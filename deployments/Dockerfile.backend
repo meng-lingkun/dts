@@ -1,0 +1,21 @@
+FROM golang:1.23-alpine AS build
+WORKDIR /src
+COPY backend/ ./backend/
+WORKDIR /src/backend
+RUN mkdir -p /out && \
+    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/qmigration-server ./cmd/server && \
+    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/qmigration-worker ./cmd/worker && \
+    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/qmigration-cdc-bridge ./cmd/cdc-bridge && \
+    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/qmigration-binlog-inspect ./cmd/binlog-inspect && \
+    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/qmigration-mysql-cdc ./cmd/mysql-cdc && \
+    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/qmigration-postgres-cdc ./cmd/postgres-cdc && \
+    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/qmigration-sqlserver-cdc ./cmd/sqlserver-cdc && \
+    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/qmigration-oracle-cdc ./cmd/oracle-cdc
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/qmigrationctl ./cmd/qmigrationctl
+
+FROM alpine:3.22
+RUN apk add --no-cache zstd && addgroup -S qmigration && adduser -S -G qmigration qmigration
+WORKDIR /app
+COPY --from=build /out/ /usr/local/bin/
+USER qmigration
+ENTRYPOINT ["/usr/local/bin/qmigration-server"]

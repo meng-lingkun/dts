@@ -1,0 +1,41 @@
+/*
+ * Compile this skeleton with the locally installed GBase 8s Client-SDK/ESQL-C
+ * and replace the stub bodies with cdc_opensess/cdc_startcapture/
+ * cdc_activatesess + ifx_lo_read logic. No GBase headers/libraries are shipped
+ * by QMigration.
+ */
+#include "qmigration_gbase8s_cdc_provider.h"
+#include <stdlib.h>
+#include <string.h>
+
+static char *dupmsg(const char *s) {
+    size_t n = strlen(s) + 1;
+    char *p = (char*)malloc(n);
+    if (p) memcpy(p, s, n);
+    return p;
+}
+
+uint32_t qm_gbase8s_cdc_abi_version(void) { return QM_GBASE8S_CDC_ABI_VERSION; }
+void qm_gbase8s_cdc_free(char *p) { free(p); }
+
+void *qm_gbase8s_cdc_open(const char *config_json, char **error_text) {
+    (void)config_json;
+    if (error_text) *error_text = dupmsg("replace native_provider.c.example with a GBase CSDK implementation");
+    return NULL;
+}
+int qm_gbase8s_cdc_health(void *handle, char **error_text) {
+    (void)handle;
+    if (error_text) *error_text = dupmsg("provider is an example stub");
+    return -1;
+}
+char *qm_gbase8s_cdc_checkpoint(void *handle, const char *request_json, char **error_text) {
+    (void)handle; (void)request_json;
+    if (error_text) *error_text = dupmsg("provider is an example stub");
+    return NULL;
+}
+char *qm_gbase8s_cdc_read(void *handle, const char *request_json, char **error_text) {
+    (void)handle; (void)request_json;
+    if (error_text) *error_text = dupmsg("provider is an example stub");
+    return NULL;
+}
+void qm_gbase8s_cdc_close(void *handle) { (void)handle; }

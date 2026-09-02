@@ -1,0 +1,12 @@
+// Build this file as a Go plugin together with a database/sql ODBC wrapper.
+// The wrapper's init function must register driver name "odbc" (or set
+// QMIGRATION_GBASE8S_SQL_DRIVER to the registered name).
+//
+// GBase 8s connectivity itself is provided by the vendor GBase Client-SDK
+// ODBC library. The Go wrapper only exposes that ODBC manager through
+// database/sql; QMigration owns all migration/catalog/write semantics.
+package main
+
+import _ "odbc"
+
+func main() {}

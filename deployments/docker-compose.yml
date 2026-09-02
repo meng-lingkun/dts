@@ -1,0 +1,73 @@
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: qmigration
+      POSTGRES_PASSWORD: ${QMIGRATION_METADATA_PASSWORD:-qmigration}
+      POSTGRES_DB: qmigration
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U qmigration"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  server:
+    build:
+      context: ..
+      dockerfile: deployments/Dockerfile.backend
+    environment:
+      QMIGRATION_REPOSITORY: postgres
+      QMIGRATION_METADATA_HOST: postgres
+      QMIGRATION_METADATA_USER: qmigration
+      QMIGRATION_METADATA_PASSWORD: ${QMIGRATION_METADATA_PASSWORD:-qmigration}
+      QMIGRATION_METADATA_DATABASE: qmigration
+      QMIGRATION_MASTER_KEY: ${QMIGRATION_MASTER_KEY:-change-this-master-key}
+      QMIGRATION_WORKER_TOKEN: ${QMIGRATION_WORKER_TOKEN:-change-this-worker-token}
+      QMIGRATION_CDC_SPOOL_STORAGE: file
+      QMIGRATION_CDC_SPOOL_DIR: /var/lib/qmigration/cdc-spool
+      QMIGRATION_CDC_SPOOL_DISK_WARN_PCT: ${QMIGRATION_CDC_SPOOL_DISK_WARN_PCT:-80}
+      QMIGRATION_CDC_SPOOL_DISK_CRITICAL_PCT: ${QMIGRATION_CDC_SPOOL_DISK_CRITICAL_PCT:-90}
+      QMIGRATION_VALIDATION_STABLE_WINDOW_SECONDS: ${QMIGRATION_VALIDATION_STABLE_WINDOW_SECONDS:-2}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports: ["8080:8080"]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/readyz"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - cdcspool:/var/lib/qmigration/cdc-spool
+    stop_grace_period: 30s
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: ..
+      dockerfile: deployments/Dockerfile.backend
+    entrypoint: ["/usr/local/bin/qmigration-worker"]
+    environment:
+      QMIGRATION_SERVER: http://server:8080
+      QMIGRATION_WORKER_TOKEN: ${QMIGRATION_WORKER_TOKEN:-change-this-worker-token}
+      QMIGRATION_WORKER_CONCURRENCY: ${QMIGRATION_WORKER_CONCURRENCY:-4}
+      QMIGRATION_WORKER_SHUTDOWN_GRACE_SECONDS: ${QMIGRATION_WORKER_SHUTDOWN_GRACE_SECONDS:-30}
+    depends_on:
+      server:
+        condition: service_healthy
+    stop_grace_period: 45s
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ..
+      dockerfile: deployments/Dockerfile.web
+    depends_on: [server]
+    ports: ["8088:80"]
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  cdcspool:

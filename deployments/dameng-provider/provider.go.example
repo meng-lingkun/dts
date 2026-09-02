@@ -1,0 +1,8 @@
+// Build this file as a Go plugin in an environment where the official DM Go
+// driver package is available as import path "dm". The blank import runs the
+// driver's init function, which registers database/sql driver name "dm".
+package main
+
+import _ "dm"
+
+func main() {}

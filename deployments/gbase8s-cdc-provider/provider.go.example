@@ -1,0 +1,22 @@
+// Build this file together with your locally supplied GBase 8s CSDK wrapper.
+// The plugin must be built with the same Go toolchain as QMigration.
+package main
+
+import (
+	"context"
+	"errors"
+	"qmigration/backend/internal/cdc/gbase8scdc"
+)
+
+type provider struct{}
+
+func (p *provider) Health(context.Context) error {
+	return errors.New("replace with CSDK connection/syscdcv1 health")
+}
+func (p *provider) Checkpoint(context.Context, gbase8scdc.CheckpointRequest) (*gbase8scdc.CheckpointResponse, error) {
+	return nil, errors.New("implement cdc_opensess/startcapture/activatesess(0) and return restart sequence")
+}
+func (p *provider) Read(context.Context, gbase8scdc.ReadRequest) (*gbase8scdc.ReadResponse, error) {
+	return nil, errors.New("implement CSDK smart-LOB read and normalized records")
+}
+func NewProvider() (gbase8scdc.Agent, error) { return &provider{}, nil }

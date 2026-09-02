@@ -1,0 +1,11 @@
+.DS_Store
+.idea/
+.vscode/
+web/node_modules/
+web/dist/
+*.log
+.env
+backend/qmigration-server
+backend/qmigration-worker
+
+bin/

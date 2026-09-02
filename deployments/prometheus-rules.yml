@@ -1,0 +1,61 @@
+groups:
+- name: qmigration
+  rules:
+  - alert: QMigrationTaskFailed
+    expr: qmigration_migrations_failed > 0
+    for: 1m
+    labels: {severity: critical}
+    annotations: {summary: "QMigration has failed migration tasks"}
+  - alert: QMigrationCDCBacklog
+    expr: qmigration_cdc_lag_seconds > 30
+    for: 5m
+    labels: {severity: warning}
+    annotations: {summary: "QMigration CDC lag exceeds 30 seconds"}
+  - alert: QMigrationWorkerHighCPU
+    expr: qmigration_worker_cpu_usage_percent > 90
+    for: 10m
+    labels: {severity: warning}
+    annotations: {summary: "QMigration worker CPU is above 90%"}
+  - alert: QMigrationValidationMismatch
+    expr: qmigration_validation_mismatch_total > 0
+    for: 1m
+    labels: {severity: critical}
+    annotations: {summary: "QMigration validation mismatch detected"}
+  - alert: QMigrationCDCSpoolDiskHigh
+    expr: qmigration_cdc_spool_storage_used_pct >= 80
+    for: 5m
+    labels: {severity: warning}
+    annotations: {summary: "QMigration CDC spool filesystem usage is above 80%"}
+  - alert: QMigrationCDCSpoolDiskCritical
+    expr: qmigration_cdc_spool_storage_used_pct >= 90
+    for: 1m
+    labels: {severity: critical}
+    annotations: {summary: "QMigration CDC spool filesystem usage is above 90%; source CDC ACK can be backpressured"}
+  - alert: QMigrationCDCSpoolCriticalETA
+    expr: qmigration_cdc_spool_critical_eta_seconds > 0 and qmigration_cdc_spool_critical_eta_seconds <= 300
+    for: 1m
+    labels: {severity: critical}
+    annotations: {summary: "QMigration CDC spool is projected to hit the critical backlog boundary within 5 minutes"}
+  - alert: QMigrationCDCSpoolGrowingFast
+    expr: qmigration_cdc_spool_growth_bytes_per_second > 104857600
+    for: 5m
+    labels: {severity: warning}
+    annotations: {summary: "QMigration CDC spool backlog is growing faster than 100 MiB/s"}
+
+  - alert: QMigrationThroughputTargetUnderRun
+    expr: qmigration_task_target_throughput_bytes_per_second > 0 and qmigration_task_throughput_target_utilization_ratio < 0.5 and qmigration_task_progress < 100
+    for: 15m
+    labels: {severity: warning}
+    annotations: {summary: "QMigration sustained throughput is below 50% of the configured task target for 15 minutes"}
+
+  - alert: QMigrationCompletionSLARisk
+    expr: qmigration_task_completion_sla_remaining_seconds > 0 and qmigration_task_sla_p95_eta_seconds > qmigration_task_completion_sla_remaining_seconds and qmigration_task_progress < 100
+    for: 10m
+    labels: {severity: warning}
+    annotations: {summary: "QMigration P95 tail-adjusted ETA is outside the configured completion SLA"}
+
+  - alert: QMigrationCompletionSLACriticalRisk
+    expr: qmigration_task_completion_sla_remaining_seconds > 0 and qmigration_task_sla_p99_eta_seconds > qmigration_task_completion_sla_remaining_seconds and qmigration_task_progress < 100
+    for: 5m
+    labels: {severity: critical}
+    annotations: {summary: "QMigration P99 tail-adjusted ETA is outside the configured completion SLA"}

@@ -1,0 +1,242 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: qmigration
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: qmigration-secrets
+  namespace: qmigration
+type: Opaque
+stringData:
+  metadata-password: change-me
+  master-key: change-me-to-a-long-random-master-key
+  worker-token: change-me-to-a-long-random-worker-token
+  auth-secret: change-me-to-a-long-random-auth-secret
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: qmigration-config
+  namespace: qmigration
+data:
+  QMIGRATION_REPOSITORY: postgres
+  QMIGRATION_METADATA_HOST: postgres.qmigration.svc
+  QMIGRATION_METADATA_PORT: "5432"
+  QMIGRATION_METADATA_USER: qmigration
+  QMIGRATION_METADATA_DATABASE: qmigration
+  QMIGRATION_AUTH_REQUIRED: "true"
+  QMIGRATION_DB_PRESSURE_SAMPLE_SECONDS: "5"
+  QMIGRATION_WORKER_MAX_CPU_PCT: "95"
+  QMIGRATION_WORKER_MAX_MEMORY_PCT: "95"
+  QMIGRATION_CDC_SPOOL_STORAGE: file
+  QMIGRATION_CDC_SPOOL_DIR: /var/lib/qmigration/cdc-spool
+  QMIGRATION_CDC_SPOOL_DISK_WARN_PCT: "80"
+  QMIGRATION_CDC_SPOOL_DISK_CRITICAL_PCT: "90"
+  QMIGRATION_VALIDATION_STABLE_WINDOW_SECONDS: "2"
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: qmigration
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels: {app: qmigration-postgres}
+  template:
+    metadata:
+      labels: {app: qmigration-postgres}
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:17
+        env:
+        - {name: POSTGRES_USER, value: qmigration}
+        - {name: POSTGRES_DB, value: qmigration}
+        - name: POSTGRES_PASSWORD
+          valueFrom: {secretKeyRef: {name: qmigration-secrets, key: metadata-password}}
+        ports: [{containerPort: 5432, name: postgres}]
+        readinessProbe:
+          exec: {command: ["pg_isready","-U","qmigration","-d","qmigration"]}
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        resources:
+          requests: {cpu: "500m", memory: "1Gi"}
+          limits: {cpu: "2", memory: "4Gi"}
+        volumeMounts: [{name: data, mountPath: /var/lib/postgresql/data}]
+  volumeClaimTemplates:
+  - metadata: {name: data}
+    spec:
+      accessModes: [ReadWriteOnce]
+      resources: {requests: {storage: 50Gi}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: qmigration
+spec:
+  selector: {app: qmigration-postgres}
+  ports: [{port: 5432, targetPort: postgres}]
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: qmigration-cdc-spool
+  namespace: qmigration
+spec:
+  # Two server replicas can stage/drain the same task. Use an RWX-capable
+  # StorageClass (NFS/CephFS/etc.) so encrypted spool files are shared.
+  accessModes: [ReadWriteMany]
+  resources:
+    requests: {storage: 200Gi}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: server
+  namespace: qmigration
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: qmigration-server}
+  template:
+    metadata:
+      labels: {app: qmigration-server}
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+      - name: server
+        image: qmigration/server:0.15.0-unified-dev9
+        imagePullPolicy: IfNotPresent
+        envFrom: [{configMapRef: {name: qmigration-config}}]
+        env:
+        - name: QMIGRATION_METADATA_PASSWORD
+          valueFrom: {secretKeyRef: {name: qmigration-secrets, key: metadata-password}}
+        - name: QMIGRATION_MASTER_KEY
+          valueFrom: {secretKeyRef: {name: qmigration-secrets, key: master-key}}
+        - name: QMIGRATION_WORKER_TOKEN
+          valueFrom: {secretKeyRef: {name: qmigration-secrets, key: worker-token}}
+        - name: QMIGRATION_AUTH_SECRET
+          valueFrom: {secretKeyRef: {name: qmigration-secrets, key: auth-secret}}
+        ports: [{containerPort: 8080, name: http}]
+        readinessProbe: {httpGet: {path: /readyz, port: http}, initialDelaySeconds: 3, periodSeconds: 5}
+        livenessProbe: {httpGet: {path: /healthz, port: http}, initialDelaySeconds: 15, periodSeconds: 10}
+        resources:
+          requests: {cpu: "250m", memory: "256Mi"}
+          limits: {cpu: "2", memory: "2Gi"}
+        volumeMounts:
+        - {name: cdc-spool, mountPath: /var/lib/qmigration/cdc-spool}
+      volumes:
+      - name: cdc-spool
+        persistentVolumeClaim: {claimName: qmigration-cdc-spool}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: server
+  namespace: qmigration
+spec:
+  selector: {app: qmigration-server}
+  ports: [{port: 8080, targetPort: http}]
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: server
+  namespace: qmigration
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: {app: qmigration-server}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  namespace: qmigration
+spec:
+  replicas: 3
+  selector:
+    matchLabels: {app: qmigration-worker}
+  template:
+    metadata:
+      labels: {app: qmigration-worker}
+    spec:
+      terminationGracePeriodSeconds: 45
+      containers:
+      - name: worker
+        image: qmigration/server:0.15.0-unified-dev9
+        command: ["/usr/local/bin/qmigration-worker"]
+        env:
+        - {name: QMIGRATION_SERVER, value: "http://server.qmigration.svc:8080"}
+        - {name: QMIGRATION_WORKER_CONCURRENCY, value: "4"}
+        - {name: QMIGRATION_WORKER_SHUTDOWN_GRACE_SECONDS, value: "30"}
+        - {name: QMIGRATION_WORKER_LABELS, value: "network=kubernetes"}
+        - name: QMIGRATION_WORKER_TOKEN
+          valueFrom: {secretKeyRef: {name: qmigration-secrets, key: worker-token}}
+        resources:
+          requests: {cpu: "1", memory: "1Gi"}
+          limits: {cpu: "4", memory: "4Gi"}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: worker
+  namespace: qmigration
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels: {app: qmigration-worker}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: worker
+  namespace: qmigration
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: worker}
+  minReplicas: 3
+  maxReplicas: 50
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target: {type: Utilization, averageUtilization: 70}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: qmigration
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: qmigration-web}
+  template:
+    metadata:
+      labels: {app: qmigration-web}
+    spec:
+      containers:
+      - name: web
+        image: qmigration/web:0.15.0-unified-dev9
+        ports: [{containerPort: 80, name: http}]
+        readinessProbe: {httpGet: {path: /, port: http}, initialDelaySeconds: 3, periodSeconds: 10}
+        resources:
+          requests: {cpu: "50m", memory: "64Mi"}
+          limits: {cpu: "500m", memory: "256Mi"}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  namespace: qmigration
+spec:
+  selector: {app: qmigration-web}
+  ports: [{port: 80, targetPort: http}]
