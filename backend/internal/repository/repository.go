@@ -10,6 +10,15 @@ import (
 var ErrNoChunk = errors.New("no chunk available")
 var ErrLeaseOwner = errors.New("chunk lease owner mismatch")
 
+// ControlOperationLeaser serializes long-running control-plane operations
+// across server replicas. Implementations must make acquisition atomic and
+// allow a lease to be reclaimed after LeaseUntil expires.
+type ControlOperationLeaser interface {
+	AcquireControlOperation(context.Context, string, string, string, time.Duration) (bool, error)
+	RenewControlOperation(context.Context, string, string, string, time.Duration) error
+	ReleaseControlOperation(context.Context, string, string, string) error
+}
+
 type Repository interface {
 	CreateDataSource(context.Context, *domain.DataSource) error
 	UpdateDataSource(context.Context, *domain.DataSource) error

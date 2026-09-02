@@ -1,17 +1,18 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import MainLayout from '../layout/MainLayout.vue'
-import Login from '../views/Login.vue'
-import Dashboard from '../views/Dashboard.vue'
-import Datasources from '../views/Datasources.vue'
-import Migrations from '../views/Migrations.vue'
-import Workers from '../views/Workers.vue'
-import Alerts from '../views/Alerts.vue'
-import Audit from '../views/Audit.vue'
-import Settings from '../views/Settings.vue'
-import Users from '../views/Users.vue'
-import ValidationCenter from '../views/ValidationCenter.vue'
-import CutoverCenter from '../views/CutoverCenter.vue'
-import MonitoringCenter from '../views/MonitoringCenter.vue'
+
+const Login = () => import('../views/Login.vue')
+const Dashboard = () => import('../views/Dashboard.vue')
+const Datasources = () => import('../views/Datasources.vue')
+const Migrations = () => import('../views/Migrations.vue')
+const Workers = () => import('../views/Workers.vue')
+const Alerts = () => import('../views/Alerts.vue')
+const Audit = () => import('../views/Audit.vue')
+const Settings = () => import('../views/Settings.vue')
+const Users = () => import('../views/Users.vue')
+const ValidationCenter = () => import('../views/ValidationCenter.vue')
+const CutoverCenter = () => import('../views/CutoverCenter.vue')
+const MonitoringCenter = () => import('../views/MonitoringCenter.vue')
 
 export default createRouter({
   history:createWebHistory(),

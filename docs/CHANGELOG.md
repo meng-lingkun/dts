@@ -3,6 +3,10 @@
 - Closed remaining software-level connector/runtime gaps: GBase 8a provider CDC + transactional target path + C ABI agent, DB2 pureScale vector merge, GaussDB multi-primary/hybrid DDL+DML, openGauss/Kingbase DDL proof sidecars, Kafka compression/SASL extensions, relocation proof and validation snapshot capability levels.
 - Added safe schema-program translation provider, external signer HA/scheduled rotation, RFC3161 timestamping, Unicode PDF renderer interface, and release qualification manifest builder.
 - Fixed Worker capability/runtime mismatches for DB2/Oracle and preserved fail-closed production qualification boundaries.
+- Added durable control-operation leases and periodic startup recovery for interrupted Precheck/Validation; unsafe partial Prepare replay fails closed with remediation guidance.
+- Hardened production startup, Compose and Kubernetes defaults; removed default secrets, enabled mandatory authentication, non-root containers and restrictive pod security contexts.
+- Added root version consistency checks, Linux CI, npm lockfile/type checking, route-level frontend code splitting and synchronized image/UI versions.
+- Added Unix/Windows File Spool capacity implementations and repaired platform-sensitive GBase 8s and SQL Server protocol tests.
 
 # V0.15.0-rc48
 

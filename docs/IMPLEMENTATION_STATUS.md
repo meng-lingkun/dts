@@ -7,6 +7,11 @@
 - DONE: atomic local Trust Store persistence; failed last-active-key revocation cannot corrupt state.
 - FAIL-SAFE: a transitioned key cannot validate a report whose signed generated_at predates the transition.
 - SECURITY BOUNDARY: a compromised retired private key can backdate a signed report; WORM/external trusted timestamping remains required for compromise-safe historical time.
+- DONE: production startup rejects open authentication, placeholder/shared/short secrets, wildcard CORS and non-PostgreSQL metadata repositories.
+- DONE: PostgreSQL/Memory control-operation lease, renewal and recovery loop serialize Precheck and Validation across Server replicas.
+- FAIL-SAFE: interrupted PREPARING is not blindly replayed after target metadata may have changed; the task fails with explicit operator guidance.
+- DONE: Linux CI, reproducible npm install/build, version consistency gate, Linux/Windows File Spool capacity implementation and hardened container manifests.
+- REMAINING: Cutover/Rollback durable Saga and idempotent target-Prepare compensation/recovery.
 
 ## V0.15.0-rc47
 

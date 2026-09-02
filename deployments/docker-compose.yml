@@ -3,7 +3,7 @@ services:
     image: postgres:17
     environment:
       POSTGRES_USER: qmigration
-      POSTGRES_PASSWORD: ${QMIGRATION_METADATA_PASSWORD:-qmigration}
+      POSTGRES_PASSWORD: ${QMIGRATION_METADATA_PASSWORD:?set QMIGRATION_METADATA_PASSWORD in a private env file}
       POSTGRES_DB: qmigration
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U qmigration"]
@@ -19,12 +19,18 @@ services:
       dockerfile: deployments/Dockerfile.backend
     environment:
       QMIGRATION_REPOSITORY: postgres
+      QMIGRATION_PRODUCTION: "true"
+      QMIGRATION_AUTH_REQUIRED: "true"
       QMIGRATION_METADATA_HOST: postgres
       QMIGRATION_METADATA_USER: qmigration
-      QMIGRATION_METADATA_PASSWORD: ${QMIGRATION_METADATA_PASSWORD:-qmigration}
+      QMIGRATION_METADATA_PASSWORD: ${QMIGRATION_METADATA_PASSWORD:?set QMIGRATION_METADATA_PASSWORD}
       QMIGRATION_METADATA_DATABASE: qmigration
-      QMIGRATION_MASTER_KEY: ${QMIGRATION_MASTER_KEY:-change-this-master-key}
-      QMIGRATION_WORKER_TOKEN: ${QMIGRATION_WORKER_TOKEN:-change-this-worker-token}
+      QMIGRATION_MASTER_KEY: ${QMIGRATION_MASTER_KEY:?set a random QMIGRATION_MASTER_KEY}
+      QMIGRATION_WORKER_TOKEN: ${QMIGRATION_WORKER_TOKEN:?set a random QMIGRATION_WORKER_TOKEN}
+      QMIGRATION_AUTH_SECRET: ${QMIGRATION_AUTH_SECRET:?set a random QMIGRATION_AUTH_SECRET}
+      QMIGRATION_BOOTSTRAP_ADMIN_USER: ${QMIGRATION_BOOTSTRAP_ADMIN_USER:-admin}
+      QMIGRATION_BOOTSTRAP_ADMIN_PASSWORD: ${QMIGRATION_BOOTSTRAP_ADMIN_PASSWORD:?set the initial admin password}
+      QMIGRATION_CORS_ORIGIN: ${QMIGRATION_CORS_ORIGIN:-http://127.0.0.1:8088}
       QMIGRATION_CDC_SPOOL_STORAGE: file
       QMIGRATION_CDC_SPOOL_DIR: /var/lib/qmigration/cdc-spool
       QMIGRATION_CDC_SPOOL_DISK_WARN_PCT: ${QMIGRATION_CDC_SPOOL_DISK_WARN_PCT:-80}
@@ -33,7 +39,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    ports: ["8080:8080"]
+    ports: ["127.0.0.1:8080:8080"]
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/readyz"]
       interval: 5s
@@ -51,7 +57,7 @@ services:
     entrypoint: ["/usr/local/bin/qmigration-worker"]
     environment:
       QMIGRATION_SERVER: http://server:8080
-      QMIGRATION_WORKER_TOKEN: ${QMIGRATION_WORKER_TOKEN:-change-this-worker-token}
+      QMIGRATION_WORKER_TOKEN: ${QMIGRATION_WORKER_TOKEN:?set the same random QMIGRATION_WORKER_TOKEN used by server}
       QMIGRATION_WORKER_CONCURRENCY: ${QMIGRATION_WORKER_CONCURRENCY:-4}
       QMIGRATION_WORKER_SHUTDOWN_GRACE_SECONDS: ${QMIGRATION_WORKER_SHUTDOWN_GRACE_SECONDS:-30}
     depends_on:
@@ -65,7 +71,7 @@ services:
       context: ..
       dockerfile: deployments/Dockerfile.web
     depends_on: [server]
-    ports: ["8088:80"]
+    ports: ["127.0.0.1:8088:8080"]
     restart: unless-stopped
 
 volumes:

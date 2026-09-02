@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -50,6 +51,12 @@ func TestProviderConfigFilePermissions(t *testing.T) {
 	t.Setenv("QMIGRATION_GBASE8S_CDC_PROVIDER_CONFIG_JSON", "")
 	t.Setenv("QMIGRATION_GBASE8S_CDC_PROVIDER_CONFIG_FILE", path)
 	got, err := providerConfig()
+	if runtime.GOOS == "windows" {
+		if err == nil || !strings.Contains(err.Error(), "not supported on Windows") {
+			t.Fatalf("expected safe Windows rejection, got=%q err=%v", got, err)
+		}
+		return
+	}
 	if err != nil || got != `{"server":"gbase8s"}` {
 		t.Fatalf("got=%q err=%v", got, err)
 	}

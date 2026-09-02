@@ -45,7 +45,59 @@ func env(k, d string) string {
 	return d
 }
 
+func envEnabled(k string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(k))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+func validateProductionEnvironment() error {
+	if !envEnabled("QMIGRATION_PRODUCTION") {
+		return nil
+	}
+	if os.Getenv("QMIGRATION_REPOSITORY") != "postgres" {
+		return errors.New("QMIGRATION_PRODUCTION requires QMIGRATION_REPOSITORY=postgres")
+	}
+	if !envEnabled("QMIGRATION_AUTH_REQUIRED") {
+		return errors.New("QMIGRATION_PRODUCTION requires QMIGRATION_AUTH_REQUIRED=true")
+	}
+	required := map[string]int{
+		"QMIGRATION_METADATA_PASSWORD": 16,
+		"QMIGRATION_MASTER_KEY":        32,
+		"QMIGRATION_WORKER_TOKEN":      32,
+		"QMIGRATION_AUTH_SECRET":       32,
+	}
+	values := make(map[string]string, len(required))
+	for name, minLength := range required {
+		value := strings.TrimSpace(os.Getenv(name))
+		lower := strings.ToLower(value)
+		if len(value) < minLength || strings.Contains(lower, "change-me") || strings.Contains(lower, "change-this") || strings.Contains(lower, "example") {
+			return fmt.Errorf("QMIGRATION_PRODUCTION requires a non-placeholder %s with at least %d characters", name, minLength)
+		}
+		values[name] = value
+	}
+	secretNames := []string{"QMIGRATION_MASTER_KEY", "QMIGRATION_WORKER_TOKEN", "QMIGRATION_AUTH_SECRET"}
+	for i := range secretNames {
+		for j := i + 1; j < len(secretNames); j++ {
+			if values[secretNames[i]] == values[secretNames[j]] {
+				return fmt.Errorf("QMIGRATION_PRODUCTION requires distinct values for %s and %s", secretNames[i], secretNames[j])
+			}
+		}
+	}
+	origin := strings.TrimSpace(os.Getenv("QMIGRATION_CORS_ORIGIN"))
+	if origin == "" || origin == "*" {
+		return errors.New("QMIGRATION_PRODUCTION requires an explicit QMIGRATION_CORS_ORIGIN")
+	}
+	return nil
+}
+
 func main() {
+	if err := validateProductionEnvironment(); err != nil {
+		log.Fatal(err)
+	}
 	repoMode := os.Getenv("QMIGRATION_REPOSITORY")
 	var base repository.Repository
 	if repoMode == "postgres" {
@@ -170,6 +222,7 @@ func main() {
 	}
 	signalCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	go srv.StartRecoveryLoop(signalCtx)
 	maintenance.Start(signalCtx, metadataBase, maintenance.ConfigFromEnv())
 	serveErr := make(chan error, 1)
 	go func() {

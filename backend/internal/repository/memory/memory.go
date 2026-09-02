@@ -18,6 +18,8 @@ import (
 
 var ErrNotFound = fmt.Errorf("not found")
 
+var _ repository.ControlOperationLeaser = (*Store)(nil)
+
 type Store struct {
 	mu                       sync.RWMutex
 	path                     string
@@ -38,6 +40,12 @@ type Store struct {
 	audits                   []domain.AuditEvent
 	taskLogs                 []domain.TaskLog
 	users                    map[string]domain.User
+	controlOperations        map[string]persistedControlOperation
+}
+
+type persistedControlOperation struct {
+	TaskID, Operation, Owner string
+	LeaseUntil, UpdatedAt    time.Time
 }
 
 type persistedCDCSpool struct {
@@ -98,6 +106,7 @@ type snapshot struct {
 	Audits                   []domain.AuditEvent                             `json:"audits"`
 	TaskLogs                 []domain.TaskLog                                `json:"task_logs"`
 	Users                    map[string]domain.User                          `json:"users"`
+	ControlOperations        map[string]persistedControlOperation            `json:"control_operations"`
 }
 
 func New() *Store { return newStore("") }
@@ -109,7 +118,7 @@ func NewPersistent(path string) (*Store, error) {
 	return s, nil
 }
 func newStore(path string) *Store {
-	return &Store{path: path, datasources: map[string]domain.DataSource{}, migrations: map[string]domain.MigrationTask{}, tables: map[string]domain.MigrationTable{}, chunks: map[string]domain.MigrationChunk{}, workers: map[string]domain.Worker{}, engineJobs: map[string]domain.EngineJob{}, cdcDeadLetters: map[string]domain.CDCDeadLetter{}, validations: map[string]domain.ValidationResult{}, validationArchives: map[string]domain.ValidationArchive{}, validationReportArchives: map[string]domain.ValidationReportArchiveRecord{}, alerts: map[string]domain.Alert{}, audits: []domain.AuditEvent{}, taskLogs: []domain.TaskLog{}, users: map[string]domain.User{}}
+	return &Store{path: path, datasources: map[string]domain.DataSource{}, migrations: map[string]domain.MigrationTask{}, tables: map[string]domain.MigrationTable{}, chunks: map[string]domain.MigrationChunk{}, workers: map[string]domain.Worker{}, engineJobs: map[string]domain.EngineJob{}, cdcDeadLetters: map[string]domain.CDCDeadLetter{}, validations: map[string]domain.ValidationResult{}, validationArchives: map[string]domain.ValidationArchive{}, validationReportArchives: map[string]domain.ValidationReportArchiveRecord{}, alerts: map[string]domain.Alert{}, audits: []domain.AuditEvent{}, taskLogs: []domain.TaskLog{}, users: map[string]domain.User{}, controlOperations: map[string]persistedControlOperation{}}
 }
 func (s *Store) load() error {
 	if s.path == "" {
@@ -183,6 +192,9 @@ func (s *Store) load() error {
 	if snap.Users != nil {
 		s.users = snap.Users
 	}
+	if snap.ControlOperations != nil {
+		s.controlOperations = snap.ControlOperations
+	}
 	return nil
 }
 func (s *Store) persistLocked() error {
@@ -201,7 +213,7 @@ func (s *Store) persistLocked() error {
 	for id, v := range s.cdcDeadLetters {
 		deadLetters[id] = persistedCDCDeadLetter{ID: v.ID, TaskID: v.TaskID, Direction: v.Direction, PositionType: v.PositionType, PositionValue: v.PositionValue, Resource: v.Resource, Events: v.Events, EventsCiphertext: v.EventsCiphertext, LastError: v.LastError, RetryCount: v.RetryCount, Status: v.Status, CreatedAt: v.CreatedAt, UpdatedAt: v.UpdatedAt, ResolvedAt: v.ResolvedAt}
 	}
-	snap := snapshot{DataSources: ds, Migrations: s.migrations, Tables: s.tables, Chunks: s.chunks, Workers: s.workers, EngineJobs: s.engineJobs, CDCPositions: s.cdcPositions, CDCSpool: spool, CDCDeadLetters: deadLetters, CDCConflicts: s.cdcConflicts, Validations: s.validations, ValidationArchives: s.validationArchives, ValidationReportArchives: s.validationReportArchives, Alerts: s.alerts, Audits: s.audits, TaskLogs: s.taskLogs, Users: s.users}
+	snap := snapshot{DataSources: ds, Migrations: s.migrations, Tables: s.tables, Chunks: s.chunks, Workers: s.workers, EngineJobs: s.engineJobs, CDCPositions: s.cdcPositions, CDCSpool: spool, CDCDeadLetters: deadLetters, CDCConflicts: s.cdcConflicts, Validations: s.validations, ValidationArchives: s.validationArchives, ValidationReportArchives: s.validationReportArchives, Alerts: s.alerts, Audits: s.audits, TaskLogs: s.taskLogs, Users: s.users, ControlOperations: s.controlOperations}
 	b, err := json.MarshalIndent(snap, "", "  ")
 	if err != nil {
 		return err
@@ -302,6 +314,49 @@ func (s *Store) UpdateMigration(_ context.Context, m *domain.MigrationTask) erro
 		return ErrNotFound
 	}
 	s.migrations[m.ID] = cloneMigration(*m)
+	return s.persistLocked()
+}
+
+func (s *Store) AcquireControlOperation(_ context.Context, taskID, operation, owner string, lease time.Duration) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now()
+	current, exists := s.controlOperations[taskID]
+	if exists && current.LeaseUntil.After(now) {
+		return false, nil
+	}
+	s.controlOperations[taskID] = persistedControlOperation{TaskID: taskID, Operation: operation, Owner: owner, LeaseUntil: now.Add(lease), UpdatedAt: now}
+	if err := s.persistLocked(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (s *Store) RenewControlOperation(_ context.Context, taskID, operation, owner string, lease time.Duration) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, exists := s.controlOperations[taskID]
+	if !exists || current.Owner != owner || current.Operation != operation {
+		return repository.ErrLeaseOwner
+	}
+	now := time.Now()
+	current.LeaseUntil = now.Add(lease)
+	current.UpdatedAt = now
+	s.controlOperations[taskID] = current
+	return s.persistLocked()
+}
+
+func (s *Store) ReleaseControlOperation(_ context.Context, taskID, operation, owner string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, exists := s.controlOperations[taskID]
+	if !exists {
+		return nil
+	}
+	if current.Owner != owner || current.Operation != operation {
+		return repository.ErrLeaseOwner
+	}
+	delete(s.controlOperations, taskID)
 	return s.persistLocked()
 }
 

@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"plugin"
+	"runtime"
 	"strings"
 	"time"
 
@@ -42,6 +43,9 @@ func providerConfig() (string, error) {
 	}
 	if !st.Mode().IsRegular() {
 		return "", errors.New("GBase 8s CDC provider config must be a regular file")
+	}
+	if runtime.GOOS == "windows" {
+		return "", errors.New("GBase 8s CDC provider config files are not supported on Windows because Unix owner permissions cannot be verified; use QMIGRATION_GBASE8S_CDC_PROVIDER_CONFIG_JSON")
 	}
 	if st.Mode().Perm()&0o007 != 0 {
 		return "", errors.New("GBase 8s CDC provider config must not be accessible by other users")

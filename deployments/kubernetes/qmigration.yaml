@@ -14,6 +14,7 @@ stringData:
   master-key: change-me-to-a-long-random-master-key
   worker-token: change-me-to-a-long-random-worker-token
   auth-secret: change-me-to-a-long-random-auth-secret
+  bootstrap-admin-password: change-me-to-a-long-random-admin-password
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -22,11 +23,14 @@ metadata:
   namespace: qmigration
 data:
   QMIGRATION_REPOSITORY: postgres
+  QMIGRATION_PRODUCTION: "true"
   QMIGRATION_METADATA_HOST: postgres.qmigration.svc
   QMIGRATION_METADATA_PORT: "5432"
   QMIGRATION_METADATA_USER: qmigration
   QMIGRATION_METADATA_DATABASE: qmigration
   QMIGRATION_AUTH_REQUIRED: "true"
+  # Replace this with the exact HTTPS origin exposed by your Ingress.
+  QMIGRATION_CORS_ORIGIN: https://qmigration.example.invalid
   QMIGRATION_DB_PRESSURE_SAMPLE_SECONDS: "5"
   QMIGRATION_WORKER_MAX_CPU_PCT: "95"
   QMIGRATION_WORKER_MAX_MEMORY_PCT: "95"
@@ -108,9 +112,16 @@ spec:
       labels: {app: qmigration-server}
     spec:
       terminationGracePeriodSeconds: 30
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: {type: RuntimeDefault}
       containers:
       - name: server
-        image: qmigration/server:0.15.0-unified-dev9
+        image: qmigration/server:0.15.0-rc49
         imagePullPolicy: IfNotPresent
         envFrom: [{configMapRef: {name: qmigration-config}}]
         env:
@@ -122,17 +133,26 @@ spec:
           valueFrom: {secretKeyRef: {name: qmigration-secrets, key: worker-token}}
         - name: QMIGRATION_AUTH_SECRET
           valueFrom: {secretKeyRef: {name: qmigration-secrets, key: auth-secret}}
+        - name: QMIGRATION_BOOTSTRAP_ADMIN_PASSWORD
+          valueFrom: {secretKeyRef: {name: qmigration-secrets, key: bootstrap-admin-password}}
         ports: [{containerPort: 8080, name: http}]
         readinessProbe: {httpGet: {path: /readyz, port: http}, initialDelaySeconds: 3, periodSeconds: 5}
         livenessProbe: {httpGet: {path: /healthz, port: http}, initialDelaySeconds: 15, periodSeconds: 10}
         resources:
           requests: {cpu: "250m", memory: "256Mi"}
           limits: {cpu: "2", memory: "2Gi"}
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities: {drop: ["ALL"]}
         volumeMounts:
         - {name: cdc-spool, mountPath: /var/lib/qmigration/cdc-spool}
+        - {name: tmp, mountPath: /tmp}
       volumes:
       - name: cdc-spool
         persistentVolumeClaim: {claimName: qmigration-cdc-spool}
+      - name: tmp
+        emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
@@ -167,9 +187,15 @@ spec:
       labels: {app: qmigration-worker}
     spec:
       terminationGracePeriodSeconds: 45
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile: {type: RuntimeDefault}
       containers:
       - name: worker
-        image: qmigration/server:0.15.0-unified-dev9
+        image: qmigration/server:0.15.0-rc49
         command: ["/usr/local/bin/qmigration-worker"]
         env:
         - {name: QMIGRATION_SERVER, value: "http://server.qmigration.svc:8080"}
@@ -181,6 +207,15 @@ spec:
         resources:
           requests: {cpu: "1", memory: "1Gi"}
           limits: {cpu: "4", memory: "4Gi"}
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities: {drop: ["ALL"]}
+        volumeMounts:
+        - {name: tmp, mountPath: /tmp}
+      volumes:
+      - name: tmp
+        emptyDir: {}
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget
@@ -223,14 +258,29 @@ spec:
     metadata:
       labels: {app: qmigration-web}
     spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        runAsGroup: 101
+        seccompProfile: {type: RuntimeDefault}
       containers:
       - name: web
-        image: qmigration/web:0.15.0-unified-dev9
-        ports: [{containerPort: 80, name: http}]
+        image: qmigration/web:0.15.0-rc49
+        ports: [{containerPort: 8080, name: http}]
         readinessProbe: {httpGet: {path: /, port: http}, initialDelaySeconds: 3, periodSeconds: 10}
         resources:
           requests: {cpu: "50m", memory: "64Mi"}
           limits: {cpu: "500m", memory: "256Mi"}
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities: {drop: ["ALL"]}
+        volumeMounts:
+        - {name: tmp, mountPath: /tmp}
+      volumes:
+      - name: tmp
+        emptyDir: {}
 ---
 apiVersion: v1
 kind: Service

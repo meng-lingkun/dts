@@ -79,6 +79,10 @@ func New(repo repository.Repository, c *connector.Registry, e *engine.Registry) 
 	return s
 }
 
+func (s *Server) StartRecoveryLoop(ctx context.Context) {
+	s.migrations.StartRecoveryLoop(ctx)
+}
+
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /metrics", s.metrics)

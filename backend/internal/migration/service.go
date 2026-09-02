@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"math/big"
 	"os"
 	"qmigration/backend/internal/connector"
@@ -59,6 +60,186 @@ func newID(prefix string) string {
 }
 
 const unifiedEngineName = "qmigration"
+
+const (
+	controlOperationPrepare    = "prepare"
+	controlOperationValidation = "validation"
+)
+
+func controlOperationLeaseTTL() time.Duration {
+	ttl := time.Duration(envInt64("QMIGRATION_CONTROL_OPERATION_LEASE_SECONDS", 120)) * time.Second
+	if ttl < 30*time.Second {
+		return 30 * time.Second
+	}
+	return ttl
+}
+
+func (s *Service) acquireControlOperation(ctx context.Context, taskID, operation string) (bool, error) {
+	leaser, ok := s.repo.(repository.ControlOperationLeaser)
+	if !ok {
+		return true, nil
+	}
+	return leaser.AcquireControlOperation(ctx, taskID, operation, s.instanceID, controlOperationLeaseTTL())
+}
+
+func (s *Service) runControlOperation(ctx context.Context, taskID, operation string, work func(context.Context)) {
+	leaser, supportsLease := s.repo.(repository.ControlOperationLeaser)
+	opCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	if supportsLease {
+		go func() {
+			ticker := time.NewTicker(controlOperationLeaseTTL() / 3)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-done:
+					return
+				case <-opCtx.Done():
+					return
+				case <-ticker.C:
+					if err := leaser.RenewControlOperation(opCtx, taskID, operation, s.instanceID, controlOperationLeaseTTL()); err != nil {
+						s.logTask(context.Background(), taskID, "", "", "", "WARN", "control operation lease lost: "+err.Error())
+						cancel()
+						return
+					}
+				}
+			}
+		}()
+	}
+	work(opCtx)
+	close(done)
+	cancel()
+	if supportsLease {
+		releaseCtx, releaseCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer releaseCancel()
+		_ = leaser.ReleaseControlOperation(releaseCtx, taskID, operation, s.instanceID)
+	}
+}
+
+func (s *Service) installRunner(taskID string) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(context.Background())
+	s.mu.Lock()
+	if old := s.runners[taskID]; old != nil {
+		old()
+	}
+	s.runners[taskID] = cancel
+	s.mu.Unlock()
+	return ctx, cancel
+}
+
+func (s *Service) removeRunner(taskID string) {
+	s.mu.Lock()
+	delete(s.runners, taskID)
+	s.mu.Unlock()
+}
+
+func (s *Service) cancelRunners() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for taskID, cancel := range s.runners {
+		cancel()
+		delete(s.runners, taskID)
+	}
+}
+
+func (s *Service) launchPrepareWithLease(taskID string) {
+	runCtx, _ := s.installRunner(taskID)
+	go s.prepare(runCtx, taskID)
+}
+
+func (s *Service) startValidation(ctx context.Context, taskID string) error {
+	acquired, err := s.acquireControlOperation(ctx, taskID, controlOperationValidation)
+	if err != nil {
+		return err
+	}
+	if !acquired {
+		return errors.New("another server is already running validation for this task")
+	}
+	runCtx, _ := s.installRunner(taskID)
+	go func() {
+		defer s.removeRunner(taskID)
+		s.runControlOperation(runCtx, taskID, controlOperationValidation, func(operationCtx context.Context) {
+			if err := s.repo.DeleteValidationResults(operationCtx, taskID); err != nil {
+				s.failTaskUnlessCanceled(operationCtx, taskID, err)
+				return
+			}
+			s.validateTask(operationCtx, taskID)
+		})
+	}()
+	return nil
+}
+
+// RecoverInterrupted reclaims expired control-plane work after a server
+// restart. Prechecks and validation are safe to replay. Preparation is not
+// replayed after it starts mutating target metadata; it is failed explicitly so
+// operators get an actionable state instead of a permanently stuck task.
+func (s *Service) RecoverInterrupted(ctx context.Context) error {
+	tasks, err := s.repo.ListMigrations(ctx)
+	if err != nil {
+		return err
+	}
+	var recoveryErrors []error
+	for i := range tasks {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		task := &tasks[i]
+		switch task.Status {
+		case domain.StatusPrechecking:
+			acquired, acquireErr := s.acquireControlOperation(ctx, task.ID, controlOperationPrepare)
+			if acquireErr != nil {
+				recoveryErrors = append(recoveryErrors, fmt.Errorf("recover task %s precheck: %w", task.ID, acquireErr))
+				continue
+			}
+			if acquired {
+				s.logTask(ctx, task.ID, "", "", "", "WARN", "restarting interrupted precheck after control-operation lease expiry")
+				s.launchPrepareWithLease(task.ID)
+			}
+		case domain.StatusValidating:
+			if startErr := s.startValidation(ctx, task.ID); startErr != nil && !strings.Contains(startErr.Error(), "already running validation") {
+				recoveryErrors = append(recoveryErrors, fmt.Errorf("recover task %s validation: %w", task.ID, startErr))
+			}
+		case domain.StatusPrecheckSuccess, domain.StatusPreparing:
+			acquired, acquireErr := s.acquireControlOperation(ctx, task.ID, "recovery")
+			if acquireErr != nil {
+				recoveryErrors = append(recoveryErrors, fmt.Errorf("recover task %s preparation: %w", task.ID, acquireErr))
+				continue
+			}
+			if !acquired {
+				continue
+			}
+			s.failTask(task.ID, fmt.Errorf("server restarted during %s; automatic replay is unsafe after target preparation may have begun; inspect target objects, then repair or recreate the task", task.Status))
+			if leaser, ok := s.repo.(repository.ControlOperationLeaser); ok {
+				_ = leaser.ReleaseControlOperation(ctx, task.ID, "recovery", s.instanceID)
+			}
+		}
+	}
+	return errors.Join(recoveryErrors...)
+}
+
+func (s *Service) StartRecoveryLoop(ctx context.Context) {
+	defer s.cancelRunners()
+	reconcile := func() {
+		if err := s.RecoverInterrupted(ctx); err != nil && ctx.Err() == nil {
+			log.Printf("control operation recovery failed: %v", err)
+		}
+	}
+	reconcile()
+	interval := time.Duration(envInt64("QMIGRATION_CONTROL_RECOVERY_INTERVAL_SECONDS", 30)) * time.Second
+	if interval < 10*time.Second {
+		interval = 10 * time.Second
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			reconcile()
+		}
+	}
+}
 
 // normalizeEngineName keeps old persisted tasks importable while ensuring new
 // execution never selects a third-party runtime. DataX/SeaTunnel/Flink/etc.
@@ -244,13 +425,31 @@ func (s *Service) Start(ctx context.Context, id string) error {
 		case domain.StatusRollbackSyncing:
 			return s.ensureManagedCDCJob(ctx, m, "reverse")
 		case domain.StatusValidating:
-			go s.validateTask(m.ID)
+			return s.startValidation(ctx, m.ID)
 		}
 		return nil
 	}
 	if err := s.validateExecutionPlan(ctx, m); err != nil {
 		return err
 	}
+	acquired, err := s.acquireControlOperation(ctx, id, controlOperationPrepare)
+	if err != nil {
+		return err
+	}
+	if !acquired {
+		return errors.New("another server is already preparing this task")
+	}
+	releaseLease := true
+	defer func() {
+		if !releaseLease {
+			return
+		}
+		if leaser, ok := s.repo.(repository.ControlOperationLeaser); ok {
+			releaseCtx, releaseCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer releaseCancel()
+			_ = leaser.ReleaseControlOperation(releaseCtx, id, controlOperationPrepare, s.instanceID)
+		}
+	}()
 	// The execution engine is fixed to QMigration. Protocol/table strategy is
 	// selected internally and is never delegated to a third-party runtime.
 	m.FullEngine = unifiedEngineName
@@ -264,14 +463,8 @@ func (s *Service) Start(ctx context.Context, id string) error {
 	if err := s.repo.UpdateMigration(ctx, m); err != nil {
 		return err
 	}
-	runCtx, cancel := context.WithCancel(context.Background())
-	s.mu.Lock()
-	if old := s.runners[id]; old != nil {
-		old()
-	}
-	s.runners[id] = cancel
-	s.mu.Unlock()
-	go s.prepare(runCtx, id)
+	releaseLease = false
+	s.launchPrepareWithLease(id)
 	return nil
 }
 func (s *Service) inferResumeStatus(ctx context.Context, m *domain.MigrationTask) domain.MigrationStatus {
@@ -507,9 +700,17 @@ func (s *Service) validateExecutionPlan(ctx context.Context, m *domain.Migration
 }
 
 func (s *Service) prepare(ctx context.Context, id string) {
-	defer func() { s.mu.Lock(); delete(s.runners, id); s.mu.Unlock() }()
-	if err := s.prepareTask(ctx, id); err != nil {
-		s.failTask(id, err)
+	s.runControlOperation(ctx, id, controlOperationPrepare, func(operationCtx context.Context) {
+		if err := s.prepareTask(operationCtx, id); err != nil {
+			s.failTaskUnlessCanceled(operationCtx, id, err)
+		}
+	})
+	s.removeRunner(id)
+	m, err := s.repo.GetMigration(context.Background(), id)
+	if err == nil && m.Status == domain.StatusValidating {
+		if err := s.startValidation(context.Background(), id); err != nil {
+			s.failTask(id, err)
+		}
 	}
 }
 func (s *Service) prepareTask(ctx context.Context, id string) error {
@@ -953,7 +1154,6 @@ func (s *Service) prepareTask(ctx context.Context, id string) error {
 			if err := s.repo.UpdateMigration(ctx, m); err != nil {
 				return err
 			}
-			go s.validateTask(id)
 			return nil
 		}
 		_ = Transition(m, domain.StatusFinished)
@@ -1270,6 +1470,13 @@ func (s *Service) failTask(id string, cause error) {
 	_ = s.repo.UpdateMigration(context.Background(), m)
 	_ = s.repo.CreateAlert(context.Background(), &domain.Alert{ID: newID("alt"), Severity: "critical", Title: "Migration failed", Message: cause.Error(), TaskID: id, CreatedAt: time.Now()})
 	s.logTask(context.Background(), id, "", "", "", "ERROR", "migration failed: "+cause.Error())
+}
+
+func (s *Service) failTaskUnlessCanceled(ctx context.Context, id string, cause error) {
+	if ctx != nil && ctx.Err() != nil {
+		return
+	}
+	s.failTask(id, cause)
 }
 
 const chunkLease = 5 * time.Minute
@@ -3535,7 +3742,7 @@ func (s *Service) refreshProgress(ctx context.Context, taskID string, last domai
 		s.scheduleCDCSpoolDrain(task.ID, "forward")
 	}
 	if startValidation {
-		go s.validateTask(task.ID)
+		_ = s.startValidation(ctx, task.ID)
 	}
 	return nil
 }
@@ -4804,8 +5011,7 @@ func (s *Service) ValidateNow(ctx context.Context, id string) error {
 			return err
 		}
 	}
-	go s.validateTask(id)
-	return nil
+	return s.startValidation(ctx, id)
 }
 
 func validationPageSize() int {
@@ -4854,42 +5060,44 @@ func streamComplexValidationSourceChecksum(ctx context.Context, repo repository.
 	return acc.Checksum(), nil
 }
 
-func (s *Service) validateTask(id string) {
-	ctx := context.Background()
+func (s *Service) validateTask(ctx context.Context, id string) {
+	if ctx.Err() != nil {
+		return
+	}
 	task, err := s.repo.GetMigration(ctx, id)
 	if err != nil {
 		return
 	}
 	srcDS, err := s.repo.GetDataSource(ctx, task.SourceID)
 	if err != nil {
-		s.failTask(id, err)
+		s.failTaskUnlessCanceled(ctx, id, err)
 		return
 	}
 	dstDS, err := s.repo.GetDataSource(ctx, task.TargetID)
 	if err != nil {
-		s.failTask(id, err)
+		s.failTaskUnlessCanceled(ctx, id, err)
 		return
 	}
 	sr, err := s.connectors.New(*srcDS)
 	if err != nil {
-		s.failTask(id, err)
+		s.failTaskUnlessCanceled(ctx, id, err)
 		return
 	}
 	defer sr.Close()
 	dr, err := s.connectors.New(*dstDS)
 	if err != nil {
-		s.failTask(id, err)
+		s.failTaskUnlessCanceled(ctx, id, err)
 		return
 	}
 	defer dr.Close()
 	src, ok := sr.(connector.DataConnector)
 	if !ok {
-		s.failTask(id, errors.New("source cannot validate data"))
+		s.failTaskUnlessCanceled(ctx, id, errors.New("source cannot validate data"))
 		return
 	}
 	dst, ok := dr.(connector.DataConnector)
 	if !ok {
-		s.failTask(id, errors.New("target cannot validate data"))
+		s.failTaskUnlessCanceled(ctx, id, errors.New("target cannot validate data"))
 		return
 	}
 	if task.Mode != domain.ModeFull && strings.TrimSpace(task.ValidationBarrierPositionValue) != "" {
@@ -4897,29 +5105,32 @@ func (s *Service) validateTask(id string) {
 		if snapper, supported := sr.(connector.ValidationSnapshotConnector); supported {
 			snapshot, snapErr := snapper.OpenValidationSnapshot(ctx, barrier)
 			if snapErr != nil {
-				s.failTask(id, fmt.Errorf("open exact validation snapshot at %s=%s: %w", barrier.PositionType, barrier.PositionValue, snapErr))
+				s.failTaskUnlessCanceled(ctx, id, fmt.Errorf("open exact validation snapshot at %s=%s: %w", barrier.PositionType, barrier.PositionValue, snapErr))
 				return
 			}
 			defer snapshot.Close()
 			src = snapshot
 			s.logTask(ctx, id, "", "", "", "INFO", fmt.Sprintf("validation source pinned to exact %s=%s snapshot", barrier.PositionType, barrier.PositionValue))
 		} else if validationRequireExactWatermark() {
-			s.failTask(id, fmt.Errorf("source %s does not implement exact validation snapshots required by QMIGRATION_VALIDATION_REQUIRE_EXACT_WATERMARK", srcDS.Type))
+			s.failTaskUnlessCanceled(ctx, id, fmt.Errorf("source %s does not implement exact validation snapshots required by QMIGRATION_VALIDATION_REQUIRE_EXACT_WATERMARK", srcDS.Type))
 			return
 		}
 	}
 
 	tables, err := s.repo.ListMigrationTables(ctx, id)
 	if err != nil {
-		s.failTask(id, err)
+		s.failTaskUnlessCanceled(ctx, id, err)
 		return
 	}
 	mismatch := 0
 	pageSize := validationPageSize()
 	for _, tbl := range tables {
+		if ctx.Err() != nil {
+			return
+		}
 		first, err := repository.ListTableChunksPage(ctx, s.repo, id, tbl.ID, -1, "", 1)
 		if err != nil {
-			s.failTask(id, err)
+			s.failTaskUnlessCanceled(ctx, id, err)
 			return
 		}
 		if len(first) == 0 {
@@ -4976,9 +5187,12 @@ func (s *Service) validateTask(id string) {
 			// writes O(page size) in the control-plane heap.
 			afterNo, afterID := -1, ""
 			for {
+				if ctx.Err() != nil {
+					return
+				}
 				page, pageErr := repository.ListTableChunksPage(ctx, s.repo, id, tbl.ID, afterNo, afterID, pageSize)
 				if pageErr != nil {
-					s.failTask(id, pageErr)
+					s.failTaskUnlessCanceled(ctx, id, pageErr)
 					return
 				}
 				if len(page) == 0 {
@@ -5002,9 +5216,12 @@ func (s *Service) validateTask(id string) {
 
 		afterNo, afterID := -1, ""
 		for {
+			if ctx.Err() != nil {
+				return
+			}
 			page, err := repository.ListTableChunksPage(ctx, s.repo, id, tbl.ID, afterNo, afterID, pageSize)
 			if err != nil {
-				s.failTask(id, err)
+				s.failTaskUnlessCanceled(ctx, id, err)
 				return
 			}
 			if len(page) == 0 {
@@ -5060,11 +5277,14 @@ func (s *Service) validateTask(id string) {
 		}
 	}
 
+	if ctx.Err() != nil {
+		return
+	}
 	task, _ = s.repo.GetMigration(ctx, id)
 	if task != nil && task.Mode != domain.ModeFull {
 		latest, latestErr := s.latestCDC(ctx, id, "forward")
 		if latestErr != nil {
-			s.failTask(id, fmt.Errorf("validation barrier verification: %w", latestErr))
+			s.failTaskUnlessCanceled(ctx, id, fmt.Errorf("validation barrier verification: %w", latestErr))
 			return
 		}
 		if !validationBarrierMatches(task, latest) {
@@ -5530,7 +5750,7 @@ func (s *Service) maybeStartValidationAfterCatchup(ctx context.Context, taskID s
 		return false
 	}
 	s.logTask(ctx, taskID, "", "", "", "INFO", fmt.Sprintf("CDC spool caught up; target apply frozen at validation barrier %s=%s; new source transactions will spool; lag=%dms", task.ValidationBarrierPositionType, task.ValidationBarrierPositionValue, task.CDCLagMS))
-	go s.validateTask(taskID)
+	_ = s.startValidation(ctx, taskID)
 	return true
 }
 

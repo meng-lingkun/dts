@@ -11,6 +11,7 @@ import (
 	"encoding/binary"
 	"encoding/pem"
 	"fmt"
+	"io"
 	"math/big"
 	"net"
 	"qmigration/backend/internal/connector"
@@ -44,8 +45,17 @@ func TestNativeTDSProbeAgainstFakeServer(t *testing.T) {
 			return
 		}
 		defer c.Close()
-		b := make([]byte, 64)
-		_, _ = c.Read(b)
+		header := make([]byte, 8)
+		if _, err := io.ReadFull(c, header); err != nil {
+			return
+		}
+		packetLen := int(binary.BigEndian.Uint16(header[2:4]))
+		if packetLen < len(header) {
+			return
+		}
+		if _, err := io.CopyN(io.Discard, c, int64(packetLen-len(header))); err != nil {
+			return
+		}
 		body := []byte{0x00, 0x00, 0x06, 0x00, 0x06, 0xff, 15, 0, 0x07, 0xd0, 0, 0}
 		resp := make([]byte, 8+len(body))
 		resp[0] = 0x04

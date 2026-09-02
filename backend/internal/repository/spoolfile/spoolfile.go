@@ -15,7 +15,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -277,12 +276,10 @@ func refRel(v string) (string, bool) {
 }
 
 func (s *Store) storageStats() (domain.CDCSpoolStats, error) {
-	var st syscall.Statfs_t
-	if err := syscall.Statfs(s.cfg.Root, &st); err != nil {
+	capacity, free, err := diskCapacity(s.cfg.Root)
+	if err != nil {
 		return domain.CDCSpoolStats{}, err
 	}
-	capacity := int64(st.Blocks) * int64(st.Bsize)
-	free := int64(st.Bavail) * int64(st.Bsize)
 	if s.cfg.CapacityBytesOverride > 0 && s.cfg.CapacityBytesOverride < capacity {
 		// Treat current QMigration spool bytes as the used portion of an explicit quota.
 		used, err := dirBytes(s.cfg.Root)

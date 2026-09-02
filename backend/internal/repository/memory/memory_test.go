@@ -55,6 +55,37 @@ func TestRenewLeaseChecksOwner(t *testing.T) {
 	}
 }
 
+func TestControlOperationLeaseIsExclusiveRenewableAndReclaimable(t *testing.T) {
+	ctx := context.Background()
+	s := New()
+	acquired, err := s.AcquireControlOperation(ctx, "m1", "prepare", "server-a", 25*time.Millisecond)
+	if err != nil || !acquired {
+		t.Fatalf("initial acquire: acquired=%v err=%v", acquired, err)
+	}
+	if acquired, err = s.AcquireControlOperation(ctx, "m1", "prepare", "server-a", time.Minute); err != nil || acquired {
+		t.Fatalf("active lease must not be acquired twice: acquired=%v err=%v", acquired, err)
+	}
+	if err = s.RenewControlOperation(ctx, "m1", "validation", "server-a", time.Minute); !errors.Is(err, repository.ErrLeaseOwner) {
+		t.Fatalf("operation mismatch should reject renewal: %v", err)
+	}
+	if err = s.RenewControlOperation(ctx, "m1", "prepare", "server-a", 25*time.Millisecond); err != nil {
+		t.Fatalf("renew: %v", err)
+	}
+	if acquired, err = s.AcquireControlOperation(ctx, "m1", "prepare", "server-b", time.Minute); err != nil || acquired {
+		t.Fatalf("other owner acquired live lease: acquired=%v err=%v", acquired, err)
+	}
+	time.Sleep(40 * time.Millisecond)
+	if acquired, err = s.AcquireControlOperation(ctx, "m1", "validation", "server-b", time.Minute); err != nil || !acquired {
+		t.Fatalf("expired lease was not reclaimed: acquired=%v err=%v", acquired, err)
+	}
+	if err = s.ReleaseControlOperation(ctx, "m1", "validation", "server-a"); !errors.Is(err, repository.ErrLeaseOwner) {
+		t.Fatalf("wrong owner should not release lease: %v", err)
+	}
+	if err = s.ReleaseControlOperation(ctx, "m1", "validation", "server-b"); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+}
+
 func TestClaimChunkFiltersWorkerCapabilities(t *testing.T) {
 	ctx := context.Background()
 	s := New()

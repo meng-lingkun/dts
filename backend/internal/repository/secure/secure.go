@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"qmigration/backend/internal/domain"
 	"qmigration/backend/internal/repository"
@@ -19,8 +20,34 @@ type Store struct {
 	cipher *security.Cipher
 }
 
+var _ repository.ControlOperationLeaser = (*Store)(nil)
+
 func New(inner repository.Repository, cipher *security.Cipher) *Store {
 	return &Store{inner: inner, cipher: cipher}
+}
+
+func (s *Store) AcquireControlOperation(ctx context.Context, taskID, operation, owner string, lease time.Duration) (bool, error) {
+	leaser, ok := s.inner.(repository.ControlOperationLeaser)
+	if !ok {
+		return false, errors.New("repository does not support control-operation leases")
+	}
+	return leaser.AcquireControlOperation(ctx, taskID, operation, owner, lease)
+}
+
+func (s *Store) RenewControlOperation(ctx context.Context, taskID, operation, owner string, lease time.Duration) error {
+	leaser, ok := s.inner.(repository.ControlOperationLeaser)
+	if !ok {
+		return errors.New("repository does not support control-operation leases")
+	}
+	return leaser.RenewControlOperation(ctx, taskID, operation, owner, lease)
+}
+
+func (s *Store) ReleaseControlOperation(ctx context.Context, taskID, operation, owner string) error {
+	leaser, ok := s.inner.(repository.ControlOperationLeaser)
+	if !ok {
+		return errors.New("repository does not support control-operation leases")
+	}
+	return leaser.ReleaseControlOperation(ctx, taskID, operation, owner)
 }
 
 // MetadataSchemaVersion preserves the optional PostgreSQL repository schema

@@ -20,6 +20,8 @@ var schemaSQL string
 
 type Store struct{ db *postgresconnector.Connector }
 
+var _ repository.ControlOperationLeaser = (*Store)(nil)
+
 func New(ctx context.Context, ds domain.DataSource, autoMigrate bool) (*Store, error) {
 	raw, err := postgresconnector.NewFactory().New(ds)
 	if err != nil {
@@ -239,6 +241,52 @@ func (s *Store) GetMigration(ctx context.Context, id string) (*domain.MigrationT
 func (s *Store) UpdateMigration(ctx context.Context, m *domain.MigrationTask) error {
 	q := fmt.Sprintf("UPDATE migration_tasks SET name=%s,mode=%s,status=%s,full_engine=%s,cdc_engine=%s,table_mappings=%s,chunk_rows=%d,batch_rows=%d,parallelism=%d,max_retries=%d,auto_create_table=%s,validation_enabled=%s,validation_mode=%s,read_limit_mbps=%d,write_limit_mbps=%d,target_throughput_mbps=%d,auto_throughput_enabled=%s,completion_sla_seconds=%d,sla_started_at=%s,controller_target_bytes_sec=%d,throughput_controller_reason=%s,adaptive_hotspot_splits=%d,adaptive_running_yields=%d,adaptive_topology_drains=%d,adaptive_topology_degraded_yields=%d,adaptive_fault_domain_yields=%d,controller_auto_probe_pct=%d,controller_sla_headroom_pct=%d,controller_learning_samples=%d,sla_p95_eta_seconds=%d,sla_p99_eta_seconds=%d,sla_risk_level=%s,sla_risk_reason=%s,worker_selector_json=%s,worker_affinity=%s,effective_parallelism=%d,flow_control_level=%s,flow_control_reason=%s,cdc_spool_growth_bytes_sec=%d,cdc_spool_critical_eta_seconds=%d,rows_limit_per_sec=%d,qps_limit=%d,rate_limit_timezone=%s,rate_limit_windows=%s,transform_rules_json=%s,speed_rows_sec=%d,eta_seconds=%d,progress=%f,total_chunks=%d,finished_chunks=%d,rows_migrated=%d,bytes_migrated=%d,speed_bytes_sec=%d,cdc_lag_ms=%d,cdc_start_timestamp_ms=%d,cdc_start_position_type=%s,cdc_start_position_value=%s,cdc_start_resource=%s,last_error=%s,paused_from_status=%s,post_load_ddl_mode=%s,rollback_cdc_engine=%s,cdc_ddl_mode=%s,cdc_conflict_mode=%s,cdc_conflict_column=%s,sequence_synced_at=%s,validation_barrier_position_type=%s,validation_barrier_position_value=%s,validation_barrier_resource=%s,validation_barrier_captured_at=%s,updated_at=%s WHERE id=%s", qs(m.Name), qs(string(m.Mode)), qs(string(m.Status)), qs(m.FullEngine), qn(m.CDCEngine), ji(m.Tables), m.ChunkRows, m.BatchRows, m.Parallelism, m.MaxRetries, qb(m.AutoCreateTable), qb(m.ValidationEnabled), qs(m.ValidationMode), m.ReadLimitMBps, m.WriteLimitMBps, m.TargetThroughputMBps, qb(m.AutoThroughputEnabled), m.CompletionSLASeconds, qt(m.SLAStartedAt), m.ControllerTargetBytesSec, qn(m.ThroughputControllerReason), m.AdaptiveHotspotSplits, m.AdaptiveRunningYields, m.AdaptiveTopologyDrains, m.AdaptiveTopologyDegradedYields, m.AdaptiveFaultDomainYields, m.ControllerAutoProbePct, m.ControllerSLAHeadroomPct, m.ControllerLearningSamples, m.SLAP95ETASeconds, m.SLAP99ETASeconds, qn(m.SLARiskLevel), qn(m.SLARiskReason), ji(m.WorkerSelector), qs(m.WorkerAffinity), m.EffectiveParallelism, qs(m.FlowControlLevel), qn(m.FlowControlReason), m.CDCSpoolGrowthBytesSec, m.CDCSpoolCriticalETASeconds, m.RowsLimitPerSec, m.QPSLimit, qs(m.RateLimitTimezone), ji(m.RateLimitWindows), ji(m.TransformRules), m.SpeedRowsSec, m.ETASeconds, m.Progress, m.TotalChunks, m.FinishedChunks, m.RowsMigrated, m.BytesMigrated, m.SpeedBytesSec, m.CDCLagMS, m.CDCStartTimestampMS, qn(m.CDCStartPositionType), qn(m.CDCStartPositionValue), qn(m.CDCStartResource), qn(m.LastError), qn(string(m.PausedFromStatus)), qs(m.PostLoadDDLMode), qn(m.RollbackCDCEngine), qs(m.CDCDDLMode), qs(m.CDCConflictMode), qn(m.CDCConflictColumn), qt(m.SequenceSyncedAt), qn(m.ValidationBarrierPositionType), qn(m.ValidationBarrierPositionValue), qn(m.ValidationBarrierResource), qt(m.ValidationBarrierCapturedAt), qt(m.UpdatedAt), qs(m.ID))
 	return s.db.ExecSQL(ctx, q)
+}
+
+func controlLeaseSeconds(lease time.Duration) int64 {
+	seconds := int64((lease + time.Second - 1) / time.Second)
+	if seconds < 1 {
+		return 1
+	}
+	return seconds
+}
+
+func (s *Store) AcquireControlOperation(ctx context.Context, taskID, operation, owner string, lease time.Duration) (bool, error) {
+	q := fmt.Sprintf(`INSERT INTO control_operation_leases(task_id,operation,owner_id,lease_until,updated_at)
+VALUES(%s,%s,%s,now()+make_interval(secs => %d),now())
+ON CONFLICT(task_id) DO UPDATE SET operation=EXCLUDED.operation,owner_id=EXCLUDED.owner_id,lease_until=EXCLUDED.lease_until,updated_at=now()
+WHERE control_operation_leases.lease_until <= now()
+RETURNING task_id`, qs(taskID), qs(operation), qs(owner), controlLeaseSeconds(lease))
+	r, err := s.db.QuerySQL(ctx, q)
+	if err != nil {
+		return false, err
+	}
+	return len(r.Rows) > 0, nil
+}
+
+func (s *Store) RenewControlOperation(ctx context.Context, taskID, operation, owner string, lease time.Duration) error {
+	q := fmt.Sprintf(`UPDATE control_operation_leases SET lease_until=now()+make_interval(secs => %d),updated_at=now()
+WHERE task_id=%s AND operation=%s AND owner_id=%s RETURNING task_id`, controlLeaseSeconds(lease), qs(taskID), qs(operation), qs(owner))
+	r, err := s.db.QuerySQL(ctx, q)
+	if err != nil {
+		return err
+	}
+	if len(r.Rows) == 0 {
+		return repository.ErrLeaseOwner
+	}
+	return nil
+}
+
+func (s *Store) ReleaseControlOperation(ctx context.Context, taskID, operation, owner string) error {
+	q := fmt.Sprintf(`DELETE FROM control_operation_leases WHERE task_id=%s AND operation=%s AND owner_id=%s RETURNING task_id`, qs(taskID), qs(operation), qs(owner))
+	r, err := s.db.QuerySQL(ctx, q)
+	if err != nil {
+		return err
+	}
+	if len(r.Rows) == 0 {
+		return repository.ErrLeaseOwner
+	}
+	return nil
 }
 
 func tableCols() string {

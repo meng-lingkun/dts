@@ -23,6 +23,37 @@ type rc44ValidationPageRepo struct {
 	listCalls int
 }
 
+func TestRecoverInterruptedPreparationWaitsForLeaseThenFailsSafe(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.New()
+	task := &domain.MigrationTask{ID: "recover-preparing", Status: domain.StatusPreparing, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	if err := repo.CreateMigration(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	acquired, err := repo.AcquireControlOperation(ctx, task.ID, controlOperationPrepare, "old-server", time.Minute)
+	if err != nil || !acquired {
+		t.Fatalf("seed active lease: acquired=%v err=%v", acquired, err)
+	}
+	svc := NewService(repo, connector.NewRegistry())
+	if err := svc.RecoverInterrupted(ctx); err != nil {
+		t.Fatal(err)
+	}
+	current, _ := repo.GetMigration(ctx, task.ID)
+	if current.Status != domain.StatusPreparing {
+		t.Fatalf("live owner must be left alone, got %s", current.Status)
+	}
+	if err := repo.ReleaseControlOperation(ctx, task.ID, controlOperationPrepare, "old-server"); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.RecoverInterrupted(ctx); err != nil {
+		t.Fatal(err)
+	}
+	current, _ = repo.GetMigration(ctx, task.ID)
+	if current.Status != domain.StatusFailed || !strings.Contains(current.LastError, "automatic replay is unsafe") {
+		t.Fatalf("interrupted target preparation must fail with remediation guidance: %+v", current)
+	}
+}
+
 func (r *rc44ValidationPageRepo) ListTableChunksPage(ctx context.Context, taskID, tableID string, afterChunkNo int, afterID string, limit int) ([]domain.MigrationChunk, error) {
 	r.pageCalls++
 	if limit > r.maxLimit {
