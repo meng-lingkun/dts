@@ -8,13 +8,20 @@ RUN mkdir -p /out && \
     CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/qmigration-cdc-bridge ./cmd/cdc-bridge && \
     CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/qmigration-binlog-inspect ./cmd/binlog-inspect && \
     CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/qmigration-mysql-cdc ./cmd/mysql-cdc && \
+    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/qmigration-tidb-cdc ./cmd/tidb-cdc && \
     CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/qmigration-postgres-cdc ./cmd/postgres-cdc && \
+    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/qmigration-opengauss-cdc ./cmd/opengauss-cdc && \
+    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/qmigration-gaussdb-cdc ./cmd/gaussdb-cdc && \
     CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/qmigration-sqlserver-cdc ./cmd/sqlserver-cdc && \
     CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/qmigration-oracle-cdc ./cmd/oracle-cdc
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/qmigration-db2-cdc ./cmd/db2-cdc && \
+    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/qmigration-dameng-cdc ./cmd/dameng-cdc && \
+    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/qmigration-gbase-cdc ./cmd/gbase-cdc && \
+    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/qmigration-gbase8s-cdc ./cmd/gbase8s-cdc
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/qmigrationctl ./cmd/qmigrationctl
 
 FROM alpine:3.22
-RUN apk add --no-cache zstd && \
+RUN apk add --no-cache ca-certificates zstd && \
     addgroup -S -g 10001 qmigration && \
     adduser -S -D -H -u 10001 -G qmigration qmigration && \
     mkdir -p /var/lib/qmigration/cdc-spool && \

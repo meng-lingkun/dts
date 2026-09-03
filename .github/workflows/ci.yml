@@ -46,6 +46,19 @@ jobs:
       - run: npm run build
         working-directory: web
 
+  offline-packaging:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache-dependency-path: tools/offline-image-builder/go.sum
+      - run: go test ./...
+        working-directory: tools/offline-image-builder
+      - run: sh -n deployments/offline/build-offline-package.sh deployments/offline/install.sh deployments/offline/install-kubernetes.sh deployments/offline/load-images-kubernetes.sh deployments/offline/install-container-runtime.sh deployments/offline/verify.sh deployments/offline/uninstall.sh
+      - run: '! grep -U $''\r'' deployments/offline/*.sh deployments/offline/runtime/versions.env deployments/offline/runtime/docker.service'
+
   containers:
     runs-on: ubuntu-latest
     strategy:

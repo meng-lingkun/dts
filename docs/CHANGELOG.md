@@ -4,7 +4,9 @@
 - Added safe schema-program translation provider, external signer HA/scheduled rotation, RFC3161 timestamping, Unicode PDF renderer interface, and release qualification manifest builder.
 - Fixed Worker capability/runtime mismatches for DB2/Oracle and preserved fail-closed production qualification boundaries.
 - Added durable control-operation leases and periodic startup recovery for interrupted Precheck/Validation; unsafe partial Prepare replay fails closed with remediation guidance.
-- Hardened production startup, Compose and Kubernetes defaults; removed default secrets, enabled mandatory authentication, non-root containers and restrictive pod security contexts.
+- Hardened production startup and kept database/encryption/token secrets random; enabled mandatory authentication, non-root containers and restrictive pod security contexts. New offline deployments use the requested bootstrap administrator default and prominently require immediate rotation.
+- Added existing-cluster Kubernetes offline installation, per-node container-runtime image import, bundled verified kubectl, idempotent Secret preservation and registry-free image policy. Multi-node topology spreading, three-tier PDBs, DaemonSet image preflight, configurable replicas/HPA, external HA PostgreSQL and LoadBalancer/Ingress entry points are included.
+- Redesigned the Web shell/login experience with responsive navigation, centralized authentication state, protected routes and expired-session handling.
 - Added root version consistency checks, Linux CI, npm lockfile/type checking, route-level frontend code splitting and synchronized image/UI versions.
 - Added Unix/Windows File Spool capacity implementations and repaired platform-sensitive GBase 8s and SQL Server protocol tests.
 

@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: qmigration
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels: {app: qmigration-postgres}
+  template:
+    metadata:
+      labels: {app: qmigration-postgres}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+      - name: postgres
+        image: qmigration/postgres:17
+        imagePullPolicy: Never
+        env:
+        - {name: POSTGRES_USER, value: qmigration}
+        - {name: POSTGRES_DB, value: qmigration}
+        - name: POSTGRES_PASSWORD
+          valueFrom: {secretKeyRef: {name: qmigration-secrets, key: metadata-password}}
+        ports: [{containerPort: 5432, name: postgres}]
+        readinessProbe:
+          exec: {command: ["pg_isready","-U","qmigration","-d","qmigration"]}
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        resources:
+          requests: {cpu: "500m", memory: "1Gi"}
+          limits: {cpu: "2", memory: "4Gi"}
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities: {drop: ["ALL"]}
+        volumeMounts: [{name: data, mountPath: /var/lib/postgresql/data}]
+  volumeClaimTemplates:
+  - metadata: {name: data}
+    spec:
+      accessModes: [ReadWriteOnce]
+      resources: {requests: {storage: 50Gi}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: qmigration
+spec:
+  selector: {app: qmigration-postgres}
+  ports: [{port: 5432, targetPort: postgres}]

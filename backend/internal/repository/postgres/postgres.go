@@ -37,18 +37,25 @@ func New(ctx context.Context, ds domain.DataSource, autoMigrate bool) (*Store, e
 		return nil, err
 	}
 	if autoMigrate {
-		for _, stmt := range strings.Split(schemaSQL, ";") {
-			stmt = strings.TrimSpace(stmt)
-			if stmt != "" {
-				if err := db.ExecSQL(ctx, stmt); err != nil {
-					db.Close()
-					return nil, fmt.Errorf("metadata schema: %w", err)
-				}
-			}
+		if err := applyMetadataSchema(ctx, db); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("metadata schema: %w", err)
 		}
 	}
 	return s, nil
 }
+
+type metadataSchemaExecutor interface {
+	ExecSQL(context.Context, string) error
+}
+
+// applyMetadataSchema sends the embedded script as one PostgreSQL simple-query
+// message. Splitting on semicolons is not SQL-aware: a semicolon in a comment,
+// quoted value, or procedure body would turn the remainder into invalid SQL.
+func applyMetadataSchema(ctx context.Context, db metadataSchemaExecutor) error {
+	return db.ExecSQL(ctx, schemaSQL)
+}
+
 func (s *Store) Close() error { return s.db.Close() }
 
 func (s *Store) MetadataStorageStats(ctx context.Context) (repository.MetadataStorageStats, error) {

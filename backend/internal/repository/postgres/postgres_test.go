@@ -1,11 +1,37 @@
 package postgres
 
 import (
+	"context"
 	"qmigration/backend/internal/repository"
 	"strings"
 	"testing"
 	"time"
 )
+
+type recordingSchemaExecutor struct {
+	calls []string
+}
+
+func (e *recordingSchemaExecutor) ExecSQL(_ context.Context, sql string) error {
+	e.calls = append(e.calls, sql)
+	return nil
+}
+
+func TestMetadataSchemaBootstrapExecutesTheWholeScript(t *testing.T) {
+	db := &recordingSchemaExecutor{}
+	if err := applyMetadataSchema(context.Background(), db); err != nil {
+		t.Fatalf("apply metadata schema: %v", err)
+	}
+	if len(db.calls) != 1 {
+		t.Fatalf("expected one schema execution, got %d", len(db.calls))
+	}
+	if db.calls[0] != schemaSQL {
+		t.Fatal("metadata schema bootstrap did not execute the complete embedded script")
+	}
+	if !strings.Contains(db.calls[0], "batches; the newest CDC position") {
+		t.Fatal("regression fixture no longer covers a semicolon inside a SQL comment")
+	}
+}
 
 func TestDatasourceColumnsStayAlignedWithParser(t *testing.T) {
 	cols := datasourceCols()

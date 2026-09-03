@@ -109,6 +109,18 @@ WHERE id = 1;
 
 Server 启动时也会应用嵌入的幂等 `schema.sql`。维护时必须保证独立 Migration 集合与嵌入 Schema 的最终状态一致，避免“两套迁移事实源”漂移。
 
+## 6. 离线包构建与验证
+
+推荐在 Linux x86_64 联网构建机运行：
+
+```bash
+sh deployments/offline/build-offline-package.sh
+```
+
+Windows 构建机可运行 `deployments/offline/build-offline-package.ps1`；该流程使用 Go 直接组装标准 Docker image archive，不要求本机 Docker daemon。两种构建方式都会产出 `dist/qmigration-offline-<版本>-linux-amd64.tar.gz`、外层 SHA-256 文件和包内 `SHA256SUMS`。
+
+发布前必须检查：所有镜像均为 `linux/amd64`；Server 镜像包含 Server、Worker、CLI、所有 CDC Runtime、`zstd` 和 CA 根证书；Docker Engine/Compose/kubectl 二进制与 `runtime/versions.env` 固定哈希一致；Compose/Kubernetes 只引用包内 Tag；`SHA256SUMS` 使用 LF；在隔离网络的多节点 Linux 集群完整执行逐节点镜像导入、DaemonSet Image Preflight、跨节点调度、节点排空、外部 HA PostgreSQL、登录、迁移冒烟和重启恢复。离线包包含 Docker Engine、Compose 和 kubectl，但不替代 Kubernetes 控制面、CNI、CSI、Ingress、宿主机内核、cgroup、iptables、磁盘及网络驱动的运维基线。
+
 ## 6. 备份与恢复
 
 ### 备份范围

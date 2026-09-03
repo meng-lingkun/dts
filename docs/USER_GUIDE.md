@@ -6,7 +6,7 @@
 
 QMigration 当前是 RC 版本。建议先在非生产环境完成目标数据库版本、数据类型、CDC 前置条件、长稳和故障恢复验证。
 
-Docker Compose 已强制认证和生产配置校验，不再提供数据库密码、Master Key、Worker Token、Auth Secret 或管理员密码的默认值。请为每项生成互不相同的强随机值，并将私有环境文件排除在版本控制之外。
+Docker Compose 已强制认证和生产配置校验。新部署管理员账号默认为 `admin` / `Cljslrl0620!`，首次登录后必须立即修改；数据库密码、Master Key、Worker Token 和 Auth Secret 仍须使用互不相同的强随机值，并将私有环境文件排除在版本控制之外。
 
 ## 2. 环境要求
 
@@ -28,7 +28,7 @@ Docker Compose 已强制认证和生产配置校验，不再提供数据库密�
 
 ```bash
 cp deployments/.env.example deployments/.env.local
-# 编辑 deployments/.env.local，填入所有空的 Secret
+# 编辑 deployments/.env.local，填入所有空的内部 Secret
 docker compose --env-file deployments/.env.local -f deployments/docker-compose.yml up --build
 ```
 
@@ -42,6 +42,24 @@ docker compose --env-file deployments/.env.local -f deployments/docker-compose.y
 
 `down -v` 会删除 PostgreSQL 和 Spool 卷，除非明确要清空数据，否则不要使用。
 
+### Linux 离线安装
+
+将 `qmigration-offline-<版本>-linux-amd64.tar.gz` 和同名 `.sha256` 文件复制到 Linux x86_64 主机，先核验外层文件，再安装：
+
+```bash
+sha256sum -c qmigration-offline-*.tar.gz.sha256
+tar -xzf qmigration-offline-*.tar.gz
+cd qmigration-offline-*
+sudo sh install.sh
+sudo cat INITIAL_ADMIN_CREDENTIALS.txt
+```
+
+安装脚本会先核验包内所有文件；Docker 不可用时安装包内 Docker Engine 29.7.2、Compose v2.40.2 并创建 systemd 服务，然后使用 `docker load` 导入三个本地镜像、生成权限为 `0600` 的 Secret 环境文件，最后以 `--pull never` 启动服务。安装过程不访问网络。执行 `sudo sh verify.sh` 可复核文件完整性、容器状态和 Server Readiness。
+
+宿主机无需预装 Docker，但必须提供 Linux x86_64 内核、systemd、cgroup、iptables、`tar` 和 `sha256sum`。安装器不会覆盖已有 Docker，不会自动授予普通用户具有 root 等价权限的 `docker` 组成员资格。默认卸载保留数据卷和容器运行时；只有确认永久删除元数据和 Spool 后才使用 `sudo sh uninstall.sh --purge`。
+
+若使用现有 Kubernetes 多节点集群，应先在每个可调度节点运行 `sudo sh load-images-kubernetes.sh`，再在控制机运行 `sh install-kubernetes.sh`。安装器使用临时 DaemonSet 检查各节点镜像，并支持 Server/Worker/Web 副本数、HPA、LoadBalancer、Ingress 及外部 HA PostgreSQL。包内含 kubectl v1.37.0；可用 `KUBECTL=/path/to/kubectl` 指定兼容客户端。Kubernetes 模式要求集群预先提供 CNI 和 RWX Spool 存储；内置 PostgreSQL 还要求 RWO 存储，且仅适用于测试/小规模环境。
+
 ## 4. 安全启动
 
 生产至少应设置以下值：
@@ -49,7 +67,7 @@ docker compose --env-file deployments/.env.local -f deployments/docker-compose.y
 | 配置 | 要求 |
 |---|---|
 | `QMIGRATION_AUTH_REQUIRED=true` | 强制 API 认证 |
-| `QMIGRATION_BOOTSTRAP_ADMIN_PASSWORD` | 首次启动创建管理员；创建后可移除 |
+| `QMIGRATION_BOOTSTRAP_ADMIN_PASSWORD` | 首次启动创建管理员；包内默认 `Cljslrl0620!`，登录后立即修改并移除 |
 | `QMIGRATION_AUTH_SECRET` | 长随机值，用于 Session 签名 |
 | `QMIGRATION_MASTER_KEY` | 长随机值，用于静态加密；必须独立备份 |
 | `QMIGRATION_WORKER_TOKEN` | 长随机值，Server 与 Worker 一致 |

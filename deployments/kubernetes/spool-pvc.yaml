@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: qmigration-cdc-spool
+  namespace: qmigration
+spec:
+  # Use an RWX-capable StorageClass such as NFS or CephFS. The offline
+  # installer can set it with QMIGRATION_RWX_STORAGE_CLASS.
+  accessModes: [ReadWriteMany]
+  resources:
+    requests: {storage: 200Gi}

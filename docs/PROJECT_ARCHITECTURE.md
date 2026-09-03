@@ -207,11 +207,11 @@ Server 启动时会执行嵌入的幂等 `schema.sql`；外部脚本也可以按
 
 ### Docker Compose
 
-包含单 PostgreSQL、单 Server、单 Worker 和单 Web。所有 Secret 必须由私有 env 文件提供，Server 开启生产安全校验和强制认证；端口默认只绑定宿主机回环地址。该拓扑适合开发和单机验证，不提供数据库高可用。
+包含单 PostgreSQL、单 Server、单 Worker 和单 Web。数据库密码、Master Key、Worker Token 与 Auth Secret 必须由私有 env 文件提供；新部署管理员使用显式初始默认值并要求首次登录后修改。Server 开启生产安全校验和强制认证；端口默认只绑定宿主机回环地址。该拓扑适合开发和单机验证，不提供数据库高可用。
 
 ### Kubernetes 示例
 
-包含两个 Server、三个 Worker、两个 Web、单节点 PostgreSQL、HPA、PDB 和共享 RWX Spool PVC。Pod 已设置非 root、Seccomp、只读根文件系统、禁用 ServiceAccount Token 和 Drop ALL Capabilities；生产环境仍应替换为外部 HA PostgreSQL，并使用外部 Secret、不可变镜像、NetworkPolicy 和可信 Ingress/TLS。
+默认包含两个 Server、三个 Worker、两个 Web、HPA、三组 PDB 和共享 RWX Spool PVC。应用副本使用 hostname Topology Spread 和 Pod Anti-Affinity 跨节点分散；副本数和 HPA 上限可由安装器调整。清单不内嵌运行 Secret，临时 DaemonSet 会在部署前验证每个可调度节点的离线镜像。内置 `postgres.yaml` 仅用于测试/小规模环境，生产多节点通过安装器接入外部 HA PostgreSQL，并使用外部 Secret、不可变 Digest、NetworkPolicy 和可信 Ingress/TLS。
 
 多 Server 的 File Spool 必须共享同一个 RWX 文件系统；也可以使用 S3-Compatible Spool。PostgreSQL 中的 Drain Lease 用于避免多 Server 同时回放同一方向。
 

@@ -53,7 +53,7 @@ Chunk 和 Engine Job 都有 Lease、Owner 校验、续租和重领。Worker 上�
 
 #### 4.1 Compose 默认开放管理员模式（已修复）
 
-Compose 现在启用 `QMIGRATION_PRODUCTION=true` 和强制认证，所有敏感值必须由私有 env 文件提供，API/Web 仅绑定回环地址。Server 会拒绝 Open Mode、短/示例/复用 Secret、通配 CORS 和非 PostgreSQL 生产仓库。镜像以非 root、只读根文件系统（Kubernetes）和最小 Capability 运行。
+Compose 现在启用 `QMIGRATION_PRODUCTION=true` 和强制认证，数据库、加密和 Token Secret 必须由私有 env 文件提供，API/Web 仅绑定回环地址。Bootstrap Admin 使用明确的初始默认值并要求首次登录后轮换。Server 会拒绝 Open Mode、短/示例/复用内部 Secret、通配 CORS 和非 PostgreSQL 生产仓库。镜像以非 root、只读根文件系统（Kubernetes）和最小 Capability 运行。
 
 剩余：Compose 仍是单机模板；TLS、Secret Manager、NetworkPolicy 和外部身份应由生产平台配置。
 
@@ -135,11 +135,11 @@ API 使用手写 `net/http` Route，缺少 OpenAPI、统一分页/过滤、请�
 
 建议：引入 OpenTelemetry，统一 `request_id/task_id/chunk_id/job_id/worker_id`，输出结构化日志。
 
-#### 4.13 Kubernetes 生产加固不足
+#### 4.13 Kubernetes 多节点与生产加固（部分修复）
 
-示例清单仍使用必须替换的占位 Secret，已统一镜像 Tag，并补非 root、Seccomp、只读根文件系统、禁用 ServiceAccount Token、Drop ALL Capabilities 和临时目录挂载；尚未提供 NetworkPolicy、专用 ServiceAccount/RBAC、外部 Secret 和 Ingress/TLS 示例。
+已移除清单内的运行 Secret，新增跨主机 Topology Spread、Pod Anti-Affinity、Server/Worker/Web PDB、可配置副本/HPA、全节点离线镜像 DaemonSet 预检、外部 HA PostgreSQL、LoadBalancer 和 Ingress/TLS 安装入口。Pod 已启用非 root、Seccomp、只读根文件系统、禁用 ServiceAccount Token、Drop ALL Capabilities 和临时目录挂载。
 
-建议：将当前 YAML 明确标为开发模板，并提供受支持的 Helm/Kustomize 生产 Profile。
+剩余：仍缺 Helm/Kustomize Profile、NetworkPolicy、External Secrets/CSI Secret Store、自动证书管理和真实多节点故障演练。当前安装器使用 RWX File Spool；大规模生产可改用 S3 Spool，但尚未提供完整 Kubernetes Overlay。
 
 ## 5. 缺失功能清单
 

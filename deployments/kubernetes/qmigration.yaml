@@ -4,19 +4,6 @@ metadata:
   name: qmigration
 ---
 apiVersion: v1
-kind: Secret
-metadata:
-  name: qmigration-secrets
-  namespace: qmigration
-type: Opaque
-stringData:
-  metadata-password: change-me
-  master-key: change-me-to-a-long-random-master-key
-  worker-token: change-me-to-a-long-random-worker-token
-  auth-secret: change-me-to-a-long-random-auth-secret
-  bootstrap-admin-password: change-me-to-a-long-random-admin-password
----
-apiVersion: v1
 kind: ConfigMap
 metadata:
   name: qmigration-config
@@ -29,8 +16,8 @@ data:
   QMIGRATION_METADATA_USER: qmigration
   QMIGRATION_METADATA_DATABASE: qmigration
   QMIGRATION_AUTH_REQUIRED: "true"
-  # Replace this with the exact HTTPS origin exposed by your Ingress.
-  QMIGRATION_CORS_ORIGIN: https://qmigration.example.invalid
+  # The offline installer overrides this value when QMIGRATION_CORS_ORIGIN is set.
+  QMIGRATION_CORS_ORIGIN: http://127.0.0.1:8088
   QMIGRATION_DB_PRESSURE_SAMPLE_SECONDS: "5"
   QMIGRATION_WORKER_MAX_CPU_PCT: "95"
   QMIGRATION_WORKER_MAX_MEMORY_PCT: "95"
@@ -41,70 +28,15 @@ data:
   QMIGRATION_VALIDATION_STABLE_WINDOW_SECONDS: "2"
 ---
 apiVersion: apps/v1
-kind: StatefulSet
-metadata:
-  name: postgres
-  namespace: qmigration
-spec:
-  serviceName: postgres
-  replicas: 1
-  selector:
-    matchLabels: {app: qmigration-postgres}
-  template:
-    metadata:
-      labels: {app: qmigration-postgres}
-    spec:
-      containers:
-      - name: postgres
-        image: postgres:17
-        env:
-        - {name: POSTGRES_USER, value: qmigration}
-        - {name: POSTGRES_DB, value: qmigration}
-        - name: POSTGRES_PASSWORD
-          valueFrom: {secretKeyRef: {name: qmigration-secrets, key: metadata-password}}
-        ports: [{containerPort: 5432, name: postgres}]
-        readinessProbe:
-          exec: {command: ["pg_isready","-U","qmigration","-d","qmigration"]}
-          initialDelaySeconds: 5
-          periodSeconds: 5
-        resources:
-          requests: {cpu: "500m", memory: "1Gi"}
-          limits: {cpu: "2", memory: "4Gi"}
-        volumeMounts: [{name: data, mountPath: /var/lib/postgresql/data}]
-  volumeClaimTemplates:
-  - metadata: {name: data}
-    spec:
-      accessModes: [ReadWriteOnce]
-      resources: {requests: {storage: 50Gi}}
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: postgres
-  namespace: qmigration
-spec:
-  selector: {app: qmigration-postgres}
-  ports: [{port: 5432, targetPort: postgres}]
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: qmigration-cdc-spool
-  namespace: qmigration
-spec:
-  # Two server replicas can stage/drain the same task. Use an RWX-capable
-  # StorageClass (NFS/CephFS/etc.) so encrypted spool files are shared.
-  accessModes: [ReadWriteMany]
-  resources:
-    requests: {storage: 200Gi}
----
-apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: server
   namespace: qmigration
 spec:
   replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
   selector:
     matchLabels: {app: qmigration-server}
   template:
@@ -119,10 +51,24 @@ spec:
         runAsGroup: 10001
         fsGroup: 10001
         seccompProfile: {type: RuntimeDefault}
+      topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: ScheduleAnyway
+        labelSelector:
+          matchLabels: {app: qmigration-server}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              topologyKey: kubernetes.io/hostname
+              labelSelector:
+                matchLabels: {app: qmigration-server}
       containers:
       - name: server
         image: qmigration/server:0.15.0-rc49
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: Never
         envFrom: [{configMapRef: {name: qmigration-config}}]
         env:
         - name: QMIGRATION_METADATA_PASSWORD
@@ -180,6 +126,9 @@ metadata:
   namespace: qmigration
 spec:
   replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxUnavailable: 1, maxSurge: 1}
   selector:
     matchLabels: {app: qmigration-worker}
   template:
@@ -193,9 +142,24 @@ spec:
         runAsUser: 10001
         runAsGroup: 10001
         seccompProfile: {type: RuntimeDefault}
+      topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: ScheduleAnyway
+        labelSelector:
+          matchLabels: {app: qmigration-worker}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              topologyKey: kubernetes.io/hostname
+              labelSelector:
+                matchLabels: {app: qmigration-worker}
       containers:
       - name: worker
         image: qmigration/server:0.15.0-rc49
+        imagePullPolicy: Never
         command: ["/usr/local/bin/qmigration-worker"]
         env:
         - {name: QMIGRATION_SERVER, value: "http://server.qmigration.svc:8080"}
@@ -252,6 +216,9 @@ metadata:
   namespace: qmigration
 spec:
   replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
   selector:
     matchLabels: {app: qmigration-web}
   template:
@@ -264,9 +231,24 @@ spec:
         runAsUser: 101
         runAsGroup: 101
         seccompProfile: {type: RuntimeDefault}
+      topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: ScheduleAnyway
+        labelSelector:
+          matchLabels: {app: qmigration-web}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              topologyKey: kubernetes.io/hostname
+              labelSelector:
+                matchLabels: {app: qmigration-web}
       containers:
       - name: web
         image: qmigration/web:0.15.0-rc49
+        imagePullPolicy: Never
         ports: [{containerPort: 8080, name: http}]
         readinessProbe: {httpGet: {path: /, port: http}, initialDelaySeconds: 3, periodSeconds: 10}
         resources:
@@ -290,3 +272,13 @@ metadata:
 spec:
   selector: {app: qmigration-web}
   ports: [{port: 80, targetPort: http}]
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: web
+  namespace: qmigration
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: {app: qmigration-web}

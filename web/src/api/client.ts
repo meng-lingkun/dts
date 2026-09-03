@@ -25,7 +25,10 @@ export async function api<T>(path:string,init:RequestInit={}):Promise<T>{
   else if(staticToken) headers['X-QMigration-API-Token']=staticToken
   const res=await fetch(path,{...init,headers})
   const data=await res.json().catch(()=>({}))
-  if(!res.ok)throw new ApiError(data.error||`HTTP ${res.status}`,res.status)
+  if(!res.ok){
+    if(res.status===401){clearCredentials();window.dispatchEvent(new Event('qmigration:unauthorized'))}
+    throw new ApiError(data.error||`HTTP ${res.status}`,res.status)
+  }
   return data as T
 }
 
@@ -38,6 +41,7 @@ export async function apiBlob(path:string,init:RequestInit={}):Promise<{blob:Blo
   const res=await fetch(path,{...init,headers})
   if(!res.ok){
     const data=await res.json().catch(()=>({})) as any
+    if(res.status===401){clearCredentials();window.dispatchEvent(new Event('qmigration:unauthorized'))}
     throw new ApiError(data.error||`HTTP ${res.status}`,res.status)
   }
   const cd=res.headers.get('Content-Disposition')||''

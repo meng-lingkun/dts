@@ -12,3 +12,4 @@ backend/qmigration-server
 backend/qmigration-worker
 
 bin/
+/dist/
