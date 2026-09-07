@@ -12,7 +12,7 @@ const ttcProtocolMessage byte = 1
 
 // ttcProtocolInfo captures the server capabilities needed by later
 // authentication and SQL codecs.  It is deliberately narrower than a generic
-// Oracle driver: QMigration only records capabilities that affect migration
+// Oracle driver: DTS only records capabilities that affect migration
 // correctness, charset decoding or authentication verifier behavior.
 type ttcProtocolInfo struct {
 	ServerVersion   byte
@@ -27,7 +27,7 @@ type ttcProtocolInfo struct {
 func buildTTCProtocolRequest(clientName string) []byte {
 	clientName = strings.TrimSpace(clientName)
 	if clientName == "" {
-		clientName = "QMigration"
+		clientName = "DTS"
 	}
 	// TTC protocol negotiation request: message=1, protocol-level=6, flags=0,
 	// followed by a NUL-terminated client identification string.
@@ -131,7 +131,7 @@ func (c *Connector) negotiateTTCProtocol(ctx context.Context, accepted *accepted
 	if accepted == nil || accepted.Session == nil {
 		return ttcProtocolInfo{}, errors.New("Oracle TTC negotiation requires accepted TNS session")
 	}
-	if err := accepted.Session.WriteData(ctx, 0, buildTTCProtocolRequest("QMigration")); err != nil {
+	if err := accepted.Session.WriteData(ctx, 0, buildTTCProtocolRequest("DTS")); err != nil {
 		return ttcProtocolInfo{}, fmt.Errorf("Oracle TTC protocol request: %w", err)
 	}
 	flags, payload, err := accepted.Session.ReadData(ctx)

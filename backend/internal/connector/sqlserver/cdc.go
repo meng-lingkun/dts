@@ -6,8 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"qmigration/backend/internal/connector"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/connector"
+	"dts/backend/internal/domain"
 	"sort"
 	"strconv"
 	"strings"
@@ -15,7 +15,7 @@ import (
 )
 
 // SQLServer CDC integration deliberately uses SQL Server's own CDC LSN/change
-// tables through QMigration's native TDS client. No SSIS/Debezium/third-party
+// tables through DTS's native TDS client. No SSIS/Debezium/third-party
 // runtime is involved. SQL Server Agent still has to maintain capture jobs on
 // the source, which is a server prerequisite rather than a migration engine.
 
@@ -43,7 +43,7 @@ func sqlServerCDCEnabled() bool {
 	if !experimentalFullEnabled() {
 		return false
 	}
-	v := strings.ToLower(strings.TrimSpace(os.Getenv("QMIGRATION_EXPERIMENTAL_SQLSERVER_CDC")))
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("DTS_EXPERIMENTAL_SQLSERVER_CDC")))
 	return v == "1" || v == "true" || v == "yes" || v == "on"
 }
 
@@ -66,7 +66,7 @@ func normalizeLSN(v string) (string, error) {
 
 func (c *Connector) CurrentCDCPosition(ctx context.Context) (*domain.CDCPosition, error) {
 	if !sqlServerCDCEnabled() {
-		return nil, errors.New("QMigration native SQL Server CDC is experimental; set QMIGRATION_EXPERIMENTAL_SQLSERVER_CDC=1 after source CDC is enabled")
+		return nil, errors.New("DTS native SQL Server CDC is experimental; set DTS_EXPERIMENTAL_SQLSERVER_CDC=1 after source CDC is enabled")
 	}
 	p, err := c.get(ctx)
 	if err != nil {
@@ -114,7 +114,7 @@ func (c *Connector) CDCRetentionMinutes(ctx context.Context) (int64, error) {
 }
 
 func sqlServerMinimumRetentionMinutes() int64 {
-	v := strings.TrimSpace(os.Getenv("QMIGRATION_SQLSERVER_CDC_MIN_RETENTION_MINUTES"))
+	v := strings.TrimSpace(os.Getenv("DTS_SQLSERVER_CDC_MIN_RETENTION_MINUTES"))
 	if v == "" {
 		return 4320
 	}

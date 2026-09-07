@@ -1,4 +1,4 @@
-# QMigration V0.15.0-rc8 Release Notes
+# DTS V0.15.0-rc8 Release Notes
 
 RC8 closes the most common remaining Db2 LUW source-CDC row-format gaps after RC7. The source path remains experimental and correctness-first.
 
@@ -7,7 +7,7 @@ RC8 closes the most common remaining Db2 LUW source-CDC row-format gaps after RC
 - Decode documented full-row VALUE COMPRESSION offset-array format.
 - Support normal values, NULL attributes and `COMPRESS SYSTEM DEFAULT` for qualified numeric/fixed-character fields.
 - Accept only unambiguous complete row layouts; partial/ambiguous compressed images fail closed.
-- Table-level classic/adaptive row compression remains delegated to IBM `db2ReadLog` with `DB2READLOG_FILTER_ON`; QMigration does not reverse-engineer a compression dictionary.
+- Table-level classic/adaptive row compression remains delegated to IBM `db2ReadLog` with `DB2READLOG_FILTER_ON`; DTS does not reverse-engineer a compression dictionary.
 
 ## Logged out-of-row data
 

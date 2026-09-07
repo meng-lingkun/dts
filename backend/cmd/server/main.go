@@ -11,27 +11,27 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"qmigration/backend/internal/api"
-	"qmigration/backend/internal/auth"
-	"qmigration/backend/internal/connector"
-	damengconnector "qmigration/backend/internal/connector/dameng"
-	db2connector "qmigration/backend/internal/connector/db2"
-	gbaseconnector "qmigration/backend/internal/connector/gbase"
-	gbase8sconnector "qmigration/backend/internal/connector/gbase8s"
-	mysqlconnector "qmigration/backend/internal/connector/mysql"
-	oracleconnector "qmigration/backend/internal/connector/oracle"
-	postgresconnector "qmigration/backend/internal/connector/postgres"
-	sqlserverconnector "qmigration/backend/internal/connector/sqlserver"
-	"qmigration/backend/internal/domain"
-	"qmigration/backend/internal/engine"
-	"qmigration/backend/internal/maintenance"
-	"qmigration/backend/internal/repository"
-	"qmigration/backend/internal/repository/memory"
-	pgrepo "qmigration/backend/internal/repository/postgres"
-	securerepo "qmigration/backend/internal/repository/secure"
-	spoolfilerepo "qmigration/backend/internal/repository/spoolfile"
-	spools3repo "qmigration/backend/internal/repository/spools3"
-	"qmigration/backend/internal/security"
+	"dts/backend/internal/api"
+	"dts/backend/internal/auth"
+	"dts/backend/internal/connector"
+	damengconnector "dts/backend/internal/connector/dameng"
+	db2connector "dts/backend/internal/connector/db2"
+	gbaseconnector "dts/backend/internal/connector/gbase"
+	gbase8sconnector "dts/backend/internal/connector/gbase8s"
+	mysqlconnector "dts/backend/internal/connector/mysql"
+	oracleconnector "dts/backend/internal/connector/oracle"
+	postgresconnector "dts/backend/internal/connector/postgres"
+	sqlserverconnector "dts/backend/internal/connector/sqlserver"
+	"dts/backend/internal/domain"
+	"dts/backend/internal/engine"
+	"dts/backend/internal/maintenance"
+	"dts/backend/internal/repository"
+	"dts/backend/internal/repository/memory"
+	pgrepo "dts/backend/internal/repository/postgres"
+	securerepo "dts/backend/internal/repository/secure"
+	spoolfilerepo "dts/backend/internal/repository/spoolfile"
+	spools3repo "dts/backend/internal/repository/spools3"
+	"dts/backend/internal/security"
 	"strconv"
 	"strings"
 	"syscall"
@@ -55,41 +55,41 @@ func envEnabled(k string) bool {
 }
 
 func validateProductionEnvironment() error {
-	if !envEnabled("QMIGRATION_PRODUCTION") {
+	if !envEnabled("DTS_PRODUCTION") {
 		return nil
 	}
-	if os.Getenv("QMIGRATION_REPOSITORY") != "postgres" {
-		return errors.New("QMIGRATION_PRODUCTION requires QMIGRATION_REPOSITORY=postgres")
+	if os.Getenv("DTS_REPOSITORY") != "postgres" {
+		return errors.New("DTS_PRODUCTION requires DTS_REPOSITORY=postgres")
 	}
-	if !envEnabled("QMIGRATION_AUTH_REQUIRED") {
-		return errors.New("QMIGRATION_PRODUCTION requires QMIGRATION_AUTH_REQUIRED=true")
+	if !envEnabled("DTS_AUTH_REQUIRED") {
+		return errors.New("DTS_PRODUCTION requires DTS_AUTH_REQUIRED=true")
 	}
 	required := map[string]int{
-		"QMIGRATION_METADATA_PASSWORD": 16,
-		"QMIGRATION_MASTER_KEY":        32,
-		"QMIGRATION_WORKER_TOKEN":      32,
-		"QMIGRATION_AUTH_SECRET":       32,
+		"DTS_METADATA_PASSWORD": 16,
+		"DTS_MASTER_KEY":        32,
+		"DTS_WORKER_TOKEN":      32,
+		"DTS_AUTH_SECRET":       32,
 	}
 	values := make(map[string]string, len(required))
 	for name, minLength := range required {
 		value := strings.TrimSpace(os.Getenv(name))
 		lower := strings.ToLower(value)
 		if len(value) < minLength || strings.Contains(lower, "change-me") || strings.Contains(lower, "change-this") || strings.Contains(lower, "example") {
-			return fmt.Errorf("QMIGRATION_PRODUCTION requires a non-placeholder %s with at least %d characters", name, minLength)
+			return fmt.Errorf("DTS_PRODUCTION requires a non-placeholder %s with at least %d characters", name, minLength)
 		}
 		values[name] = value
 	}
-	secretNames := []string{"QMIGRATION_MASTER_KEY", "QMIGRATION_WORKER_TOKEN", "QMIGRATION_AUTH_SECRET"}
+	secretNames := []string{"DTS_MASTER_KEY", "DTS_WORKER_TOKEN", "DTS_AUTH_SECRET"}
 	for i := range secretNames {
 		for j := i + 1; j < len(secretNames); j++ {
 			if values[secretNames[i]] == values[secretNames[j]] {
-				return fmt.Errorf("QMIGRATION_PRODUCTION requires distinct values for %s and %s", secretNames[i], secretNames[j])
+				return fmt.Errorf("DTS_PRODUCTION requires distinct values for %s and %s", secretNames[i], secretNames[j])
 			}
 		}
 	}
-	origin := strings.TrimSpace(os.Getenv("QMIGRATION_CORS_ORIGIN"))
+	origin := strings.TrimSpace(os.Getenv("DTS_CORS_ORIGIN"))
 	if origin == "" || origin == "*" {
-		return errors.New("QMIGRATION_PRODUCTION requires an explicit QMIGRATION_CORS_ORIGIN")
+		return errors.New("DTS_PRODUCTION requires an explicit DTS_CORS_ORIGIN")
 	}
 	return nil
 }
@@ -98,16 +98,16 @@ func main() {
 	if err := validateProductionEnvironment(); err != nil {
 		log.Fatal(err)
 	}
-	repoMode := os.Getenv("QMIGRATION_REPOSITORY")
+	repoMode := os.Getenv("DTS_REPOSITORY")
 	var base repository.Repository
 	if repoMode == "postgres" {
 		port := 5432
-		if v := os.Getenv("QMIGRATION_METADATA_PORT"); v != "" {
+		if v := os.Getenv("DTS_METADATA_PORT"); v != "" {
 			if n, e := strconv.Atoi(v); e == nil {
 				port = n
 			}
 		}
-		ds := domain.DataSource{Type: domain.DataSourcePostgreSQL, Host: env("QMIGRATION_METADATA_HOST", "127.0.0.1"), Port: port, Username: env("QMIGRATION_METADATA_USER", "qmigration"), Password: os.Getenv("QMIGRATION_METADATA_PASSWORD"), Database: env("QMIGRATION_METADATA_DATABASE", "qmigration")}
+		ds := domain.DataSource{Type: domain.DataSourcePostgreSQL, Host: env("DTS_METADATA_HOST", "127.0.0.1"), Port: port, Username: env("DTS_METADATA_USER", "dts"), Password: os.Getenv("DTS_METADATA_PASSWORD"), Database: env("DTS_METADATA_DATABASE", "dts")}
 		st, err := pgrepo.New(context.Background(), ds, true)
 		if err != nil {
 			log.Fatalf("open PostgreSQL metadata repository: %v", err)
@@ -115,7 +115,7 @@ func main() {
 		base = st
 		log.Printf("metadata repository: PostgreSQL %s:%d/%s", ds.Host, ds.Port, ds.Database)
 	} else {
-		stateFile := os.Getenv("QMIGRATION_STATE_FILE")
+		stateFile := os.Getenv("DTS_STATE_FILE")
 		if stateFile == ":memory:" {
 			base = memory.New()
 			log.Printf("metadata repository: memory")
@@ -132,7 +132,7 @@ func main() {
 		}
 	}
 	metadataBase := base
-	spoolStorage := strings.ToLower(strings.TrimSpace(env("QMIGRATION_CDC_SPOOL_STORAGE", "file")))
+	spoolStorage := strings.ToLower(strings.TrimSpace(env("DTS_CDC_SPOOL_STORAGE", "file")))
 	switch spoolStorage {
 	case "file", "shared-fs":
 		spoolStore, err := spoolfilerepo.New(base, spoolfilerepo.ConfigFromEnv())
@@ -160,13 +160,13 @@ func main() {
 	case "metadata":
 		log.Printf("CDC spool storage: metadata (not recommended for large snapshots)")
 	default:
-		log.Fatalf("unsupported QMIGRATION_CDC_SPOOL_STORAGE=%q; use file, shared-fs, s3, or metadata", spoolStorage)
+		log.Fatalf("unsupported DTS_CDC_SPOOL_STORAGE=%q; use file, shared-fs, s3, or metadata", spoolStorage)
 	}
 
-	master := os.Getenv("QMIGRATION_MASTER_KEY")
+	master := os.Getenv("DTS_MASTER_KEY")
 	if master == "" {
-		master = "qmigration-development-key-change-me"
-		log.Printf("WARNING: QMIGRATION_MASTER_KEY is not set; using development key")
+		master = "dts-development-key-change-me"
+		log.Printf("WARNING: DTS_MASTER_KEY is not set; using development key")
 	}
 	cipher, err := security.New(master)
 	if err != nil {
@@ -199,12 +199,12 @@ func main() {
 	registry.Register(domain.DataSourceGBase, gbaseconnector.NewFactory())
 	registry.Register(domain.DataSourceGBase8s, gbase8sconnector.NewFactory())
 	engines := engine.NewRegistry()
-	// QMigration exposes exactly one migration engine. Third-party projects are
+	// DTS exposes exactly one migration engine. Third-party projects are
 	// design inspirations only; they are not runtime dependencies or selectable
 	// execution engines.
 	engines.Register(engine.NewUnified())
 	srv := api.New(store, registry, engines)
-	addr := os.Getenv("QMIGRATION_ADDR")
+	addr := os.Getenv("DTS_ADDR")
 	if addr == "" {
 		addr = ":8080"
 	}
@@ -216,9 +216,9 @@ func main() {
 		WriteTimeout:      0,
 		IdleTimeout:       120 * time.Second,
 	}
-	cert, key := os.Getenv("QMIGRATION_TLS_CERT"), os.Getenv("QMIGRATION_TLS_KEY")
+	cert, key := os.Getenv("DTS_TLS_CERT"), os.Getenv("DTS_TLS_KEY")
 	if (cert == "") != (key == "") {
-		log.Fatal("QMIGRATION_TLS_CERT and QMIGRATION_TLS_KEY must be set together")
+		log.Fatal("DTS_TLS_CERT and DTS_TLS_KEY must be set together")
 	}
 	signalCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -227,11 +227,11 @@ func main() {
 	serveErr := make(chan error, 1)
 	go func() {
 		if cert != "" {
-			log.Printf("QMigration HTTPS server listening on %s", addr)
+			log.Printf("DTS HTTPS server listening on %s", addr)
 			serveErr <- httpServer.ListenAndServeTLS(cert, key)
 			return
 		}
-		log.Printf("QMigration HTTP server listening on %s (production deployments should enable TLS or terminate TLS at a trusted proxy)", addr)
+		log.Printf("DTS HTTP server listening on %s (production deployments should enable TLS or terminate TLS at a trusted proxy)", addr)
 		serveErr <- httpServer.ListenAndServe()
 	}()
 
@@ -255,11 +255,11 @@ func main() {
 }
 
 func bootstrapAdmin(ctx context.Context, repo repository.Repository) error {
-	password := os.Getenv("QMIGRATION_BOOTSTRAP_ADMIN_PASSWORD")
+	password := os.Getenv("DTS_BOOTSTRAP_ADMIN_PASSWORD")
 	if password == "" {
 		return nil
 	}
-	username := strings.ToLower(strings.TrimSpace(env("QMIGRATION_BOOTSTRAP_ADMIN_USER", "admin")))
+	username := strings.ToLower(strings.TrimSpace(env("DTS_BOOTSTRAP_ADMIN_USER", "admin")))
 	if _, err := repo.GetUserByUsername(ctx, username); err == nil {
 		log.Printf("bootstrap admin %q already exists; password was not reset", username)
 		return nil
@@ -282,19 +282,19 @@ func bootstrapAdmin(ctx context.Context, repo repository.Repository) error {
 }
 
 func validateAuthBootstrap(ctx context.Context, repo repository.Repository) error {
-	if !strings.EqualFold(os.Getenv("QMIGRATION_AUTH_REQUIRED"), "true") {
+	if !strings.EqualFold(os.Getenv("DTS_AUTH_REQUIRED"), "true") {
 		return nil
 	}
 	users, err := repo.ListUsers(ctx)
 	if err != nil {
 		return err
 	}
-	spec := os.Getenv("QMIGRATION_RBAC_TOKENS")
-	if spec == "" && os.Getenv("QMIGRATION_API_TOKEN") != "" {
-		spec = "admin:" + os.Getenv("QMIGRATION_API_TOKEN")
+	spec := os.Getenv("DTS_RBAC_TOKENS")
+	if spec == "" && os.Getenv("DTS_API_TOKEN") != "" {
+		spec = "admin:" + os.Getenv("DTS_API_TOKEN")
 	}
 	if len(users) == 0 && auth.ParseTokens(spec).Empty() {
-		return fmt.Errorf("QMIGRATION_AUTH_REQUIRED=true but no users or static RBAC tokens exist; set QMIGRATION_BOOTSTRAP_ADMIN_PASSWORD for first startup")
+		return fmt.Errorf("DTS_AUTH_REQUIRED=true but no users or static RBAC tokens exist; set DTS_BOOTSTRAP_ADMIN_PASSWORD for first startup")
 	}
 	return nil
 }

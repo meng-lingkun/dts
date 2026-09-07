@@ -2,7 +2,7 @@
 set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 : "${GBASE8S_GO_ODBC_DRIVER_DIR:?set GBASE8S_GO_ODBC_DRIVER_DIR to an unpacked Go database/sql ODBC wrapper source tree}"
-OUT=${QMIGRATION_GBASE8S_DRIVER_PLUGIN_OUT:-"$ROOT/bin/qmigration-gbase8s-driver.so"}
+OUT=${DTS_GBASE8S_DRIVER_PLUGIN_OUT:-"$ROOT/bin/dts-gbase8s-driver.so"}
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$WORK/provider" "$WORK/odbc"
@@ -16,7 +16,7 @@ EOM
 fi
 cp "$ROOT/deployments/gbase8s-provider/provider.go.example" "$WORK/provider/provider.go"
 cat > "$WORK/provider/go.mod" <<EOM
-module qmigration-gbase8s-provider
+module dts-gbase8s-provider
 
 go 1.20
 
@@ -31,4 +31,4 @@ EOM
 )
 echo "built $OUT"
 echo "Runtime also needs unixODBC and the matching GBase Client-SDK ODBC libraries/LD_LIBRARY_PATH."
-echo "Use the same Go toolchain as the QMigration Server/Worker binaries."
+echo "Use the same Go toolchain as the DTS Server/Worker binaries."

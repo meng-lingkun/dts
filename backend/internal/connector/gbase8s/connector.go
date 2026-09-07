@@ -13,11 +13,11 @@ import (
 	"sync"
 	"time"
 
-	"qmigration/backend/internal/connector"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/connector"
+	"dts/backend/internal/domain"
 )
 
-// RC19 treats GBase 8s as its own transactional database family. QMigration
+// RC19 treats GBase 8s as its own transactional database family. DTS
 // owns catalog discovery, keyset planning, schema creation, Full Write and
 // target CDC apply. The supported transport is the vendor GBase Client-SDK
 // ODBC driver exposed through a database/sql provider plugin.
@@ -25,7 +25,7 @@ type Factory struct{}
 
 func NewFactory() *Factory { return &Factory{} }
 
-func experimentalEnabled() bool { return envOn("QMIGRATION_EXPERIMENTAL_GBASE8S_NATIVE") }
+func experimentalEnabled() bool { return envOn("DTS_EXPERIMENTAL_GBASE8S_NATIVE") }
 func envOn(name string) bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv(name))) {
 	case "1", "true", "yes", "on":
@@ -37,7 +37,7 @@ func envOn(name string) bool {
 func (*Factory) Capabilities(t domain.DataSourceType) connector.Descriptor {
 	caps := []connector.Capability{connector.CapabilityProtocolProbe}
 	maturity := connector.MaturityProbeOnly
-	note := "GBase 8s TCP probe only; set QMIGRATION_EXPERIMENTAL_GBASE8S_NATIVE=1 and configure a GBase Client-SDK ODBC database/sql provider for the experimental data plane"
+	note := "GBase 8s TCP probe only; set DTS_EXPERIMENTAL_GBASE8S_NATIVE=1 and configure a GBase Client-SDK ODBC database/sql provider for the experimental data plane"
 	if experimentalEnabled() {
 		caps = append(caps,
 			connector.CapabilityMetadata,
@@ -231,13 +231,13 @@ func buildODBCConnectionString(ds domain.DataSource) (string, error) {
 		raw = strings.TrimSpace(raw[len("odbc:"):])
 	}
 	if raw == "" {
-		raw = strings.TrimSpace(os.Getenv("QMIGRATION_GBASE8S_ODBC_DSN"))
+		raw = strings.TrimSpace(os.Getenv("DTS_GBASE8S_ODBC_DSN"))
 	}
 	if raw == "" {
-		return "", errors.New("GBase 8s ODBC DSN is required in datasource jdbc_url (optionally prefixed odbc:) or QMIGRATION_GBASE8S_ODBC_DSN; QMigration will not guess DBSERVERNAME/CSDK driver paths")
+		return "", errors.New("GBase 8s ODBC DSN is required in datasource jdbc_url (optionally prefixed odbc:) or DTS_GBASE8S_ODBC_DSN; DTS will not guess DBSERVERNAME/CSDK driver paths")
 	}
 	if containsODBCSecret(raw) {
-		return "", errors.New("GBase 8s jdbc_url/ODBC DSN must not contain UID/PWD credentials; store username/password in the QMigration datasource so they remain encrypted at rest")
+		return "", errors.New("GBase 8s jdbc_url/ODBC DSN must not contain UID/PWD credentials; store username/password in the DTS datasource so they remain encrypted at rest")
 	}
 	base := strings.TrimSuffix(strings.TrimSpace(raw), ";")
 	if !strings.Contains(base, "=") && !strings.Contains(base, ";") {
@@ -255,12 +255,12 @@ var openRunner = func(ds domain.DataSource) (runner, error) {
 	if err := validateTransportSettings(ds); err != nil {
 		return nil, err
 	}
-	if err := loadDriverPlugin(os.Getenv("QMIGRATION_GBASE8S_DRIVER_PLUGIN")); err != nil {
+	if err := loadDriverPlugin(os.Getenv("DTS_GBASE8S_DRIVER_PLUGIN")); err != nil {
 		return nil, err
 	}
 	driver := strings.TrimSpace(ds.DriverClass)
 	if driver == "" {
-		driver = strings.TrimSpace(os.Getenv("QMIGRATION_GBASE8S_SQL_DRIVER"))
+		driver = strings.TrimSpace(os.Getenv("DTS_GBASE8S_SQL_DRIVER"))
 	}
 	if driver == "" {
 		driver = "odbc"
@@ -273,7 +273,7 @@ var openRunner = func(ds domain.DataSource) (runner, error) {
 		}
 	}
 	if !found {
-		return nil, fmt.Errorf("GBase 8s database/sql driver %q is not registered; load QMIGRATION_GBASE8S_DRIVER_PLUGIN or build a binary with the ODBC provider", driver)
+		return nil, fmt.Errorf("GBase 8s database/sql driver %q is not registered; load DTS_GBASE8S_DRIVER_PLUGIN or build a binary with the ODBC provider", driver)
 	}
 	dsn, err := buildODBCConnectionString(ds)
 	if err != nil {
@@ -1349,7 +1349,7 @@ func (c *Connector) PlanKeysetBoundaries(ctx context.Context, req connector.Keys
 
 func (c *Connector) MigrationPrechecks(ctx context.Context, needCDC bool) []domain.PrecheckItem {
 	if !experimentalEnabled() {
-		return []domain.PrecheckItem{{Name: "gbase8s_native_gate", Level: domain.PrecheckFailed, Message: "set QMIGRATION_EXPERIMENTAL_GBASE8S_NATIVE=1 after retained qualification"}}
+		return []domain.PrecheckItem{{Name: "gbase8s_native_gate", Level: domain.PrecheckFailed, Message: "set DTS_EXPERIMENTAL_GBASE8S_NATIVE=1 after retained qualification"}}
 	}
 	r, err := c.get(ctx)
 	if err != nil {
@@ -1377,7 +1377,7 @@ func (c *Connector) MigrationPrechecks(ctx context.Context, needCDC bool) []doma
 	items = append(items, domain.PrecheckItem{Name: "gbase8s_identifier_policy", Level: domain.PrecheckWarning, Message: "RC21 supports the safe unquoted identifier subset [A-Za-z_][A-Za-z0-9_$#]*; quoted/case-sensitive identifiers require later qualification"})
 	if needCDC {
 		if !experimentalCDCEnabled() {
-			items = append(items, domain.PrecheckItem{Name: "gbase8s_source_cdc", Level: domain.PrecheckFailed, Message: "set QMIGRATION_EXPERIMENTAL_GBASE8S_CDC=1 and configure datasource cdc_url for the CSDK CDC provider"})
+			items = append(items, domain.PrecheckItem{Name: "gbase8s_source_cdc", Level: domain.PrecheckFailed, Message: "set DTS_EXPERIMENTAL_GBASE8S_CDC=1 and configure datasource cdc_url for the CSDK CDC provider"})
 		} else if a, e := c.cdcAgent(); e != nil {
 			items = append(items, domain.PrecheckItem{Name: "gbase8s_source_cdc", Level: domain.PrecheckFailed, Message: e.Error()})
 		} else if e = a.Health(ctx); e != nil {

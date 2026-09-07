@@ -1,4 +1,4 @@
-# QMigration V0.15.0-unified-dev7 Release Notes
+# DTS V0.15.0-unified-dev7 Release Notes
 
 ## Theme
 
@@ -6,7 +6,7 @@ This snapshot moves durable CDC payloads out of Metadata into an independent enc
 
 ## Independent encrypted file spool
 
-Default mode is `QMIGRATION_CDC_SPOOL_STORAGE=file`. QMigration gzip-compresses and AES-256-GCM encrypts the transaction first. The ciphertext is atomically written (`0600`, fsync, rename) to `QMIGRATION_CDC_SPOOL_DIR`; only then is the Metadata sequence/index committed and the source position allowed to ACK.
+Default mode is `DTS_CDC_SPOOL_STORAGE=file`. DTS gzip-compresses and AES-256-GCM encrypts the transaction first. The ciphertext is atomically written (`0600`, fsync, rename) to `DTS_CDC_SPOOL_DIR`; only then is the Metadata sequence/index committed and the source position allowed to ACK.
 
 Metadata stores ordering, position, status and a file reference; it no longer needs to carry the large encrypted CDC payload itself.
 
@@ -23,9 +23,9 @@ PostgreSQL Metadata includes `cdc_spool_drain_leases`. A Server instance must ho
 
 ## Validation Watermark Barrier
 
-Full+CDC validation now requires empty spool, acceptable lag, and a durable CDC checkpoint that has remained unchanged for `QMIGRATION_VALIDATION_STABLE_WINDOW_SECONDS` (default 2 seconds). The position/type/resource/time are persisted on the task.
+Full+CDC validation now requires empty spool, acceptable lag, and a durable CDC checkpoint that has remained unchanged for `DTS_VALIDATION_STABLE_WINDOW_SECONDS` (default 2 seconds). The position/type/resource/time are persisted on the task.
 
-If the checkpoint changes while validation is scanning, QMigration deletes the results from that generation and moves the task back to `CDC_CATCHING_UP`. This prevents ordinary concurrent-write drift from being reported as a final validation mismatch or success.
+If the checkpoint changes while validation is scanning, DTS deletes the results from that generation and moves the task back to `CDC_CATCHING_UP`. This prevents ordinary concurrent-write drift from being reported as a final validation mismatch or success.
 
 This is not yet vendor-specific historical snapshot validation at an exact GTID/LSN; nonstop-write workloads may retry until a stable window is available.
 

@@ -1,47 +1,47 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: qmigration
+  name: dts
 ---
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: qmigration-config
-  namespace: qmigration
+  name: dts-config
+  namespace: dts
 data:
-  QMIGRATION_REPOSITORY: postgres
-  QMIGRATION_PRODUCTION: "true"
-  QMIGRATION_METADATA_HOST: postgres.qmigration.svc
-  QMIGRATION_METADATA_PORT: "5432"
-  QMIGRATION_METADATA_USER: qmigration
-  QMIGRATION_METADATA_DATABASE: qmigration
-  QMIGRATION_AUTH_REQUIRED: "true"
-  # The offline installer overrides this value when QMIGRATION_CORS_ORIGIN is set.
-  QMIGRATION_CORS_ORIGIN: http://127.0.0.1:8088
-  QMIGRATION_DB_PRESSURE_SAMPLE_SECONDS: "5"
-  QMIGRATION_WORKER_MAX_CPU_PCT: "95"
-  QMIGRATION_WORKER_MAX_MEMORY_PCT: "95"
-  QMIGRATION_CDC_SPOOL_STORAGE: file
-  QMIGRATION_CDC_SPOOL_DIR: /var/lib/qmigration/cdc-spool
-  QMIGRATION_CDC_SPOOL_DISK_WARN_PCT: "80"
-  QMIGRATION_CDC_SPOOL_DISK_CRITICAL_PCT: "90"
-  QMIGRATION_VALIDATION_STABLE_WINDOW_SECONDS: "2"
+  DTS_REPOSITORY: postgres
+  DTS_PRODUCTION: "true"
+  DTS_METADATA_HOST: postgres.dts.svc
+  DTS_METADATA_PORT: "5432"
+  DTS_METADATA_USER: dts
+  DTS_METADATA_DATABASE: dts
+  DTS_AUTH_REQUIRED: "true"
+  # The offline installer overrides this value when DTS_CORS_ORIGIN is set.
+  DTS_CORS_ORIGIN: http://127.0.0.1:8088
+  DTS_DB_PRESSURE_SAMPLE_SECONDS: "5"
+  DTS_WORKER_MAX_CPU_PCT: "95"
+  DTS_WORKER_MAX_MEMORY_PCT: "95"
+  DTS_CDC_SPOOL_STORAGE: file
+  DTS_CDC_SPOOL_DIR: /var/lib/dts/cdc-spool
+  DTS_CDC_SPOOL_DISK_WARN_PCT: "80"
+  DTS_CDC_SPOOL_DISK_CRITICAL_PCT: "90"
+  DTS_VALIDATION_STABLE_WINDOW_SECONDS: "2"
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: server
-  namespace: qmigration
+  namespace: dts
 spec:
   replicas: 2
   strategy:
     type: RollingUpdate
     rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
   selector:
-    matchLabels: {app: qmigration-server}
+    matchLabels: {app: dts-server}
   template:
     metadata:
-      labels: {app: qmigration-server}
+      labels: {app: dts-server}
     spec:
       terminationGracePeriodSeconds: 30
       automountServiceAccountToken: false
@@ -56,7 +56,7 @@ spec:
         topologyKey: kubernetes.io/hostname
         whenUnsatisfiable: ScheduleAnyway
         labelSelector:
-          matchLabels: {app: qmigration-server}
+          matchLabels: {app: dts-server}
       affinity:
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
@@ -64,23 +64,23 @@ spec:
             podAffinityTerm:
               topologyKey: kubernetes.io/hostname
               labelSelector:
-                matchLabels: {app: qmigration-server}
+                matchLabels: {app: dts-server}
       containers:
       - name: server
-        image: qmigration/server:0.15.0-rc49
+        image: dts/server:0.15.0-rc49
         imagePullPolicy: Never
-        envFrom: [{configMapRef: {name: qmigration-config}}]
+        envFrom: [{configMapRef: {name: dts-config}}]
         env:
-        - name: QMIGRATION_METADATA_PASSWORD
-          valueFrom: {secretKeyRef: {name: qmigration-secrets, key: metadata-password}}
-        - name: QMIGRATION_MASTER_KEY
-          valueFrom: {secretKeyRef: {name: qmigration-secrets, key: master-key}}
-        - name: QMIGRATION_WORKER_TOKEN
-          valueFrom: {secretKeyRef: {name: qmigration-secrets, key: worker-token}}
-        - name: QMIGRATION_AUTH_SECRET
-          valueFrom: {secretKeyRef: {name: qmigration-secrets, key: auth-secret}}
-        - name: QMIGRATION_BOOTSTRAP_ADMIN_PASSWORD
-          valueFrom: {secretKeyRef: {name: qmigration-secrets, key: bootstrap-admin-password}}
+        - name: DTS_METADATA_PASSWORD
+          valueFrom: {secretKeyRef: {name: dts-secrets, key: metadata-password}}
+        - name: DTS_MASTER_KEY
+          valueFrom: {secretKeyRef: {name: dts-secrets, key: master-key}}
+        - name: DTS_WORKER_TOKEN
+          valueFrom: {secretKeyRef: {name: dts-secrets, key: worker-token}}
+        - name: DTS_AUTH_SECRET
+          valueFrom: {secretKeyRef: {name: dts-secrets, key: auth-secret}}
+        - name: DTS_BOOTSTRAP_ADMIN_PASSWORD
+          valueFrom: {secretKeyRef: {name: dts-secrets, key: bootstrap-admin-password}}
         ports: [{containerPort: 8080, name: http}]
         readinessProbe: {httpGet: {path: /readyz, port: http}, initialDelaySeconds: 3, periodSeconds: 5}
         livenessProbe: {httpGet: {path: /healthz, port: http}, initialDelaySeconds: 15, periodSeconds: 10}
@@ -92,11 +92,11 @@ spec:
           readOnlyRootFilesystem: true
           capabilities: {drop: ["ALL"]}
         volumeMounts:
-        - {name: cdc-spool, mountPath: /var/lib/qmigration/cdc-spool}
+        - {name: cdc-spool, mountPath: /var/lib/dts/cdc-spool}
         - {name: tmp, mountPath: /tmp}
       volumes:
       - name: cdc-spool
-        persistentVolumeClaim: {claimName: qmigration-cdc-spool}
+        persistentVolumeClaim: {claimName: dts-cdc-spool}
       - name: tmp
         emptyDir: {}
 ---
@@ -104,36 +104,36 @@ apiVersion: v1
 kind: Service
 metadata:
   name: server
-  namespace: qmigration
+  namespace: dts
 spec:
-  selector: {app: qmigration-server}
+  selector: {app: dts-server}
   ports: [{port: 8080, targetPort: http}]
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
   name: server
-  namespace: qmigration
+  namespace: dts
 spec:
   minAvailable: 1
   selector:
-    matchLabels: {app: qmigration-server}
+    matchLabels: {app: dts-server}
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: worker
-  namespace: qmigration
+  namespace: dts
 spec:
   replicas: 3
   strategy:
     type: RollingUpdate
     rollingUpdate: {maxUnavailable: 1, maxSurge: 1}
   selector:
-    matchLabels: {app: qmigration-worker}
+    matchLabels: {app: dts-worker}
   template:
     metadata:
-      labels: {app: qmigration-worker}
+      labels: {app: dts-worker}
     spec:
       terminationGracePeriodSeconds: 45
       automountServiceAccountToken: false
@@ -147,7 +147,7 @@ spec:
         topologyKey: kubernetes.io/hostname
         whenUnsatisfiable: ScheduleAnyway
         labelSelector:
-          matchLabels: {app: qmigration-worker}
+          matchLabels: {app: dts-worker}
       affinity:
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
@@ -155,19 +155,19 @@ spec:
             podAffinityTerm:
               topologyKey: kubernetes.io/hostname
               labelSelector:
-                matchLabels: {app: qmigration-worker}
+                matchLabels: {app: dts-worker}
       containers:
       - name: worker
-        image: qmigration/server:0.15.0-rc49
+        image: dts/server:0.15.0-rc49
         imagePullPolicy: Never
-        command: ["/usr/local/bin/qmigration-worker"]
+        command: ["/usr/local/bin/dts-worker"]
         env:
-        - {name: QMIGRATION_SERVER, value: "http://server.qmigration.svc:8080"}
-        - {name: QMIGRATION_WORKER_CONCURRENCY, value: "4"}
-        - {name: QMIGRATION_WORKER_SHUTDOWN_GRACE_SECONDS, value: "30"}
-        - {name: QMIGRATION_WORKER_LABELS, value: "network=kubernetes"}
-        - name: QMIGRATION_WORKER_TOKEN
-          valueFrom: {secretKeyRef: {name: qmigration-secrets, key: worker-token}}
+        - {name: DTS_SERVER, value: "http://server.dts.svc:8080"}
+        - {name: DTS_WORKER_CONCURRENCY, value: "4"}
+        - {name: DTS_WORKER_SHUTDOWN_GRACE_SECONDS, value: "30"}
+        - {name: DTS_WORKER_LABELS, value: "network=kubernetes"}
+        - name: DTS_WORKER_TOKEN
+          valueFrom: {secretKeyRef: {name: dts-secrets, key: worker-token}}
         resources:
           requests: {cpu: "1", memory: "1Gi"}
           limits: {cpu: "4", memory: "4Gi"}
@@ -185,17 +185,17 @@ apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
   name: worker
-  namespace: qmigration
+  namespace: dts
 spec:
   minAvailable: 2
   selector:
-    matchLabels: {app: qmigration-worker}
+    matchLabels: {app: dts-worker}
 ---
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
   name: worker
-  namespace: qmigration
+  namespace: dts
 spec:
   scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: worker}
   minReplicas: 3
@@ -213,17 +213,17 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: web
-  namespace: qmigration
+  namespace: dts
 spec:
   replicas: 2
   strategy:
     type: RollingUpdate
     rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
   selector:
-    matchLabels: {app: qmigration-web}
+    matchLabels: {app: dts-web}
   template:
     metadata:
-      labels: {app: qmigration-web}
+      labels: {app: dts-web}
     spec:
       automountServiceAccountToken: false
       securityContext:
@@ -236,7 +236,7 @@ spec:
         topologyKey: kubernetes.io/hostname
         whenUnsatisfiable: ScheduleAnyway
         labelSelector:
-          matchLabels: {app: qmigration-web}
+          matchLabels: {app: dts-web}
       affinity:
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
@@ -244,10 +244,10 @@ spec:
             podAffinityTerm:
               topologyKey: kubernetes.io/hostname
               labelSelector:
-                matchLabels: {app: qmigration-web}
+                matchLabels: {app: dts-web}
       containers:
       - name: web
-        image: qmigration/web:0.15.0-rc49
+        image: dts/web:0.15.0-rc49
         imagePullPolicy: Never
         ports: [{containerPort: 8080, name: http}]
         readinessProbe: {httpGet: {path: /, port: http}, initialDelaySeconds: 3, periodSeconds: 10}
@@ -268,17 +268,17 @@ apiVersion: v1
 kind: Service
 metadata:
   name: web
-  namespace: qmigration
+  namespace: dts
 spec:
-  selector: {app: qmigration-web}
+  selector: {app: dts-web}
   ports: [{port: 80, targetPort: http}]
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
   name: web
-  namespace: qmigration
+  namespace: dts
 spec:
   minAvailable: 1
   selector:
-    matchLabels: {app: qmigration-web}
+    matchLabels: {app: dts-web}

@@ -3,18 +3,18 @@ package gbaseconnector
 import (
 	"testing"
 
-	"qmigration/backend/internal/connector"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/connector"
+	"dts/backend/internal/domain"
 )
 
 func TestCapabilitiesAreQualificationGated(t *testing.T) {
 	f := NewFactory()
-	t.Setenv("QMIGRATION_EXPERIMENTAL_GBASE8A_NATIVE", "")
+	t.Setenv("DTS_EXPERIMENTAL_GBASE8A_NATIVE", "")
 	d := f.Capabilities(domain.DataSourceGBase)
 	if !d.Has(connector.CapabilityProtocolProbe) || d.Has(connector.CapabilityFullRead) {
 		t.Fatalf("default GBase descriptor must be probe-only: %+v", d)
 	}
-	t.Setenv("QMIGRATION_EXPERIMENTAL_GBASE8A_NATIVE", "1")
+	t.Setenv("DTS_EXPERIMENTAL_GBASE8A_NATIVE", "1")
 	d = f.Capabilities(domain.DataSourceGBase)
 	for _, cap := range []connector.Capability{
 		connector.CapabilityMetadata,
@@ -52,8 +52,8 @@ func TestGBaseIsNoLongerExternalJDBC(t *testing.T) {
 
 func TestGBaseTargetCDCApplyGateIsNonTransactional(t *testing.T) {
 	f := NewFactory()
-	t.Setenv("QMIGRATION_EXPERIMENTAL_GBASE8A_NATIVE", "1")
-	t.Setenv("QMIGRATION_EXPERIMENTAL_GBASE8A_TARGET_CDC", "1")
+	t.Setenv("DTS_EXPERIMENTAL_GBASE8A_NATIVE", "1")
+	t.Setenv("DTS_EXPERIMENTAL_GBASE8A_TARGET_CDC", "1")
 	d := f.Capabilities(domain.DataSourceGBase)
 	if !d.Has(connector.CapabilityCDCApply) || !d.Has(connector.CapabilityPointLookup) {
 		t.Fatalf("GBase target CDC capabilities missing: %+v", d)

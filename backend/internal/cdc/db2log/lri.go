@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// LRI is the normalized durable Db2 Log Record Identifier used by QMigration.
+// LRI is the normalized durable Db2 Log Record Identifier used by DTS.
 // IBM's native db2ReadLog provider serializes the opaque LRI components as
 // unsigned hexadecimal values so the Worker never depends on C struct packing.
 type LRI struct {

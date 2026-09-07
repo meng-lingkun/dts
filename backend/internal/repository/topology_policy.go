@@ -2,8 +2,8 @@ package repository
 
 import (
 	"os"
-	"qmigration/backend/internal/domain"
-	"qmigration/backend/internal/perfmodel"
+	"dts/backend/internal/domain"
+	"dts/backend/internal/perfmodel"
 	"strconv"
 	"strings"
 )
@@ -22,11 +22,11 @@ func positiveEnvInt(name string, fallback int) int {
 
 // TopologyHealthyMaxConcurrency returns 0 for unlimited healthy-topology concurrency.
 func TopologyHealthyMaxConcurrency() int {
-	return positiveEnvInt("QMIGRATION_TOPOLOGY_HEALTHY_MAX_CONCURRENCY", 0)
+	return positiveEnvInt("DTS_TOPOLOGY_HEALTHY_MAX_CONCURRENCY", 0)
 }
 
 func TopologyDegradedMaxConcurrency() int {
-	n := positiveEnvInt("QMIGRATION_TOPOLOGY_DEGRADED_MAX_CONCURRENCY", 1)
+	n := positiveEnvInt("DTS_TOPOLOGY_DEGRADED_MAX_CONCURRENCY", 1)
 	if n <= 0 {
 		return 1
 	}
@@ -39,7 +39,7 @@ func TopologyRecoveryMaxConcurrency() int {
 	if healthy > 0 {
 		fallback = healthy
 	}
-	n := positiveEnvInt("QMIGRATION_TOPOLOGY_RECOVERY_MAX_CONCURRENCY", fallback)
+	n := positiveEnvInt("DTS_TOPOLOGY_RECOVERY_MAX_CONCURRENCY", fallback)
 	base := TopologyDegradedMaxConcurrency()
 	if n < base {
 		n = base
@@ -100,11 +100,11 @@ func envDefaultOn(name string) bool {
 }
 
 func FaultDomainProtectionEnabled() bool {
-	return envDefaultOn("QMIGRATION_TOPOLOGY_FAULT_DOMAIN_PROTECTION")
+	return envDefaultOn("DTS_TOPOLOGY_FAULT_DOMAIN_PROTECTION")
 }
 
 func FaultDomainDegradedMaxConcurrency() int {
-	n := positiveEnvInt("QMIGRATION_TOPOLOGY_FAULT_DOMAIN_DEGRADED_MAX_CONCURRENCY", 2)
+	n := positiveEnvInt("DTS_TOPOLOGY_FAULT_DOMAIN_DEGRADED_MAX_CONCURRENCY", 2)
 	if n <= 0 {
 		return 1
 	}
@@ -112,7 +112,7 @@ func FaultDomainDegradedMaxConcurrency() int {
 }
 
 func FaultDomainCriticalMaxConcurrency() int {
-	n := positiveEnvInt("QMIGRATION_TOPOLOGY_FAULT_DOMAIN_CRITICAL_MAX_CONCURRENCY", 1)
+	n := positiveEnvInt("DTS_TOPOLOGY_FAULT_DOMAIN_CRITICAL_MAX_CONCURRENCY", 1)
 	if n <= 0 {
 		return 1
 	}
@@ -120,7 +120,7 @@ func FaultDomainCriticalMaxConcurrency() int {
 }
 
 func FaultDomainRegionMinUnhealthyZones() int {
-	n := positiveEnvInt("QMIGRATION_TOPOLOGY_FAULT_DOMAIN_REGION_MIN_UNHEALTHY_ZONES", 2)
+	n := positiveEnvInt("DTS_TOPOLOGY_FAULT_DOMAIN_REGION_MIN_UNHEALTHY_ZONES", 2)
 	if n < 2 {
 		return 2
 	}

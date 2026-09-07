@@ -55,7 +55,7 @@ func VerifyPassword(encoded, password string) bool {
 }
 
 // pbkdf2SHA256 is a compact RFC 8018 PBKDF2 implementation kept in the
-// standard library so QMigration remains buildable in offline environments.
+// standard library so DTS remains buildable in offline environments.
 func pbkdf2SHA256(password, salt []byte, iterations, keyLen int) []byte {
 	hLen := sha256.Size
 	blocks := (keyLen + hLen - 1) / hLen

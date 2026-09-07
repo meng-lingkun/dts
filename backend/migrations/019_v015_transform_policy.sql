@@ -1,4 +1,4 @@
--- QMigration V0.15.0-unified-dev3
+-- DTS V0.15.0-unified-dev3
 -- Durable task-scoped Transform Policy DSL.
 ALTER TABLE migration_tasks
   ADD COLUMN IF NOT EXISTS transform_rules_json jsonb NOT NULL DEFAULT '[]'::jsonb;

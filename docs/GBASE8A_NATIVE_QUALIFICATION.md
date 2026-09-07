@@ -3,7 +3,7 @@
 RC18 exposes the GBase 8a Full data plane only behind:
 
 ```bash
-export QMIGRATION_EXPERIMENTAL_GBASE8A_NATIVE=1
+export DTS_EXPERIMENTAL_GBASE8A_NATIVE=1
 ```
 
 This document applies to **GBase 8a MPP Cluster only**. Do not use an RC18
@@ -14,7 +14,7 @@ qualification result to claim GBase 8s or GBase 8c support.
 ```bash
 export GBASE_HOST=10.0.0.10
 export GBASE_PORT=5258
-export GBASE_USER=qmigration
+export GBASE_USER=dts
 export GBASE_PASSWORD='***'
 export GBASE_DATABASE=app
 export GBASE_TABLE=orders
@@ -83,4 +83,4 @@ Retain JSON reports and operational notes for every supported deployment family:
 - no implicit AUTO_INCREMENT runtime-state restoration is performed;
 - no GBase 8s / GBase 8c compatibility claim is made.
 
-For production migration, pre-create the target table when a workload-specific HASH layout is required. RC18 validates the real target with `SHOW CREATE TABLE`; every HASH distribution column must also be part of QMigration's stable migration key. Random and REPLICATED targets are rejected for retryable MERGE Full Write because the GBase MERGE path requires HASH distribution.
+For production migration, pre-create the target table when a workload-specific HASH layout is required. RC18 validates the real target with `SHOW CREATE TABLE`; every HASH distribution column must also be part of DTS's stable migration key. Random and REPLICATED targets are rejected for retryable MERGE Full Write because the GBase MERGE path requires HASH distribution.

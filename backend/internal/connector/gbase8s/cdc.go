@@ -8,25 +8,25 @@ import (
 	"strconv"
 	"strings"
 
-	"qmigration/backend/internal/cdc/gbase8scdc"
-	"qmigration/backend/internal/connector"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/cdc/gbase8scdc"
+	"dts/backend/internal/connector"
+	"dts/backend/internal/domain"
 )
 
-func experimentalCDCEnabled() bool { return envOn("QMIGRATION_EXPERIMENTAL_GBASE8S_CDC") }
+func experimentalCDCEnabled() bool { return envOn("DTS_EXPERIMENTAL_GBASE8S_CDC") }
 func experimentalSmartLOBCDCEnabled() bool {
-	return envOn("QMIGRATION_EXPERIMENTAL_GBASE8S_SMART_LOB_CDC")
+	return envOn("DTS_EXPERIMENTAL_GBASE8S_SMART_LOB_CDC")
 }
 
 func (c *Connector) cdcAgent() (*gbase8scdc.Client, error) {
 	if !experimentalEnabled() || !experimentalCDCEnabled() {
-		return nil, errors.New("GBase 8s source CDC requires QMIGRATION_EXPERIMENTAL_GBASE8S_NATIVE=1 and QMIGRATION_EXPERIMENTAL_GBASE8S_CDC=1")
+		return nil, errors.New("GBase 8s source CDC requires DTS_EXPERIMENTAL_GBASE8S_NATIVE=1 and DTS_EXPERIMENTAL_GBASE8S_CDC=1")
 	}
 	raw := strings.TrimSpace(c.ds.CDCURL)
 	if raw == "" {
 		return nil, errors.New("GBase 8s source CDC requires datasource cdc_url pointing at a local CSDK CDC provider")
 	}
-	return gbase8scdc.NewClient(raw, os.Getenv("QMIGRATION_GBASE8S_CDC_CA_PEM"), os.Getenv("QMIGRATION_GBASE8S_CDC_SERVER_NAME"), os.Getenv("QMIGRATION_GBASE8S_CDC_TOKEN"))
+	return gbase8scdc.NewClient(raw, os.Getenv("DTS_GBASE8S_CDC_CA_PEM"), os.Getenv("DTS_GBASE8S_CDC_SERVER_NAME"), os.Getenv("DTS_GBASE8S_CDC_TOKEN"))
 }
 
 func smartLOBCDCType(col domain.ColumnInfo) bool {
@@ -77,7 +77,7 @@ func (c *Connector) cdcSelections(ctx context.Context, mappings []domain.TableMa
 				return nil, fmt.Errorf("GBase 8s CDC does not qualify simple-LOB/complex column %s.%s.%s (%s)", schema, table, col.Name, col.ColumnType)
 			}
 			if smartLOBCDCType(col) && !experimentalSmartLOBCDCEnabled() {
-				return nil, fmt.Errorf("GBase 8s smart BLOB/CLOB CDC for %s.%s.%s requires QMIGRATION_EXPERIMENTAL_GBASE8S_SMART_LOB_CDC=1 and an event-owned provider image contract", schema, table, col.Name)
+				return nil, fmt.Errorf("GBase 8s smart BLOB/CLOB CDC for %s.%s.%s requires DTS_EXPERIMENTAL_GBASE8S_SMART_LOB_CDC=1 and an event-owned provider image contract", schema, table, col.Name)
 			}
 		}
 		sel, err := gbase8scdc.BuildTableSelection(schema, table, md.Columns, md.PrimaryKeys)

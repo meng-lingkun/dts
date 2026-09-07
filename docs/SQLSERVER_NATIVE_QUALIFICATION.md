@@ -1,14 +1,14 @@
 # SQL Server Native Qualification
 
-QMigration V0.15.0-rc2 contains an experimental native SQL Server software data
+DTS V0.15.0-rc2 contains an experimental native SQL Server software data
 plane. The experimental gate is removed only after the exact server/deployment
 class has a retained qualification report.
 
 ## Gates
 
 ```bash
-export QMIGRATION_EXPERIMENTAL_SQLSERVER_NATIVE=1
-export QMIGRATION_EXPERIMENTAL_SQLSERVER_CDC=1   # only when source CDC is required
+export DTS_EXPERIMENTAL_SQLSERVER_NATIVE=1
+export DTS_EXPERIMENTAL_SQLSERVER_CDC=1   # only when source CDC is required
 ```
 
 ## One-command qualification
@@ -18,7 +18,7 @@ Read-only by default:
 ```bash
 SQLSERVER_HOST=sqlserver.example.internal \
 SQLSERVER_DATABASE=app \
-SQLSERVER_USER=qmigration \
+SQLSERVER_USER=dts \
 SQLSERVER_PASSWORD='***' \
   deployments/scripts/qualify-sqlserver.sh
 ```
@@ -67,7 +67,7 @@ The qualifier covers:
 ## Server matrix
 
 Run source-only, CDC and target-write scopes as applicable across the SQL Server
-versions QMigration intends to claim. Record:
+versions DTS intends to claim. Record:
 
 - exact product version / edition;
 - database compatibility level;

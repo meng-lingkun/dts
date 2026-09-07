@@ -169,16 +169,16 @@ func (o *observedAgent) PrometheusMetrics() string {
 		healthy = 0
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "# HELP qmigration_gbase8s_cdc_agent_up Agent/provider health state.\n# TYPE qmigration_gbase8s_cdc_agent_up gauge\nqmigration_gbase8s_cdc_agent_up %d\n", healthy)
-	fmt.Fprintf(&b, "# HELP qmigration_gbase8s_cdc_agent_busy Whether a provider call is active.\n# TYPE qmigration_gbase8s_cdc_agent_busy gauge\nqmigration_gbase8s_cdc_agent_busy %d\n", busy)
-	fmt.Fprintf(&b, "# TYPE qmigration_gbase8s_cdc_health_calls_total counter\nqmigration_gbase8s_cdc_health_calls_total %d\n", s.HealthCalls)
-	fmt.Fprintf(&b, "# TYPE qmigration_gbase8s_cdc_health_errors_total counter\nqmigration_gbase8s_cdc_health_errors_total %d\n", s.HealthErrors)
-	fmt.Fprintf(&b, "# TYPE qmigration_gbase8s_cdc_checkpoint_calls_total counter\nqmigration_gbase8s_cdc_checkpoint_calls_total %d\n", s.CheckpointCalls)
-	fmt.Fprintf(&b, "# TYPE qmigration_gbase8s_cdc_checkpoint_errors_total counter\nqmigration_gbase8s_cdc_checkpoint_errors_total %d\n", s.CheckpointErrors)
-	fmt.Fprintf(&b, "# TYPE qmigration_gbase8s_cdc_read_calls_total counter\nqmigration_gbase8s_cdc_read_calls_total %d\n", s.ReadCalls)
-	fmt.Fprintf(&b, "# TYPE qmigration_gbase8s_cdc_read_errors_total counter\nqmigration_gbase8s_cdc_read_errors_total %d\n", s.ReadErrors)
-	fmt.Fprintf(&b, "# TYPE qmigration_gbase8s_cdc_records_returned_total counter\nqmigration_gbase8s_cdc_records_returned_total %d\n", s.RecordsReturned)
-	fmt.Fprintf(&b, "# TYPE qmigration_gbase8s_cdc_bytes_returned_total counter\nqmigration_gbase8s_cdc_bytes_returned_total %d\n", s.BytesReturned)
-	fmt.Fprintf(&b, "# TYPE qmigration_gbase8s_cdc_last_operation_duration_milliseconds gauge\nqmigration_gbase8s_cdc_last_operation_duration_milliseconds %d\n", s.LastOperationDurationMS)
+	fmt.Fprintf(&b, "# HELP dts_gbase8s_cdc_agent_up Agent/provider health state.\n# TYPE dts_gbase8s_cdc_agent_up gauge\ndts_gbase8s_cdc_agent_up %d\n", healthy)
+	fmt.Fprintf(&b, "# HELP dts_gbase8s_cdc_agent_busy Whether a provider call is active.\n# TYPE dts_gbase8s_cdc_agent_busy gauge\ndts_gbase8s_cdc_agent_busy %d\n", busy)
+	fmt.Fprintf(&b, "# TYPE dts_gbase8s_cdc_health_calls_total counter\ndts_gbase8s_cdc_health_calls_total %d\n", s.HealthCalls)
+	fmt.Fprintf(&b, "# TYPE dts_gbase8s_cdc_health_errors_total counter\ndts_gbase8s_cdc_health_errors_total %d\n", s.HealthErrors)
+	fmt.Fprintf(&b, "# TYPE dts_gbase8s_cdc_checkpoint_calls_total counter\ndts_gbase8s_cdc_checkpoint_calls_total %d\n", s.CheckpointCalls)
+	fmt.Fprintf(&b, "# TYPE dts_gbase8s_cdc_checkpoint_errors_total counter\ndts_gbase8s_cdc_checkpoint_errors_total %d\n", s.CheckpointErrors)
+	fmt.Fprintf(&b, "# TYPE dts_gbase8s_cdc_read_calls_total counter\ndts_gbase8s_cdc_read_calls_total %d\n", s.ReadCalls)
+	fmt.Fprintf(&b, "# TYPE dts_gbase8s_cdc_read_errors_total counter\ndts_gbase8s_cdc_read_errors_total %d\n", s.ReadErrors)
+	fmt.Fprintf(&b, "# TYPE dts_gbase8s_cdc_records_returned_total counter\ndts_gbase8s_cdc_records_returned_total %d\n", s.RecordsReturned)
+	fmt.Fprintf(&b, "# TYPE dts_gbase8s_cdc_bytes_returned_total counter\ndts_gbase8s_cdc_bytes_returned_total %d\n", s.BytesReturned)
+	fmt.Fprintf(&b, "# TYPE dts_gbase8s_cdc_last_operation_duration_milliseconds gauge\ndts_gbase8s_cdc_last_operation_duration_milliseconds %d\n", s.LastOperationDurationMS)
 	return b.String()
 }

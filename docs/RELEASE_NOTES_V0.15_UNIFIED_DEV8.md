@@ -1,11 +1,11 @@
-# QMigration V0.15.0-unified-dev8 Release Notes
+# DTS V0.15.0-unified-dev8 Release Notes
 
 ## Native S3-compatible encrypted CDC spool
 
-- Added `QMIGRATION_CDC_SPOOL_STORAGE=s3` without AWS SDK or third-party migration runtimes.
-- QMigration implements AWS Signature V4 for S3-compatible PUT/GET/COPY/DELETE/HEAD/ListObjectsV2 operations.
+- Added `DTS_CDC_SPOOL_STORAGE=s3` without AWS SDK or third-party migration runtimes.
+- DTS implements AWS Signature V4 for S3-compatible PUT/GET/COPY/DELETE/HEAD/ListObjectsV2 operations.
 - Supports AWS-style session tokens, path-style endpoints, MinIO/Ceph RGW/S3-compatible services, custom CA, TLS ServerName and optional mTLS.
-- CDC payload remains gzip + AES-256-GCM encrypted by QMigration before object upload; object storage never receives plaintext row images.
+- CDC payload remains gzip + AES-256-GCM encrypted by DTS before object upload; object storage never receives plaintext row images.
 - Metadata keeps the durable transaction sequence/source position/status and an opaque object reference.
 - Target commit + Metadata APPLIED remains the correctness boundary; pending objects are moved to date/hash-sharded applied storage only after that boundary.
 - Added applied-object retention GC and crash orphan reconciliation.

@@ -1,4 +1,4 @@
-module qmigration/offline-image-builder
+module dts/offline-image-builder
 
 go 1.24
 

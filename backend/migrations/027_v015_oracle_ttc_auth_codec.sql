@@ -1,4 +1,4 @@
--- V0.15 unified-dev11 adds the QMigration-owned Oracle TTC protocol/datatype
+-- V0.15 unified-dev11 adds the DTS-owned Oracle TTC protocol/datatype
 -- negotiation and password-authentication wire codecs behind explicit deep-
 -- probe gates.  Oracle SQL execution, metadata/full-load and Redo CDC remain
 -- capability-gated until qualification against a real Oracle database.

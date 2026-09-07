@@ -13,16 +13,16 @@ import (
 	"log"
 	"math/big"
 	"os"
-	"qmigration/backend/internal/connector"
-	"qmigration/backend/internal/domain"
-	"qmigration/backend/internal/engine"
-	"qmigration/backend/internal/faultinject"
-	"qmigration/backend/internal/perfmodel"
-	"qmigration/backend/internal/repository"
-	schemapkg "qmigration/backend/internal/schema"
-	"qmigration/backend/internal/schematranslate"
-	"qmigration/backend/internal/transform"
-	validationpkg "qmigration/backend/internal/validation"
+	"dts/backend/internal/connector"
+	"dts/backend/internal/domain"
+	"dts/backend/internal/engine"
+	"dts/backend/internal/faultinject"
+	"dts/backend/internal/perfmodel"
+	"dts/backend/internal/repository"
+	schemapkg "dts/backend/internal/schema"
+	"dts/backend/internal/schematranslate"
+	"dts/backend/internal/transform"
+	validationpkg "dts/backend/internal/validation"
 	"sort"
 	"strconv"
 	"strings"
@@ -59,7 +59,7 @@ func newID(prefix string) string {
 	return prefix + "_" + hex.EncodeToString(b)
 }
 
-const unifiedEngineName = "qmigration"
+const unifiedEngineName = "dts"
 
 const (
 	controlOperationPrepare    = "prepare"
@@ -67,7 +67,7 @@ const (
 )
 
 func controlOperationLeaseTTL() time.Duration {
-	ttl := time.Duration(envInt64("QMIGRATION_CONTROL_OPERATION_LEASE_SECONDS", 120)) * time.Second
+	ttl := time.Duration(envInt64("DTS_CONTROL_OPERATION_LEASE_SECONDS", 120)) * time.Second
 	if ttl < 30*time.Second {
 		return 30 * time.Second
 	}
@@ -225,7 +225,7 @@ func (s *Service) StartRecoveryLoop(ctx context.Context) {
 		}
 	}
 	reconcile()
-	interval := time.Duration(envInt64("QMIGRATION_CONTROL_RECOVERY_INTERVAL_SECONDS", 30)) * time.Second
+	interval := time.Duration(envInt64("DTS_CONTROL_RECOVERY_INTERVAL_SECONDS", 30)) * time.Second
 	if interval < 10*time.Second {
 		interval = 10 * time.Second
 	}
@@ -260,7 +260,7 @@ func (s *Service) Create(ctx context.Context, m *domain.MigrationTask) error {
 	m.Status = domain.StatusCreated
 	m.CreatedAt = now
 	m.UpdatedAt = now
-	// Engine selection is intentionally not user-configurable anymore. QMigration
+	// Engine selection is intentionally not user-configurable anymore. DTS
 	// is the engine; source protocol and table strategy are selected internally.
 	m.FullEngine = unifiedEngineName
 	if m.Mode == domain.ModeFullAndIncremental || m.Mode == domain.ModeIncremental {
@@ -450,7 +450,7 @@ func (s *Service) Start(ctx context.Context, id string) error {
 			_ = leaser.ReleaseControlOperation(releaseCtx, id, controlOperationPrepare, s.instanceID)
 		}
 	}()
-	// The execution engine is fixed to QMigration. Protocol/table strategy is
+	// The execution engine is fixed to DTS. Protocol/table strategy is
 	// selected internally and is never delegated to a third-party runtime.
 	m.FullEngine = unifiedEngineName
 	if m.Mode != domain.ModeFull {
@@ -632,7 +632,7 @@ func (s *Service) requireCDCPair(source, target domain.DataSource) error {
 
 func (s *Service) chooseTableFullEngine(_ *domain.MigrationTask, source, target domain.DataSource, _ *domain.TableMetadata) (string, error) {
 	if err := s.requireFullPair(source, target); err != nil {
-		return "", fmt.Errorf("QMigration Unified Engine cannot execute full load %s -> %s: %w", source.Type, target.Type, err)
+		return "", fmt.Errorf("DTS Unified Engine cannot execute full load %s -> %s: %w", source.Type, target.Type, err)
 	}
 	return unifiedEngineName, nil
 }
@@ -749,10 +749,10 @@ func (s *Service) prepareTask(ctx context.Context, id string) error {
 		if inspector, ok := src.(connector.MigrationPrecheckConnector); ok {
 			for _, item := range inspector.MigrationPrechecks(ctx, true) {
 				if item.Level == domain.PrecheckFailed {
-					return fmt.Errorf("QMigration MySQL CDC precheck %s failed: %s", item.Name, item.Message)
+					return fmt.Errorf("DTS MySQL CDC precheck %s failed: %s", item.Name, item.Message)
 				}
 				if item.Name == "mysql_binlog_row_image" && item.Level != domain.PrecheckPass {
-					return fmt.Errorf("QMigration MySQL CDC requires binlog_row_image=FULL: %s", item.Message)
+					return fmt.Errorf("DTS MySQL CDC requires binlog_row_image=FULL: %s", item.Message)
 				}
 			}
 		}
@@ -777,10 +777,10 @@ func (s *Service) prepareTask(ctx context.Context, id string) error {
 		} else if mysqlSource, ok := src.(connector.MySQLBinlogSource); ok && sourceDS.Type.IsMySQLFamily() && sourceDS.Type != domain.DataSourceTiDB && sourceDS.Type != domain.DataSourceOceanBase {
 			pos, err = mysqlSource.CurrentCDCPosition(ctx)
 			if err != nil {
-				return fmt.Errorf("capture QMigration MySQL CDC start position: %w", err)
+				return fmt.Errorf("capture DTS MySQL CDC start position: %w", err)
 			}
 		} else if checkpoint, ok := src.(connector.CDCCheckpointSource); ok && sourceDS.Type.IsPostgreSQLFamily() {
-			slot := strings.ToLower(strings.ReplaceAll("qmigration_"+m.ID, "-", "_"))
+			slot := strings.ToLower(strings.ReplaceAll("dts_"+m.ID, "-", "_"))
 			if len(slot) > 63 {
 				slot = slot[:63]
 			}
@@ -794,7 +794,7 @@ func (s *Service) prepareTask(ctx context.Context, id string) error {
 				return fmt.Errorf("capture CDC start position: %w", err)
 			}
 		} else {
-			return fmt.Errorf("source connector %s does not implement the QMigration CDC source contract", sourceDS.Type)
+			return fmt.Errorf("source connector %s does not implement the DTS CDC source contract", sourceDS.Type)
 		}
 		pos.ID = newID("cdc")
 		pos.TaskID = id
@@ -843,7 +843,7 @@ func (s *Service) prepareTask(ctx context.Context, id string) error {
 		}
 		meta, err := src.GetTableMetadata(ctx, mapping.SourceSchema, mapping.SourceTable)
 		if err != nil && errors.Is(err, connector.ErrMetadataUnavailable) {
-			return fmt.Errorf("QMigration connector for %s does not expose table metadata; QMigration requires a native connector implementation", sourceDS.Type)
+			return fmt.Errorf("DTS connector for %s does not expose table metadata; DTS requires a native connector implementation", sourceDS.Type)
 		}
 		if err != nil {
 			return fmt.Errorf("read metadata %s.%s: %w", mapping.SourceSchema, mapping.SourceTable, err)
@@ -926,7 +926,7 @@ func (s *Service) prepareTask(ctx context.Context, id string) error {
 			}
 			idx := domain.IndexInfo{Name: migrationUniqueIndex.Name, Columns: append([]string(nil), targetPKs...), Unique: true}
 			if idx.Name == "" {
-				idx.Name = "uq_qmigration_key"
+				idx.Name = "uq_dts_key"
 			}
 			if err := ddl.CreateIndex(ctx, mapping.TargetSchema, mapping.TargetTable, idx); err != nil {
 				return fmt.Errorf("create target UNIQUE migration key %v: %w", targetPKs, err)
@@ -950,7 +950,7 @@ func (s *Service) prepareTask(ctx context.Context, id string) error {
 			return ""
 		}(), TargetPrimaryKey: targetPK, PrimaryKeyType: meta.PrimaryKeyType, Columns: sourceColumns, TargetColumns: targetColumns, Indexes: mappedIndexes, ForeignKeys: mappedFKs, EstimatedRows: meta.EstimatedRows, DataLength: meta.DataLength, MinPK: meta.MinPK, MaxPK: meta.MaxPK, SplitStrategy: normalizedSplitStrategy(mapping.SplitStrategy), CustomWhere: strings.TrimSpace(mapping.CustomWhere), HashBuckets: mapping.HashBuckets, Partitions: append([]string(nil), mapping.Partitions...), Status: "READY"}
 		plannedChunkRows := m.ChunkRows
-		if envDefaultOn("QMIGRATION_HISTORICAL_PROFILE_REUSE") {
+		if envDefaultOn("DTS_HISTORICAL_PROFILE_REUSE") {
 			if prev, e := s.repo.FindMigrationTableProfile(ctx, m.SourceID, m.TargetID, mapping.SourceSchema, mapping.SourceTable); e == nil && prev.PerformanceSamples > 0 {
 				t.ProfileBytesPerSec = prev.ProfileBytesPerSec
 				t.ProfileRowsPerSec = prev.ProfileRowsPerSec
@@ -1548,10 +1548,10 @@ func (s *Service) discoverTableTopology(ctx context.Context, src connector.Conne
 }
 
 func loadPressureLevel(name string, load domain.DatabaseRuntimeLoad) (string, string) {
-	criticalConn := floatEnv("QMIGRATION_DB_CONNECTION_CRITICAL_PCT", 90)
-	warnConn := floatEnv("QMIGRATION_DB_CONNECTION_WARN_PCT", 75)
-	criticalRunning := int64(intEnv("QMIGRATION_DB_RUNNING_QUERY_CRITICAL", 128))
-	warnRunning := int64(intEnv("QMIGRATION_DB_RUNNING_QUERY_WARN", 64))
+	criticalConn := floatEnv("DTS_DB_CONNECTION_CRITICAL_PCT", 90)
+	warnConn := floatEnv("DTS_DB_CONNECTION_WARN_PCT", 75)
+	criticalRunning := int64(intEnv("DTS_DB_RUNNING_QUERY_CRITICAL", 128))
+	warnRunning := int64(intEnv("DTS_DB_RUNNING_QUERY_WARN", 64))
 	if load.ConnectionUsagePct >= criticalConn && load.ConnectionUsagePct > 0 {
 		return "CRITICAL", fmt.Sprintf("%s connections %.1f%% >= %.1f%%", name, load.ConnectionUsagePct, criticalConn)
 	}
@@ -1604,9 +1604,9 @@ func (s *Service) sampleCDCSpoolPressure(ctx context.Context, task *domain.Migra
 		return "NORMAL", "", 0, 0, 0
 	}
 	pendingBytes = stats.PendingBytes
-	maxPending := positiveInt64Env("QMIGRATION_CDC_SPOOL_MAX_PENDING_BYTES", 64<<30)
-	warnBytes := positiveInt64Env("QMIGRATION_CDC_SPOOL_BACKLOG_WARN_BYTES", maxPending/2)
-	criticalBytes := positiveInt64Env("QMIGRATION_CDC_SPOOL_BACKLOG_CRITICAL_BYTES", maxPending*4/5)
+	maxPending := positiveInt64Env("DTS_CDC_SPOOL_MAX_PENDING_BYTES", 64<<30)
+	warnBytes := positiveInt64Env("DTS_CDC_SPOOL_BACKLOG_WARN_BYTES", maxPending/2)
+	criticalBytes := positiveInt64Env("DTS_CDC_SPOOL_BACKLOG_CRITICAL_BYTES", maxPending*4/5)
 	if warnBytes >= criticalBytes {
 		warnBytes = criticalBytes / 2
 	}
@@ -1628,8 +1628,8 @@ func (s *Service) sampleCDCSpoolPressure(ctx context.Context, task *domain.Migra
 	if growthBPS > 0 && pendingBytes < criticalBytes {
 		headroomSeconds := (criticalBytes - pendingBytes) / growthBPS
 		criticalETASeconds = headroomSeconds
-		criticalETA := int64(intEnv("QMIGRATION_CDC_SPOOL_PREDICT_CRITICAL_SECONDS", 300))
-		warnETA := int64(intEnv("QMIGRATION_CDC_SPOOL_PREDICT_WARN_SECONDS", 900))
+		criticalETA := int64(intEnv("DTS_CDC_SPOOL_PREDICT_CRITICAL_SECONDS", 300))
+		warnETA := int64(intEnv("DTS_CDC_SPOOL_PREDICT_WARN_SECONDS", 900))
 		predLevel := "NORMAL"
 		if headroomSeconds <= criticalETA {
 			predLevel = "CRITICAL"
@@ -1685,7 +1685,7 @@ func (s *Service) reconcileTaskFlowControl(ctx context.Context, task *domain.Mig
 	}
 	s.pressureMu.Lock()
 	defer s.pressureMu.Unlock()
-	interval := time.Duration(intEnv("QMIGRATION_DB_PRESSURE_SAMPLE_SECONDS", 5)) * time.Second
+	interval := time.Duration(intEnv("DTS_DB_PRESSURE_SAMPLE_SECONDS", 5)) * time.Second
 	previous := s.pressure[task.ID]
 	if !previous.At.IsZero() && time.Since(previous.At) < interval && pressureRank(observedLevel) <= pressureRank(previous.Level) {
 		return previous.Level, previous.Reason
@@ -1782,13 +1782,13 @@ func mergeTaskPressure(control domain.ChunkControl, taskLevel, taskReason string
 	control.Level = taskLevel
 	control.Reason = taskReason
 	if taskLevel == "CRITICAL" {
-		control.PauseMS = intEnv("QMIGRATION_BACKPRESSURE_CRITICAL_PAUSE_MS", 1000)
+		control.PauseMS = intEnv("DTS_BACKPRESSURE_CRITICAL_PAUSE_MS", 1000)
 		control.MaxBatchRows = batch / 2
 		if control.MaxBatchRows < 50 {
 			control.MaxBatchRows = 50
 		}
 	} else {
-		control.PauseMS = intEnv("QMIGRATION_BACKPRESSURE_WARN_PAUSE_MS", 250)
+		control.PauseMS = intEnv("DTS_BACKPRESSURE_WARN_PAUSE_MS", 250)
 		control.MaxBatchRows = batch * 3 / 4
 		if control.MaxBatchRows < 100 {
 			control.MaxBatchRows = 100
@@ -1825,8 +1825,8 @@ func workerOverloaded(w *domain.Worker) bool {
 	if w.Status != "" && !strings.EqualFold(w.Status, "ONLINE") {
 		return true
 	}
-	maxCPU := floatEnv("QMIGRATION_WORKER_MAX_CPU_PCT", 95)
-	maxMemory := floatEnv("QMIGRATION_WORKER_MAX_MEMORY_PCT", 95)
+	maxCPU := floatEnv("DTS_WORKER_MAX_CPU_PCT", 95)
+	maxMemory := floatEnv("DTS_WORKER_MAX_MEMORY_PCT", 95)
 	return (w.CPUUsagePct > 0 && w.CPUUsagePct >= maxCPU) || (w.MemoryUsagePct > 0 && w.MemoryUsagePct >= maxMemory)
 }
 
@@ -1839,7 +1839,7 @@ func workerSchedulingScore(w *domain.Worker) float64 {
 		cores = 1
 	}
 	jobsPct := float64(w.RunningJobs) * 100 / float64(cores)
-	netCapacityMbps := int64(intEnv("QMIGRATION_WORKER_NETWORK_CAPACITY_MBPS", 1000))
+	netCapacityMbps := int64(intEnv("DTS_WORKER_NETWORK_CAPACITY_MBPS", 1000))
 	netCapacityBPS := float64(netCapacityMbps) * 1000 * 1000 / 8
 	netPct := 0.0
 	if netCapacityBPS > 0 {
@@ -1875,7 +1875,7 @@ func (s *Service) betterWorkerAvailable(ctx context.Context, current *domain.Wor
 	}
 	now := time.Now()
 	currentScore := workerSchedulingScore(current)
-	margin := float64(intEnv("QMIGRATION_WORKER_REBALANCE_SCORE_MARGIN", 15))
+	margin := float64(intEnv("DTS_WORKER_REBALANCE_SCORE_MARGIN", 15))
 	bestScore, bestID, bestJobs := currentScore, "", current.RunningJobs
 	for i := range workers {
 		candidate := &workers[i]
@@ -1947,7 +1947,7 @@ func runningChunkYieldCursorSafe(chunk *domain.MigrationChunk, progress domain.C
 }
 
 func (s *Service) topologyDegradedShedReason(ctx context.Context, chunk *domain.MigrationChunk, progress domain.ChunkProgress) string {
-	if chunk == nil || !envDefaultOn("QMIGRATION_TOPOLOGY_DEGRADED_RUNNING_SHED") || strings.TrimSpace(chunk.TopologyID) == "" || !runningChunkYieldCursorSafe(chunk, progress) {
+	if chunk == nil || !envDefaultOn("DTS_TOPOLOGY_DEGRADED_RUNNING_SHED") || strings.TrimSpace(chunk.TopologyID) == "" || !runningChunkYieldCursorSafe(chunk, progress) {
 		return ""
 	}
 	table, err := s.repo.GetMigrationTable(ctx, chunk.TableID)
@@ -1990,7 +1990,7 @@ func (s *Service) topologyDegradedShedReason(ctx context.Context, chunk *domain.
 }
 
 func (s *Service) faultDomainRunningShedReason(ctx context.Context, chunk *domain.MigrationChunk, progress domain.ChunkProgress) string {
-	if chunk == nil || !envDefaultOn("QMIGRATION_TOPOLOGY_FAULT_DOMAIN_RUNNING_SHED") || !repository.FaultDomainProtectionEnabled() || !runningChunkYieldCursorSafe(chunk, progress) {
+	if chunk == nil || !envDefaultOn("DTS_TOPOLOGY_FAULT_DOMAIN_RUNNING_SHED") || !repository.FaultDomainProtectionEnabled() || !runningChunkYieldCursorSafe(chunk, progress) {
 		return ""
 	}
 	table, err := s.repo.GetMigrationTable(ctx, chunk.TableID)
@@ -2082,8 +2082,8 @@ func (s *Service) applyTopologyRunningPressure(ctx context.Context, task *domain
 	pauseMS := 0
 	reasons := []string{}
 	health := repository.TopologyProfileHealth(table, chunk.TopologyID)
-	if envDefaultOn("QMIGRATION_TOPOLOGY_DEGRADED_THROTTLE") && health == "DEGRADED" {
-		degradedPct := clampInt(intEnv("QMIGRATION_TOPOLOGY_DEGRADED_BATCH_PCT", 50), 10, 100)
+	if envDefaultOn("DTS_TOPOLOGY_DEGRADED_THROTTLE") && health == "DEGRADED" {
+		degradedPct := clampInt(intEnv("DTS_TOPOLOGY_DEGRADED_BATCH_PCT", 50), 10, 100)
 		baseCap := repository.TopologyDegradedMaxConcurrency()
 		effectiveCap := repository.TopologyEffectiveConcurrencyCap(table, chunk.TopologyID)
 		maxRecoveryCap := repository.TopologyRecoveryMaxConcurrency()
@@ -2096,7 +2096,7 @@ func (s *Service) applyTopologyRunningPressure(ctx context.Context, task *domain
 		if degradedPct < pct {
 			pct = degradedPct
 		}
-		degradedPause := intEnv("QMIGRATION_TOPOLOGY_DEGRADED_PAUSE_MS", 250)
+		degradedPause := intEnv("DTS_TOPOLOGY_DEGRADED_PAUSE_MS", 250)
 		if effectiveCap > baseCap && maxRecoveryCap > baseCap {
 			degradedPause = degradedPause * (maxRecoveryCap - effectiveCap) / (maxRecoveryCap - baseCap)
 		}
@@ -2108,11 +2108,11 @@ func (s *Service) applyTopologyRunningPressure(ctx context.Context, task *domain
 	if repository.FaultDomainProtectionEnabled() {
 		risk := repository.TopologyFaultDomainPeerRisk(table, chunk.TopologyID)
 		if risk > 0 {
-			fdPct := intEnv("QMIGRATION_TOPOLOGY_FAULT_DOMAIN_DEGRADED_BATCH_PCT", 75)
-			fdPause := intEnv("QMIGRATION_TOPOLOGY_FAULT_DOMAIN_DEGRADED_PAUSE_MS", 100)
+			fdPct := intEnv("DTS_TOPOLOGY_FAULT_DOMAIN_DEGRADED_BATCH_PCT", 75)
+			fdPause := intEnv("DTS_TOPOLOGY_FAULT_DOMAIN_DEGRADED_PAUSE_MS", 100)
 			if risk >= perfmodel.TopologyHealthRank("HALF_OPEN") {
-				fdPct = intEnv("QMIGRATION_TOPOLOGY_FAULT_DOMAIN_CRITICAL_BATCH_PCT", 50)
-				fdPause = intEnv("QMIGRATION_TOPOLOGY_FAULT_DOMAIN_CRITICAL_PAUSE_MS", 250)
+				fdPct = intEnv("DTS_TOPOLOGY_FAULT_DOMAIN_CRITICAL_BATCH_PCT", 50)
+				fdPause = intEnv("DTS_TOPOLOGY_FAULT_DOMAIN_CRITICAL_PAUSE_MS", 250)
 			}
 			fdPct = clampInt(fdPct, 10, 100)
 			if fdPct < pct {
@@ -2167,7 +2167,7 @@ func (s *Service) applyTopologyRunningPressure(ctx context.Context, task *domain
 }
 
 func (s *Service) topologyCircuitDrainReason(ctx context.Context, chunk *domain.MigrationChunk, progress domain.ChunkProgress) string {
-	if chunk == nil || !envDefaultOn("QMIGRATION_TOPOLOGY_RUNNING_DRAIN") || strings.TrimSpace(chunk.TopologyID) == "" || !runningChunkYieldCursorSafe(chunk, progress) {
+	if chunk == nil || !envDefaultOn("DTS_TOPOLOGY_RUNNING_DRAIN") || strings.TrimSpace(chunk.TopologyID) == "" || !runningChunkYieldCursorSafe(chunk, progress) {
 		return ""
 	}
 	table, err := s.repo.GetMigrationTable(ctx, chunk.TableID)
@@ -2204,13 +2204,13 @@ func (s *Service) shouldYieldRunningChunk(ctx context.Context, task *domain.Migr
 	if reason := s.faultDomainRunningShedReason(ctx, chunk, progress); reason != "" {
 		return true, reason
 	}
-	if !envDefaultOn("QMIGRATION_RUNNING_CHUNK_REBALANCE") || !runningChunkYieldCursorSafe(chunk, progress) {
+	if !envDefaultOn("DTS_RUNNING_CHUNK_REBALANCE") || !runningChunkYieldCursorSafe(chunk, progress) {
 		return false, ""
 	}
-	if progress.BytesWritten < positiveInt64Env("QMIGRATION_RUNNING_CHUNK_REBALANCE_MIN_BYTES", 8<<20) {
+	if progress.BytesWritten < positiveInt64Env("DTS_RUNNING_CHUNK_REBALANCE_MIN_BYTES", 8<<20) {
 		return false, ""
 	}
-	if !chunk.StartedAt.IsZero() && time.Since(chunk.StartedAt) < time.Duration(intEnv("QMIGRATION_RUNNING_CHUNK_REBALANCE_MIN_SECONDS", 30))*time.Second {
+	if !chunk.StartedAt.IsZero() && time.Since(chunk.StartedAt) < time.Duration(intEnv("DTS_RUNNING_CHUNK_REBALANCE_MIN_SECONDS", 30))*time.Second {
 		return false, ""
 	}
 	counts, err := repository.CountTableRunnable(ctx, s.repo, task.ID, chunk.TableID)
@@ -2537,7 +2537,7 @@ func reconcileThroughputController(task *domain.MigrationTask, tables []domain.M
 }
 
 func topologyHalfOpenCooldown() time.Duration {
-	seconds := intEnv("QMIGRATION_TOPOLOGY_HALF_OPEN_AFTER_SECONDS", 300)
+	seconds := intEnv("DTS_TOPOLOGY_HALF_OPEN_AFTER_SECONDS", 300)
 	return time.Duration(seconds) * time.Second
 }
 
@@ -2692,7 +2692,7 @@ func adaptiveBatchTarget(progress domain.ChunkProgress) int {
 	if latency <= 0 {
 		return 0
 	}
-	targetMS := int64(intEnv("QMIGRATION_ADAPTIVE_BATCH_TARGET_MS", 1200))
+	targetMS := int64(intEnv("DTS_ADAPTIVE_BATCH_TARGET_MS", 1200))
 	desired := current
 	switch {
 	case latency > targetMS:
@@ -2718,8 +2718,8 @@ func adaptiveBatchTarget(progress domain.ChunkProgress) int {
 	if desired > maxChange {
 		desired = maxChange
 	}
-	minRows := intEnv("QMIGRATION_ADAPTIVE_BATCH_MIN_ROWS", 50)
-	maxRows := intEnv("QMIGRATION_ADAPTIVE_BATCH_MAX_ROWS", 5000)
+	minRows := intEnv("DTS_ADAPTIVE_BATCH_MIN_ROWS", 50)
+	maxRows := intEnv("DTS_ADAPTIVE_BATCH_MAX_ROWS", 5000)
 	if minRows > maxRows {
 		minRows = maxRows
 	}
@@ -2739,7 +2739,7 @@ func ewmaRate(previous, instant int64) int64 {
 	if previous <= 0 {
 		return instant
 	}
-	alpha := int64(intEnv("QMIGRATION_SPEED_EWMA_ALPHA_PCT", 25))
+	alpha := int64(intEnv("DTS_SPEED_EWMA_ALPHA_PCT", 25))
 	if alpha > 100 {
 		alpha = 100
 	}
@@ -2747,8 +2747,8 @@ func ewmaRate(previous, instant int64) int64 {
 }
 
 func backpressureControl(progress domain.ChunkProgress, worker *domain.Worker) domain.ChunkControl {
-	warnMS := int64(intEnv("QMIGRATION_BACKPRESSURE_WARN_MS", 3000))
-	criticalMS := int64(intEnv("QMIGRATION_BACKPRESSURE_CRITICAL_MS", 8000))
+	warnMS := int64(intEnv("DTS_BACKPRESSURE_WARN_MS", 3000))
+	criticalMS := int64(intEnv("DTS_BACKPRESSURE_CRITICAL_MS", 8000))
 	latency := progress.LastReadMS
 	reason := "source read latency"
 	if progress.LastWriteMS > latency {
@@ -2762,7 +2762,7 @@ func backpressureControl(progress domain.ChunkProgress, worker *domain.Worker) d
 	control := domain.ChunkControl{Level: "NORMAL", TargetBatchRows: adaptiveBatchTarget(progress)}
 	if latency >= criticalMS {
 		control.Level = "CRITICAL"
-		control.PauseMS = intEnv("QMIGRATION_BACKPRESSURE_CRITICAL_PAUSE_MS", 1000)
+		control.PauseMS = intEnv("DTS_BACKPRESSURE_CRITICAL_PAUSE_MS", 1000)
 		control.MaxBatchRows = batch / 2
 		if control.MaxBatchRows < 50 {
 			control.MaxBatchRows = 50
@@ -2775,7 +2775,7 @@ func backpressureControl(progress domain.ChunkProgress, worker *domain.Worker) d
 	}
 	if latency >= warnMS {
 		control.Level = "WARN"
-		control.PauseMS = intEnv("QMIGRATION_BACKPRESSURE_WARN_PAUSE_MS", 250)
+		control.PauseMS = intEnv("DTS_BACKPRESSURE_WARN_PAUSE_MS", 250)
 		control.MaxBatchRows = batch * 3 / 4
 		if control.MaxBatchRows < 100 {
 			control.MaxBatchRows = 100
@@ -2783,12 +2783,12 @@ func backpressureControl(progress domain.ChunkProgress, worker *domain.Worker) d
 		control.Reason = fmt.Sprintf("%s %dms >= %dms", reason, latency, warnMS)
 	}
 	if worker != nil {
-		cpuWarn := floatEnv("QMIGRATION_BACKPRESSURE_WORKER_CPU_PCT", 90)
-		memWarn := floatEnv("QMIGRATION_BACKPRESSURE_WORKER_MEMORY_PCT", 90)
+		cpuWarn := floatEnv("DTS_BACKPRESSURE_WORKER_CPU_PCT", 90)
+		memWarn := floatEnv("DTS_BACKPRESSURE_WORKER_MEMORY_PCT", 90)
 		if (worker.CPUUsagePct > 0 && worker.CPUUsagePct >= cpuWarn) || (worker.MemoryUsagePct > 0 && worker.MemoryUsagePct >= memWarn) {
 			if control.Level == "NORMAL" {
 				control.Level = "WARN"
-				control.PauseMS = intEnv("QMIGRATION_BACKPRESSURE_WARN_PAUSE_MS", 250)
+				control.PauseMS = intEnv("DTS_BACKPRESSURE_WARN_PAUSE_MS", 250)
 				control.MaxBatchRows = batch * 3 / 4
 				if control.MaxBatchRows < 100 {
 					control.MaxBatchRows = 100
@@ -2863,7 +2863,7 @@ func boundedPieceCount(task *domain.MigrationTask, remaining int64) int {
 	if pieces < 1 {
 		pieces = 1
 	}
-	if hard := intEnv("QMIGRATION_RUNNING_CHUNK_REBALANCE_MAX_PIECES", 16); pieces > hard {
+	if hard := intEnv("DTS_RUNNING_CHUNK_REBALANCE_MAX_PIECES", 16); pieces > hard {
 		pieces = hard
 	}
 	if remaining > 0 && int64(pieces) > remaining {
@@ -3119,10 +3119,10 @@ func decodeKeysetBound(raw string) ([]connector.Value, error) {
 	return values, nil
 }
 
-func profileTargetSeconds() int { return intEnv("QMIGRATION_ADAPTIVE_CHUNK_TARGET_SECONDS", 30) }
+func profileTargetSeconds() int { return intEnv("DTS_ADAPTIVE_CHUNK_TARGET_SECONDS", 30) }
 
 func topologyRecoveryMinDegradedDuration() time.Duration {
-	seconds := intEnv("QMIGRATION_TOPOLOGY_RECOVERY_MIN_DEGRADED_SECONDS", 30)
+	seconds := intEnv("DTS_TOPOLOGY_RECOVERY_MIN_DEGRADED_SECONDS", 30)
 	if seconds < 0 {
 		seconds = 0
 	}
@@ -3130,7 +3130,7 @@ func topologyRecoveryMinDegradedDuration() time.Duration {
 }
 
 func topologyRecoveryHealthyGoodSamples() int {
-	n := intEnv("QMIGRATION_TOPOLOGY_RECOVERY_HEALTHY_GOOD_SAMPLES", 8)
+	n := intEnv("DTS_TOPOLOGY_RECOVERY_HEALTHY_GOOD_SAMPLES", 8)
 	if n < 2 {
 		n = 2
 	}
@@ -3138,7 +3138,7 @@ func topologyRecoveryHealthyGoodSamples() int {
 }
 
 func topologyRecoveryStepGoodSamples() int {
-	n := intEnv("QMIGRATION_TOPOLOGY_RECOVERY_STEP_GOOD_SAMPLES", 2)
+	n := intEnv("DTS_TOPOLOGY_RECOVERY_STEP_GOOD_SAMPLES", 2)
 	if n < 1 {
 		n = 1
 	}
@@ -3192,11 +3192,11 @@ func (s *Service) recordTablePerformance(ctx context.Context, chunk *domain.Migr
 	}
 	bps := result.BytesWritten * 1000 / result.DurationMS
 	rps := result.RowsWritten * 1000 / result.DurationMS
-	alpha := intEnv("QMIGRATION_TABLE_PROFILE_EWMA_ALPHA_PCT", 25)
+	alpha := intEnv("DTS_TABLE_PROFILE_EWMA_ALPHA_PCT", 25)
 	table.ProfileBytesPerSec = perfmodel.EWMA(table.ProfileBytesPerSec, bps, alpha)
 	table.ProfileRowsPerSec = perfmodel.EWMA(table.ProfileRowsPerSec, rps, alpha)
-	minRows := positiveInt64Env("QMIGRATION_PREDICTED_CHUNK_MIN_ROWS", 1000)
-	maxRows := positiveInt64Env("QMIGRATION_PREDICTED_CHUNK_MAX_ROWS", 10_000_000)
+	minRows := positiveInt64Env("DTS_PREDICTED_CHUNK_MIN_ROWS", 1000)
+	maxRows := positiveInt64Env("DTS_PREDICTED_CHUNK_MAX_ROWS", 10_000_000)
 	table.RecommendedChunkRows = perfmodel.RecommendChunkRows(table.ProfileRowsPerSec, profileTargetSeconds(), minRows, maxRows)
 	table.PerformanceSamples++
 	if chunk.TopologyID != "" {
@@ -3208,10 +3208,10 @@ func (s *Service) recordTablePerformance(ctx context.Context, chunk *domain.Migr
 		p.RowsPerSec = perfmodel.EWMA(p.RowsPerSec, rps, alpha)
 		p.RecommendedChunkRows = perfmodel.RecommendChunkRows(p.RowsPerSec, profileTargetSeconds(), minRows, maxRows)
 		p.Samples++
-		p.DurationSamplesMS = perfmodel.AppendSample(p.DurationSamplesMS, result.DurationMS, intEnv("QMIGRATION_TOPOLOGY_LATENCY_SAMPLES", 64))
+		p.DurationSamplesMS = perfmodel.AppendSample(p.DurationSamplesMS, result.DurationMS, intEnv("DTS_TOPOLOGY_LATENCY_SAMPLES", 64))
 		p.P95DurationMS = perfmodel.Percentile(p.DurationSamplesMS, 95)
 		p.P99DurationMS = perfmodel.Percentile(p.DurationSamplesMS, 99)
-		slowP99 := int64(intEnv("QMIGRATION_TOPOLOGY_P99_SLOW_MS", 90000))
+		slowP99 := int64(intEnv("DTS_TOPOLOGY_P99_SLOW_MS", 90000))
 		profileBad := (table.ProfileBytesPerSec > 0 && p.BytesPerSec*100 < table.ProfileBytesPerSec*55) || p.P99DurationMS >= slowP99
 		// Recovery hysteresis must use the current sample rather than the rolling
 		// P99. Otherwise one historical outlier keeps HALF_OPEN/DEGRADED unhealthy
@@ -3302,7 +3302,7 @@ func (s *Service) adaptPendingChunks(ctx context.Context, completed *domain.Migr
 	if completed == nil || result.DurationMS <= 0 {
 		return nil
 	}
-	targetSeconds := intEnv("QMIGRATION_ADAPTIVE_CHUNK_TARGET_SECONDS", 30)
+	targetSeconds := intEnv("DTS_ADAPTIVE_CHUNK_TARGET_SECONDS", 30)
 	table, err := s.repo.GetMigrationTable(ctx, completed.TableID)
 	if err != nil {
 		return err
@@ -3315,7 +3315,7 @@ func (s *Service) adaptPendingChunks(ctx context.Context, completed *domain.Migr
 	if result.DurationMS > 0 {
 		chunkBPS = result.BytesWritten * 1000 / result.DurationMS
 	}
-	hotspotPct := int64(intEnv("QMIGRATION_ADAPTIVE_CHUNK_HOTSPOT_PCT", 50))
+	hotspotPct := int64(intEnv("DTS_ADAPTIVE_CHUNK_HOTSPOT_PCT", 50))
 	slowByDuration := result.DurationMS >= int64(targetSeconds*2)*1000
 	slowByThroughput := task.SpeedBytesSec > 0 && chunkBPS > 0 && chunkBPS*100 < task.SpeedBytesSec*hotspotPct
 	if !slowByDuration && !slowByThroughput {
@@ -3336,7 +3336,7 @@ func (s *Service) adaptPendingChunks(ctx context.Context, completed *domain.Migr
 	if err != nil {
 		return err
 	}
-	baseSplits := intEnv("QMIGRATION_ADAPTIVE_CHUNK_MAX_SPLITS", 8)
+	baseSplits := intEnv("DTS_ADAPTIVE_CHUNK_MAX_SPLITS", 8)
 	if baseSplits < 1 {
 		baseSplits = 1
 	}
@@ -3359,8 +3359,8 @@ func (s *Service) adaptPendingChunks(ctx context.Context, completed *domain.Migr
 	if maxSplits > baseSplits {
 		maxSplits = baseSplits
 	}
-	hardMax := intEnv("QMIGRATION_ADAPTIVE_CHUNK_HARD_MAX_SPLITS", 16)
-	if envDefaultOn("QMIGRATION_PREDICTIVE_CHUNK_SIZING") {
+	hardMax := intEnv("DTS_ADAPTIVE_CHUNK_HARD_MAX_SPLITS", 16)
+	if envDefaultOn("DTS_PREDICTIVE_CHUNK_SIZING") {
 		for i := range chunks {
 			ch := &chunks[i]
 			if ch.TableID != completed.TableID || ch.Status != domain.ChunkPending || !numericRangeSplit(ch.SplitType) {
@@ -3613,8 +3613,8 @@ func updateSLATailRisk(task *domain.MigrationTask, tables []domain.MigrationTabl
 		}
 	}
 	targetMS := int64(profileTargetSeconds()) * 1000
-	task.SLAP95ETASeconds = perfmodel.TailRiskETA(task.ETASeconds, targetMS, maxP95, intEnv("QMIGRATION_SLA_P95_TAIL_WEIGHT_PCT", 25))
-	task.SLAP99ETASeconds = perfmodel.TailRiskETA(task.ETASeconds, targetMS, maxP99, intEnv("QMIGRATION_SLA_P99_TAIL_WEIGHT_PCT", 50))
+	task.SLAP95ETASeconds = perfmodel.TailRiskETA(task.ETASeconds, targetMS, maxP95, intEnv("DTS_SLA_P95_TAIL_WEIGHT_PCT", 25))
+	task.SLAP99ETASeconds = perfmodel.TailRiskETA(task.ETASeconds, targetMS, maxP99, intEnv("DTS_SLA_P99_TAIL_WEIGHT_PCT", 50))
 	if task.CompletionSLASeconds <= 0 || task.SLAStartedAt.IsZero() {
 		task.SLARiskLevel = "NONE"
 		if maxP99 > targetMS && task.ETASeconds > 0 {
@@ -3802,7 +3802,7 @@ func (s *Service) postLoadConnector(ctx context.Context, task *domain.MigrationT
 		return nil, func() {}, err
 	}
 	if err := s.connectors.Require(targetDS.Type, connector.CapabilityPostLoadSchema); err != nil {
-		_ = s.repo.CreateAlert(ctx, &domain.Alert{ID: newID("alt"), Severity: "warning", Title: "Post-load DDL deferred", Message: "Target QMigration connector does not yet advertise post-load-schema capability; the unified engine will not delegate this DDL to another runtime", TaskID: task.ID, CreatedAt: time.Now()})
+		_ = s.repo.CreateAlert(ctx, &domain.Alert{ID: newID("alt"), Severity: "warning", Title: "Post-load DDL deferred", Message: "Target DTS connector does not yet advertise post-load-schema capability; the unified engine will not delegate this DDL to another runtime", TaskID: task.ID, CreatedAt: time.Now()})
 		return nil, func() {}, nil
 	}
 	raw, err := s.connectors.New(*targetDS)
@@ -3968,11 +3968,11 @@ func (s *Service) Precheck(ctx context.Context, id string) ([]domain.PrecheckIte
 		items = append(items, domain.PrecheckItem{Name: "chunk_rows", Level: domain.PrecheckPass, Message: fmt.Sprintf("%d rows", m.ChunkRows)})
 	}
 	if m.Mode != domain.ModeFull {
-		msg := "QMigration Unified CDC uses a built-in native log reader and apply-before-checkpoint semantics"
+		msg := "DTS Unified CDC uses a built-in native log reader and apply-before-checkpoint semantics"
 		if srcDS.Type.IsMySQLFamily() {
-			msg = "QMigration Unified CDC uses the MySQL binlog protocol directly; ROW/FULL prechecks and transaction checkpoints are enforced"
+			msg = "DTS Unified CDC uses the MySQL binlog protocol directly; ROW/FULL prechecks and transaction checkpoints are enforced"
 		} else if srcDS.Type.IsPostgreSQLFamily() {
-			msg = "QMigration Unified CDC uses PostgreSQL pgoutput directly and acknowledges LSN only after target apply"
+			msg = "DTS Unified CDC uses PostgreSQL pgoutput directly and acknowledges LSN only after target apply"
 		}
 		items = append(items, domain.PrecheckItem{Name: "cdc_engine", Level: domain.PrecheckPass, Message: msg})
 	}
@@ -3981,12 +3981,12 @@ func (s *Service) Precheck(ctx context.Context, id string) ([]domain.PrecheckIte
 		if e := s.connectors.Require(srcDS.Type, connector.CapabilityFullRead); e != nil {
 			items = append(items, domain.PrecheckItem{Name: "source_connector", Level: domain.PrecheckFailed, Message: e.Error()})
 		} else {
-			items = append(items, domain.PrecheckItem{Name: "source_connector", Level: domain.PrecheckPass, Message: "QMigration native full-read capability available"})
+			items = append(items, domain.PrecheckItem{Name: "source_connector", Level: domain.PrecheckPass, Message: "DTS native full-read capability available"})
 		}
 		if e := s.connectors.Require(dstDS.Type, connector.CapabilityFullWrite); e != nil {
 			items = append(items, domain.PrecheckItem{Name: "target_connector", Level: domain.PrecheckFailed, Message: e.Error()})
 		} else {
-			items = append(items, domain.PrecheckItem{Name: "target_connector", Level: domain.PrecheckPass, Message: "QMigration native full-write capability available"})
+			items = append(items, domain.PrecheckItem{Name: "target_connector", Level: domain.PrecheckPass, Message: "DTS native full-write capability available"})
 		}
 	}
 	if m.Mode != domain.ModeFull {
@@ -4004,7 +4004,7 @@ func (s *Service) Precheck(ctx context.Context, id string) ([]domain.PrecheckIte
 }
 
 // AssessCompatibility performs a read-only migration assessment before execution.
-// It reports connector gaps explicitly. QMigration never hides an unsupported native connector behind a third-party execution engine.
+// It reports connector gaps explicitly. DTS never hides an unsupported native connector behind a third-party execution engine.
 func (s *Service) AssessCompatibility(ctx context.Context, id string) (*domain.CompatibilityAssessment, error) {
 	task, err := s.repo.GetMigration(ctx, id)
 	if err != nil {
@@ -4039,7 +4039,7 @@ func (s *Service) AssessCompatibility(ctx context.Context, id string) (*domain.C
 		}
 	}
 	if fullSupported {
-		add(domain.CompatibilityCompatible, "ENGINE", unifiedEngineName, unifiedEngineName, "UNIFIED_ENGINE", "Data movement is executed by the single QMigration Unified Engine through native Connector SPI capabilities")
+		add(domain.CompatibilityCompatible, "ENGINE", unifiedEngineName, unifiedEngineName, "UNIFIED_ENGINE", "Data movement is executed by the single DTS Unified Engine through native Connector SPI capabilities")
 	}
 	if task.Mode != domain.ModeFull {
 		if e := validateCDCEngineSource(task.CDCEngine, *sourceDS, "forward"); e != nil {
@@ -4049,7 +4049,7 @@ func (s *Service) AssessCompatibility(ctx context.Context, id string) (*domain.C
 		}
 		rollbackEngine := s.chooseRollbackCDCEngine(task, *targetDS)
 		if rollbackEngine == "" {
-			add(domain.CompatibilityWarning, "ROLLBACK_CDC", string(targetDS.Type), "", "ROLLBACK_CDC_UNCONFIGURED", "QMigration does not yet have a native reverse CDC reader for the post-cutover source database")
+			add(domain.CompatibilityWarning, "ROLLBACK_CDC", string(targetDS.Type), "", "ROLLBACK_CDC_UNCONFIGURED", "DTS does not yet have a native reverse CDC reader for the post-cutover source database")
 		} else if e := validateCDCEngineSource(rollbackEngine, *targetDS, "rollback"); e != nil {
 			add(domain.CompatibilityUnsupported, "ROLLBACK_CDC", rollbackEngine, string(targetDS.Type), "ROLLBACK_CDC_ENGINE_SOURCE_MISMATCH", e.Error())
 		} else {
@@ -4061,7 +4061,7 @@ func (s *Service) AssessCompatibility(ctx context.Context, id string) (*domain.C
 				if sameFamily {
 					add(domain.CompatibilityWarning, "CDC_DDL", string(sourceDS.Type), string(targetDS.Type), "NATIVE_MYSQL_DDL_SAME_FAMILY", "Native MySQL CDC can replay DDL only when every migrated schema/table/column mapping is identity; runtime revalidates this before executing each DDL")
 				} else {
-					add(domain.CompatibilityUnsupported, "CDC_DDL", string(sourceDS.Type), string(targetDS.Type), "NATIVE_MYSQL_DDL_CROSS_FAMILY", "cdc_ddl_mode=SAME_FAMILY cannot translate MySQL DDL to a different database family; use coordinated schema change or wait for a QMigration heterogeneous DDL translator")
+					add(domain.CompatibilityUnsupported, "CDC_DDL", string(sourceDS.Type), string(targetDS.Type), "NATIVE_MYSQL_DDL_CROSS_FAMILY", "cdc_ddl_mode=SAME_FAMILY cannot translate MySQL DDL to a different database family; use coordinated schema change or wait for a DTS heterogeneous DDL translator")
 				}
 			} else {
 				add(domain.CompatibilityWarning, "CDC_DDL", string(sourceDS.Type), string(targetDS.Type), "NATIVE_MYSQL_DDL_FAIL_SAFE", "Native MySQL CDC rejects DDL by default and does not advance the checkpoint; enable SAME_FAMILY only for identity mappings")
@@ -4075,7 +4075,7 @@ func (s *Service) AssessCompatibility(ctx context.Context, id string) (*domain.C
 		srcCapErr := s.connectors.Require(sourceDS.Type, connector.CapabilityFullRead)
 		dstCapErr := s.connectors.Require(targetDS.Type, connector.CapabilityFullWrite)
 		if srcCapErr != nil || dstCapErr != nil {
-			add(domain.CompatibilityUnsupported, "CONNECTOR", string(sourceDS.Type), string(targetDS.Type), "NATIVE_FULL_CAPABILITY_REQUIRED", "QMigration unified full load requires source full-read and target full-write capabilities; protocol probes alone are not migration support")
+			add(domain.CompatibilityUnsupported, "CONNECTOR", string(sourceDS.Type), string(targetDS.Type), "NATIVE_FULL_CAPABILITY_REQUIRED", "DTS unified full load requires source full-read and target full-write capabilities; protocol probes alone are not migration support")
 			return out, nil
 		}
 	}
@@ -4190,7 +4190,7 @@ func (s *Service) AssessCompatibility(ctx context.Context, id string) (*domain.C
 							add(domain.CompatibilityWarning, "SEQUENCE", sourceObject, "", "SEQUENCE_BINDING_MAPPING_REQUIRED", "SERIAL sequence ownership cannot be mapped unambiguously to the target table/column")
 						}
 					} else if targetDS.Type.IsPostgreSQLFamily() && strings.EqualFold(obj.Definition, "IDENTITY") {
-						add(domain.CompatibilityWarning, "SEQUENCE", sourceObject, obj.RelatedTo, "SEQUENCE_IDENTITY_PRESERVE", "IDENTITY semantics must already exist on the target; QMigration only synchronizes the backing sequence state and will not convert IDENTITY into a plain sequence")
+						add(domain.CompatibilityWarning, "SEQUENCE", sourceObject, obj.RelatedTo, "SEQUENCE_IDENTITY_PRESERVE", "IDENTITY semantics must already exist on the target; DTS only synchronizes the backing sequence state and will not convert IDENTITY into a plain sequence")
 					} else if targetDS.Type.IsPostgreSQLFamily() {
 						add(domain.CompatibilityCompatible, "SEQUENCE", sourceObject, "", "SEQUENCE_NATIVE", "Standalone sequence can be created natively and its last_value/is_called synchronized after full load")
 					} else {
@@ -4608,7 +4608,7 @@ func (s *Service) PlanSchemaObjects(ctx context.Context, id string) (*domain.Sch
 						item.Reason = "target view already exists with an equivalent discovered definition"
 						plan.Skipped++
 					} else {
-						item.Reason = "target view already exists but its definition is different or cannot be proven equivalent; QMigration will not overwrite it automatically"
+						item.Reason = "target view already exists but its definition is different or cannot be proven equivalent; DTS will not overwrite it automatically"
 						plan.Manual++
 					}
 				} else if !obj.DependenciesKnown {
@@ -4939,7 +4939,7 @@ func (s *Service) ValidationArchive(ctx context.Context, id string) (*domain.Val
 }
 
 func (s *Service) EnsureValidationArchive(ctx context.Context, id string) (*domain.ValidationArchive, bool, error) {
-	return repository.EnsureValidationArchive(ctx, s.repo, id, int(envInt64("QMIGRATION_VALIDATION_ARCHIVE_PAGE_SIZE", 512)))
+	return repository.EnsureValidationArchive(ctx, s.repo, id, int(envInt64("DTS_VALIDATION_ARCHIVE_PAGE_SIZE", 512)))
 }
 
 func (s *Service) ValidationReportArchive(ctx context.Context, taskID, evidenceDigest string) (*domain.ValidationReportArchiveRecord, error) {
@@ -4962,7 +4962,7 @@ func (s *Service) archiveValidationBestEffort(ctx context.Context, taskID string
 	if taskID == "" {
 		return
 	}
-	if _, _, err := repository.EnsureValidationArchive(ctx, s.repo, taskID, int(envInt64("QMIGRATION_VALIDATION_ARCHIVE_PAGE_SIZE", 512))); err != nil && !errors.Is(err, repository.ErrNoValidationEvidence) && !errors.Is(err, repository.ErrValidationArchiveNotTerminal) {
+	if _, _, err := repository.EnsureValidationArchive(ctx, s.repo, taskID, int(envInt64("DTS_VALIDATION_ARCHIVE_PAGE_SIZE", 512))); err != nil && !errors.Is(err, repository.ErrNoValidationEvidence) && !errors.Is(err, repository.ErrValidationArchiveNotTerminal) {
 		s.logTask(ctx, taskID, "", "", "", "WARN", "validation archive creation failed: "+err.Error())
 	}
 }
@@ -5015,7 +5015,7 @@ func (s *Service) ValidateNow(ctx context.Context, id string) error {
 }
 
 func validationPageSize() int {
-	v := int(envInt64("QMIGRATION_VALIDATION_CHUNK_PAGE_SIZE", 512))
+	v := int(envInt64("DTS_VALIDATION_CHUNK_PAGE_SIZE", 512))
 	if v < 16 {
 		v = 16
 	}
@@ -5112,7 +5112,7 @@ func (s *Service) validateTask(ctx context.Context, id string) {
 			src = snapshot
 			s.logTask(ctx, id, "", "", "", "INFO", fmt.Sprintf("validation source pinned to exact %s=%s snapshot", barrier.PositionType, barrier.PositionValue))
 		} else if validationRequireExactWatermark() {
-			s.failTaskUnlessCanceled(ctx, id, fmt.Errorf("source %s does not implement exact validation snapshots required by QMIGRATION_VALIDATION_REQUIRE_EXACT_WATERMARK", srcDS.Type))
+			s.failTaskUnlessCanceled(ctx, id, fmt.Errorf("source %s does not implement exact validation snapshots required by DTS_VALIDATION_REQUIRE_EXACT_WATERMARK", srcDS.Type))
 			return
 		}
 	}
@@ -5424,7 +5424,7 @@ func (s *Service) acquireCDCSpoolDrainLease(ctx context.Context, taskID, directi
 	if !ok {
 		return true, nil
 	}
-	ttl := time.Duration(envInt64("QMIGRATION_CDC_SPOOL_DRAIN_LEASE_SECONDS", 300)) * time.Second
+	ttl := time.Duration(envInt64("DTS_CDC_SPOOL_DRAIN_LEASE_SECONDS", 300)) * time.Second
 	if ttl < 30*time.Second {
 		ttl = 30 * time.Second
 	}
@@ -5511,9 +5511,9 @@ func (s *Service) stageCDCEvents(ctx context.Context, taskID, direction string, 
 	if err != nil {
 		return nil, fmt.Errorf("marshal CDC spool transaction: %w", err)
 	}
-	maxTx := envInt64("QMIGRATION_CDC_SPOOL_MAX_TRANSACTION_BYTES", 16<<20)
+	maxTx := envInt64("DTS_CDC_SPOOL_MAX_TRANSACTION_BYTES", 16<<20)
 	if maxTx > 0 && int64(len(raw)) > maxTx {
-		return nil, fmt.Errorf("CDC transaction is %d bytes and exceeds QMIGRATION_CDC_SPOOL_MAX_TRANSACTION_BYTES=%d; source position is not acknowledged", len(raw), maxTx)
+		return nil, fmt.Errorf("CDC transaction is %d bytes and exceeds DTS_CDC_SPOOL_MAX_TRANSACTION_BYTES=%d; source position is not acknowledged", len(raw), maxTx)
 	}
 	stats, err := s.repo.CDCSpoolStats(ctx, taskID, direction)
 	if err != nil {
@@ -5523,7 +5523,7 @@ func (s *Service) stageCDCEvents(ctx context.Context, taskID, direction string, 
 	case "CRITICAL":
 		return nil, fmt.Errorf("CDC spool storage is CRITICAL at %.1f%% used; source position is not acknowledged", stats.StorageUsedPct)
 	case "WARN":
-		delay := time.Duration(envInt64("QMIGRATION_CDC_SPOOL_WARN_BACKPRESSURE_MS", 250)) * time.Millisecond
+		delay := time.Duration(envInt64("DTS_CDC_SPOOL_WARN_BACKPRESSURE_MS", 250)) * time.Millisecond
 		if delay > 0 {
 			select {
 			case <-ctx.Done():
@@ -5532,7 +5532,7 @@ func (s *Service) stageCDCEvents(ctx context.Context, taskID, direction string, 
 			}
 		}
 	}
-	maxPending := envInt64("QMIGRATION_CDC_SPOOL_MAX_PENDING_BYTES", 64<<30)
+	maxPending := envInt64("DTS_CDC_SPOOL_MAX_PENDING_BYTES", 64<<30)
 	if maxPending > 0 && stats.PendingBytes+int64(len(raw)) > maxPending {
 		return nil, fmt.Errorf("CDC spool capacity would exceed %d bytes (pending=%d incoming=%d); source position is not acknowledged", maxPending, stats.PendingBytes, len(raw))
 	}
@@ -5621,7 +5621,7 @@ func (s *Service) drainCDCSpoolLocked(ctx context.Context, taskID, direction str
 		}
 	}
 	keep := 1000
-	if raw := strings.TrimSpace(os.Getenv("QMIGRATION_CDC_SPOOL_KEEP_APPLIED")); raw != "" {
+	if raw := strings.TrimSpace(os.Getenv("DTS_CDC_SPOOL_KEEP_APPLIED")); raw != "" {
 		if n, e := strconv.Atoi(raw); e == nil && n >= 0 {
 			keep = n
 		}
@@ -5652,15 +5652,15 @@ func (s *Service) CDCSpoolStats(ctx context.Context, taskID, direction string) (
 }
 
 func validationCatchupMaxLagMS() int64 {
-	return envInt64("QMIGRATION_VALIDATION_MAX_CDC_LAG_MS", 5000)
+	return envInt64("DTS_VALIDATION_MAX_CDC_LAG_MS", 5000)
 }
 
 func validationStableWindow() time.Duration {
-	return time.Duration(envInt64("QMIGRATION_VALIDATION_STABLE_WINDOW_SECONDS", 2)) * time.Second
+	return time.Duration(envInt64("DTS_VALIDATION_STABLE_WINDOW_SECONDS", 2)) * time.Second
 }
 
 func validationRequireExactWatermark() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("QMIGRATION_VALIDATION_REQUIRE_EXACT_WATERMARK"))) {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("DTS_VALIDATION_REQUIRE_EXACT_WATERMARK"))) {
 	case "1", "true", "yes", "on":
 		return true
 	default:
@@ -5819,7 +5819,7 @@ func (s *Service) ApplyEngineJobCDCEvents(ctx context.Context, workerID, jobID s
 			return nil, stageErr
 		}
 		maxDrain := 1000
-		if raw := strings.TrimSpace(os.Getenv("QMIGRATION_CDC_SPOOL_DRAIN_PER_REQUEST")); raw != "" {
+		if raw := strings.TrimSpace(os.Getenv("DTS_CDC_SPOOL_DRAIN_PER_REQUEST")); raw != "" {
 			if n, e := strconv.Atoi(raw); e == nil && n > 0 {
 				maxDrain = n
 			}
@@ -5900,7 +5900,7 @@ func (s *Service) beginCDCCommitFence(ctx context.Context, taskID, direction str
 }
 
 // completeCDCCommitFence is called only after the target commit AND the durable
-// QMigration source checkpoint have both succeeded. New transient fences are
+// DTS source checkpoint have both succeeded. New transient fences are
 // deleted to avoid one DLQ row per successful transaction; a fence that reused
 // an operator-visible prior DLQ is retained as RESOLVED audit history.
 func (s *Service) completeCDCCommitFence(ctx context.Context, fence *cdcCommitFence) error {
@@ -5986,7 +5986,7 @@ func (s *Service) recordCDCDeadLetter(ctx context.Context, taskID, direction str
 		return
 	}
 	maxBytes := 4 << 20
-	if raw := os.Getenv("QMIGRATION_CDC_DLQ_MAX_BYTES"); raw != "" {
+	if raw := os.Getenv("DTS_CDC_DLQ_MAX_BYTES"); raw != "" {
 		if n, err := strconv.Atoi(raw); err == nil && n >= 0 {
 			maxBytes = n
 		}
@@ -6542,7 +6542,7 @@ func (s *Service) ApplyCDCEvents(ctx context.Context, id string, req domain.CDCA
 			for i, col := range sourceCols {
 				field, exists := after[col.Name]
 				if !exists {
-					return result, fmt.Errorf("CDC %s event for %s is missing after-image column %s; QMigration native apply requires full row images", event.Operation, objectName(schema, event.SourceTable), col.Name)
+					return result, fmt.Errorf("CDC %s event for %s is missing after-image column %s; DTS native apply requires full row images", event.Operation, objectName(schema, event.SourceTable), col.Name)
 				}
 				v, e := decodeCDCValue(field)
 				if e != nil {
@@ -6741,7 +6741,7 @@ func (s *Service) ApplyCDCEvents(ctx context.Context, id string, req domain.CDCA
 
 func (s *Service) maybeAlertCDCLag(ctx context.Context, taskID, direction string, lagMS int64) {
 	threshold := int64(60000)
-	if raw := os.Getenv("QMIGRATION_CDC_LAG_ALERT_MS"); raw != "" {
+	if raw := os.Getenv("DTS_CDC_LAG_ALERT_MS"); raw != "" {
 		if n, err := strconv.ParseInt(raw, 10, 64); err == nil {
 			threshold = n
 		}
@@ -6787,7 +6787,7 @@ func (s *Service) recordCDCProgress(ctx context.Context, id string, p *domain.CD
 	previousLag := task.CDCLagMS
 	task.CDCLagMS = p.LagMS
 	task.UpdatedAt = time.Now()
-	warnLag := int64(intEnv("QMIGRATION_CDC_LAG_WARN_MS", 30000))
+	warnLag := int64(intEnv("DTS_CDC_LAG_WARN_MS", 30000))
 	if p.LagMS >= warnLag && previousLag < warnLag {
 		_ = s.repo.CreateAlert(ctx, &domain.Alert{ID: newID("alt"), Severity: "warning", Title: "CDC lag high", Message: fmt.Sprintf("CDC lag %dms exceeds warning threshold %dms", p.LagMS, warnLag), TaskID: id, CreatedAt: time.Now()})
 		s.logTask(ctx, id, "", "", "", "WARN", fmt.Sprintf("CDC lag high: %dms", p.LagMS))
@@ -6809,7 +6809,7 @@ func (s *Service) CDCPositions(ctx context.Context, id string) ([]domain.CDCPosi
 }
 func sequenceSyncFreshness() time.Duration {
 	seconds := int64(60)
-	if raw := strings.TrimSpace(os.Getenv("QMIGRATION_SEQUENCE_SYNC_MAX_AGE_SECONDS")); raw != "" {
+	if raw := strings.TrimSpace(os.Getenv("DTS_SEQUENCE_SYNC_MAX_AGE_SECONDS")); raw != "" {
 		if value, err := strconv.ParseInt(raw, 10, 64); err == nil && value > 0 && value <= 3600 {
 			seconds = value
 		}
@@ -6938,7 +6938,7 @@ func (s *Service) requireSuccessfulValidation(ctx context.Context, task *domain.
 }
 
 func cutoverEngineStopTimeout() time.Duration {
-	seconds := envInt64("QMIGRATION_CUTOVER_ENGINE_STOP_TIMEOUT_SECONDS", 60)
+	seconds := envInt64("DTS_CUTOVER_ENGINE_STOP_TIMEOUT_SECONDS", 60)
 	if seconds < 5 {
 		seconds = 5
 	}
@@ -7183,7 +7183,7 @@ func (s *Service) PrepareRollback(ctx context.Context, id string) error {
 			return fmt.Errorf("capture reverse native MySQL CDC start position: %w", err)
 		}
 	} else if checkpoint, ok := target.(connector.CDCCheckpointSource); ok && targetDS.Type.IsPostgreSQLFamily() {
-		slot := strings.ToLower(strings.ReplaceAll("qmigration_rb_"+task.ID, "-", "_"))
+		slot := strings.ToLower(strings.ReplaceAll("dts_rb_"+task.ID, "-", "_"))
 		if len(slot) > 63 {
 			slot = slot[:63]
 		}
@@ -7197,7 +7197,7 @@ func (s *Service) PrepareRollback(ctx context.Context, id string) error {
 			return fmt.Errorf("capture reverse CDC start position: %w", err)
 		}
 	} else {
-		return fmt.Errorf("target connector %s cannot provide a QMigration reverse CDC start position", targetDS.Type)
+		return fmt.Errorf("target connector %s cannot provide a DTS reverse CDC start position", targetDS.Type)
 	}
 	pos.ID = newID("cdc")
 	pos.TaskID = id
@@ -7503,7 +7503,7 @@ func (s *Service) EngineJobControl(ctx context.Context, workerID, jobID string) 
 
 // EngineJobCDCReady tells a managed native CDC reader whether source capture may
 // begin. For full+incremental tasks capture starts during FULL_MIGRATING: each
-// transaction is first durably staged in the encrypted QMigration CDC spool and
+// transaction is first durably staged in the encrypted DTS CDC spool and
 // only then may the reader ACK the source. Once target apply is safe, the spool
 // drains in sequence before newer live transactions can overtake it.
 func (s *Service) EngineJobCDCReady(ctx context.Context, workerID, jobID string) (bool, domain.MigrationStatus, error) {
@@ -7695,7 +7695,7 @@ func relocationCandidate(table *domain.MigrationTable, from string) *domain.Topo
 // treat topology as an advisory placement hint; direct-DN readers must provide
 // an explicit replica/epoch/position proof through ReplicaRelocationConnector.
 func (s *Service) relocateYieldRemainders(ctx context.Context, task *domain.MigrationTask, table *domain.MigrationTable, from *domain.MigrationChunk, created []domain.MigrationChunk) ([]domain.MigrationChunk, error) {
-	if len(created) == 0 || !envDefaultOn("QMIGRATION_RUNNING_CHUNK_RELOCATION") || strings.TrimSpace(from.TopologyID) == "" {
+	if len(created) == 0 || !envDefaultOn("DTS_RUNNING_CHUNK_RELOCATION") || strings.TrimSpace(from.TopologyID) == "" {
 		return created, nil
 	}
 	candidate := relocationCandidate(table, from.TopologyID)

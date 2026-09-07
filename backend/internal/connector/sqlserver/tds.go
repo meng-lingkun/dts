@@ -11,7 +11,7 @@ import (
 	"io"
 	"net"
 	"os"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/domain"
 	"strconv"
 	"strings"
 	"time"
@@ -56,7 +56,7 @@ type tdsClient struct {
 }
 
 func experimentalFullEnabled() bool {
-	v := strings.ToLower(strings.TrimSpace(os.Getenv("QMIGRATION_EXPERIMENTAL_SQLSERVER_NATIVE")))
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("DTS_EXPERIMENTAL_SQLSERVER_NATIVE")))
 	return v == "1" || v == "true" || v == "yes" || v == "on"
 }
 
@@ -91,10 +91,10 @@ func buildLogin7(dsHost, user, password, database string, packetSize int) []byte
 		packetSize = 4096
 	}
 	const fixedLen = 94
-	host := "qmigration"
-	app := "QMigration"
+	host := "dts"
+	app := "DTS"
 	server := dsHost
-	clientInt := "QMigration Native TDS"
+	clientInt := "DTS Native TDS"
 	fields := [][]byte{utf16Bytes(host), utf16Bytes(user), obfuscatePassword(password), utf16Bytes(app), utf16Bytes(server), nil, utf16Bytes(clientInt), nil, utf16Bytes(database)}
 	payload := make([]byte, fixedLen)
 	pos := fixedLen
@@ -551,7 +551,7 @@ func parseTypeInfo(b []byte, p int, typ byte) (tdsColumn, int, error) {
 		col.maxLen = binary.LittleEndian.Uint16(b[p : p+2])
 		p += 2
 	default:
-		return col, p, fmt.Errorf("QMigration TDS result decoder supports NVARCHAR/NCHAR/VARBINARY/BINARY only, got type 0x%02x", typ)
+		return col, p, fmt.Errorf("DTS TDS result decoder supports NVARCHAR/NCHAR/VARBINARY/BINARY only, got type 0x%02x", typ)
 	}
 	return col, p, nil
 }
@@ -663,7 +663,7 @@ func parseQueryResponse(b []byte) (rows [][][]byte, nulls [][]bool, rowCount int
 			rows = append(rows, r)
 			nulls = append(nulls, nullRow)
 		case tokNBCRow:
-			return nil, nil, 0, errors.New("TDS NBCROW is not emitted by QMigration CAST queries; decoder intentionally rejects it")
+			return nil, nil, 0, errors.New("TDS NBCROW is not emitted by DTS CAST queries; decoder intentionally rejects it")
 		case tokError, tokInfo, tokEnvChange:
 			if p+2 > len(b) {
 				return nil, nil, 0, io.ErrUnexpectedEOF

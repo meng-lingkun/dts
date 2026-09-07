@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-BIN=${QMIGRATION_DB2_QUALIFY_BIN:-"$ROOT/bin/qmigration-db2-qualify"}
+BIN=${DTS_DB2_QUALIFY_BIN:-"$ROOT/bin/dts-db2-qualify"}
 if [[ ! -x "$BIN" ]]; then
-  echo "building qmigration-db2-qualify" >&2
+  echo "building dts-db2-qualify" >&2
   (cd "$ROOT/backend" && go build -o "$BIN" ./cmd/db2-qualify)
 fi
 : "${DB2_HOST:?set DB2_HOST}"

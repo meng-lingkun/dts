@@ -519,7 +519,7 @@ func SaveTrustStore(path string, store *TrustStore) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(dir, ".qmigration-trust-*.tmp")
+	tmp, err := os.CreateTemp(dir, ".dts-trust-*.tmp")
 	if err != nil {
 		return err
 	}

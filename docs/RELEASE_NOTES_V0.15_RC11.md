@@ -1,4 +1,4 @@
-# QMigration V0.15.0-rc11 Release Notes
+# DTS V0.15.0-rc11 Release Notes
 
 RC11 continues the correctness-first Db2 LUW source-CDC work from RC10. It
 extends out-of-row reconstruction into the documented DMS 167 multi-insert path
@@ -37,7 +37,7 @@ real-instance qualification is complete.
 ## Target boundary
 
 RC11 does not claim DB2 VECTOR target support. Target table auto-create and
-prepared writes fail closed for VECTOR columns until QMigration has retained
+prepared writes fail closed for VECTOR columns until DTS has retained
 metadata for dimension/coordinate type plus native target parameter encoding.
 This prevents accidental fallback to VARCHAR semantics.
 

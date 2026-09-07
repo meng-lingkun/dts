@@ -7,8 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"qmigration/backend/internal/connector"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/connector"
+	"dts/backend/internal/domain"
 	"strconv"
 	"strings"
 	"sync"
@@ -25,7 +25,7 @@ type Factory struct{}
 func NewFactory() *Factory { return &Factory{} }
 func (*Factory) Capabilities(t domain.DataSourceType) connector.Descriptor {
 	caps := []connector.Capability{connector.CapabilityProtocolProbe}
-	note := "QMigration native TDS PRELOGIN/LOGIN7/SQL Batch protocol is implemented; full migration remains experimental until real SQL Server E2E qualification"
+	note := "DTS native TDS PRELOGIN/LOGIN7/SQL Batch protocol is implemented; full migration remains experimental until real SQL Server E2E qualification"
 	if experimentalFullEnabled() {
 		caps = append(caps,
 			connector.CapabilityMetadata,
@@ -43,11 +43,11 @@ func (*Factory) Capabilities(t domain.DataSourceType) connector.Descriptor {
 			connector.CapabilityPointLookup,
 			connector.CapabilityMigrationPrecheck,
 		)
-		note = "EXPERIMENTAL QMigration native TDS full data plane enabled by QMIGRATION_EXPERIMENTAL_SQLSERVER_NATIVE"
+		note = "EXPERIMENTAL DTS native TDS full data plane enabled by DTS_EXPERIMENTAL_SQLSERVER_NATIVE"
 	}
 	if sqlServerCDCEnabled() {
 		caps = append(caps, connector.CapabilityCDCPosition, connector.CapabilityCDCRead, connector.CapabilityMigrationPrecheck)
-		note += "; EXPERIMENTAL native SQL Server CDC/LSN reader enabled by QMIGRATION_EXPERIMENTAL_SQLSERVER_CDC"
+		note += "; EXPERIMENTAL native SQL Server CDC/LSN reader enabled by DTS_EXPERIMENTAL_SQLSERVER_CDC"
 	}
 	return connector.Descriptor{Type: t, Protocol: "tds", Native: true, Capabilities: caps, Maturity: connector.MaturityExperimental, QualificationRequired: true, Note: note}
 }
@@ -419,7 +419,7 @@ func sqlServerKeyColumns(keys []string, columns []domain.ColumnInfo) ([]domain.C
 // PlanKeysetBoundaries finds real source keys at ordered NTILE boundaries.
 // SQL Server lacks row-value tuple comparisons, so lower/upper predicates use
 // the same exact lexicographic expansion as ReadBatch. Returned values are the
-// converted wire representation consumed by QMigration's durable keyset cursor.
+// converted wire representation consumed by DTS's durable keyset cursor.
 func (c *Connector) PlanKeysetBoundaries(ctx context.Context, req connector.KeysetBoundaryRequest) ([][]connector.Value, error) {
 	if req.Partitions <= 1 {
 		return nil, nil
@@ -1150,7 +1150,7 @@ func (c *Connector) MigrationPrechecks(ctx context.Context, cdc bool) []domain.P
 	items := []domain.PrecheckItem{{Name: "SQL Server Native TDS", Level: domain.PrecheckWarning, Message: "experimental native TDS data plane; qualify against the exact SQL Server version before production"}}
 	if cdc {
 		if !sqlServerCDCEnabled() {
-			items = append(items, domain.PrecheckItem{Name: "SQL Server source CDC", Level: domain.PrecheckFailed, Message: "native CDC reader is capability-gated; set QMIGRATION_EXPERIMENTAL_SQLSERVER_CDC=1 after enabling SQL Server CDC"})
+			items = append(items, domain.PrecheckItem{Name: "SQL Server source CDC", Level: domain.PrecheckFailed, Message: "native CDC reader is capability-gated; set DTS_EXPERIMENTAL_SQLSERVER_CDC=1 after enabling SQL Server CDC"})
 		} else if pos, err := c.CurrentCDCPosition(ctx); err != nil {
 			items = append(items, domain.PrecheckItem{Name: "SQL Server source CDC", Level: domain.PrecheckFailed, Message: err.Error()})
 		} else {
@@ -1160,7 +1160,7 @@ func (c *Connector) MigrationPrechecks(ctx context.Context, cdc bool) []domain.P
 			} else {
 				minimum := sqlServerMinimumRetentionMinutes()
 				level := domain.PrecheckPass
-				message := fmt.Sprintf("cleanup retention=%d minutes; configured QMigration minimum=%d minutes; durable CDC staging is enabled; retention only needs to cover capture outages/backpressure, subject to this operational safety floor", retention, minimum)
+				message := fmt.Sprintf("cleanup retention=%d minutes; configured DTS minimum=%d minutes; durable CDC staging is enabled; retention only needs to cover capture outages/backpressure, subject to this operational safety floor", retention, minimum)
 				if retention < minimum {
 					level = domain.PrecheckFailed
 				}

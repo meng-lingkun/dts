@@ -1,4 +1,4 @@
--- QMigration V0.4 external engines, CDC replay metadata and JDBC datasource support.
+-- DTS V0.4 external engines, CDC replay metadata and JDBC datasource support.
 ALTER TABLE datasources ADD COLUMN IF NOT EXISTS jdbc_url text;
 ALTER TABLE datasources ADD COLUMN IF NOT EXISTS driver_class text;
 ALTER TABLE cdc_positions ADD COLUMN IF NOT EXISTS direction text NOT NULL DEFAULT 'forward';

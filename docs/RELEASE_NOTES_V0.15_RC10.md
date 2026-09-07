@@ -1,4 +1,4 @@
-# QMigration V0.15.0-rc10 Release Notes
+# DTS V0.15.0-rc10 Release Notes
 
 RC10 continues the correctness-first Db2 LUW source-CDC work from RC9. The
 release implements two documented update-relocation forms that previously

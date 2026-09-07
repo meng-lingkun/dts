@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/domain"
 )
 
 func env(k, d string) string {
@@ -44,7 +44,7 @@ func postBatch(client *http.Client, endpoint, token string, req domain.CDCApplyR
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("QMigration returned %s: %s", resp.Status, strings.TrimSpace(string(data)))
+		return nil, fmt.Errorf("DTS returned %s: %s", resp.Status, strings.TrimSpace(string(data)))
 	}
 	var out domain.CDCApplyResult
 	if len(data) > 0 {
@@ -56,18 +56,18 @@ func postBatch(client *http.Client, endpoint, token string, req domain.CDCApplyR
 }
 
 func main() {
-	server := strings.TrimRight(env("QMIGRATION_SERVER", "http://127.0.0.1:8080"), "/")
-	taskID := env("QMIGRATION_TASK_ID", "")
+	server := strings.TrimRight(env("DTS_SERVER", "http://127.0.0.1:8080"), "/")
+	taskID := env("DTS_TASK_ID", "")
 	if taskID == "" {
-		log.Fatal("QMIGRATION_TASK_ID is required")
+		log.Fatal("DTS_TASK_ID is required")
 	}
-	direction := strings.ToLower(env("QMIGRATION_CDC_DIRECTION", "forward"))
+	direction := strings.ToLower(env("DTS_CDC_DIRECTION", "forward"))
 	if direction != "forward" && direction != "reverse" {
-		log.Fatal("QMIGRATION_CDC_DIRECTION must be forward or reverse")
+		log.Fatal("DTS_CDC_DIRECTION must be forward or reverse")
 	}
-	token := env("QMIGRATION_API_TOKEN", "")
+	token := env("DTS_API_TOKEN", "")
 	batchSize := 100
-	if raw := env("QMIGRATION_CDC_BATCH_SIZE", "100"); raw != "" {
+	if raw := env("DTS_CDC_BATCH_SIZE", "100"); raw != "" {
 		if n, err := strconv.Atoi(raw); err == nil && n > 0 && n <= 10000 {
 			batchSize = n
 		}

@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"qmigration/backend/internal/domain"
-	"qmigration/backend/internal/repository"
-	"qmigration/backend/internal/repository/memory"
+	"dts/backend/internal/domain"
+	"dts/backend/internal/repository"
+	"dts/backend/internal/repository/memory"
 )
 
 func seedArchiveTask(t *testing.T, status domain.MigrationStatus, split string, chunks int) (*memory.Store, string, string) {

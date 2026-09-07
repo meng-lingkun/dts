@@ -10,7 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"qmigration/backend/internal/netchaos"
+	"dts/backend/internal/netchaos"
 )
 
 func networkChaosCheck() check {

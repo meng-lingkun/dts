@@ -1,15 +1,15 @@
-# QMigration V1.0.0 RC2 Release Notes
+# DTS V1.0.0 RC2 Release Notes
 
-V1.0.0 RC2 hardens the feature-complete RC1 line for production-style deployment and upgrade testing. The product model remains QMigration Control Plane + distributed Workers + pluggable Native/DataX/SeaTunnel/Flink/Debezium/Canal execution paths.
+V1.0.0 RC2 hardens the feature-complete RC1 line for production-style deployment and upgrade testing. The product model remains DTS Control Plane + distributed Workers + pluggable Native/DataX/SeaTunnel/Flink/Debezium/Canal execution paths.
 
 ## CDC integration hardening
 
 - Added built-in raw Debezium and Canal push-ingress endpoints.
 - Added Debezium/Canal JSON normalization into the common `CDCEvent` model.
 - Reused atomic target apply, durable checkpoint, DLQ, replay and conflict policy for pushed events.
-- Added HTTP `425 Too Early` retry semantics so upstream capture does not ACK events before QMigration reaches a safe apply state.
+- Added HTTP `425 Too Early` retry semantics so upstream capture does not ACK events before DTS reaches a safe apply state.
 - Fixed the first-push state transition so an unapplied Debezium/Canal record is never persisted as the CDC checkpoint; the state gate opens with a nil position and the normal apply path checkpoints only after target success.
-- Debezium/Canal no longer depend on nonexistent local `qmigration-*-runner` binaries.
+- Debezium/Canal no longer depend on nonexistent local `dts-*-runner` binaries.
 
 ## Repository and mTLS correctness
 
@@ -22,7 +22,7 @@ V1.0.0 RC2 hardens the feature-complete RC1 line for production-style deployment
 
 - Server handles SIGINT/SIGTERM and drains HTTP requests with a 20-second shutdown window.
 - Worker stops claiming new work on SIGINT/SIGTERM, cancels managed external CDC processes, and relies on durable cursor + lease recovery for interrupted chunks.
-- Added configurable `QMIGRATION_WORKER_SHUTDOWN_GRACE_SECONDS`.
+- Added configurable `DTS_WORKER_SHUTDOWN_GRACE_SECONDS`.
 - Docker Compose and Kubernetes manifests now use `/readyz`, termination grace periods and Worker/Server PDBs.
 - Added ordered transactional PostgreSQL metadata migration script: `deployments/scripts/migrate-metadata.sh`.
 

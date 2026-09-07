@@ -13,11 +13,11 @@ import (
 	"sync"
 	"time"
 
-	"qmigration/backend/internal/connector"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/connector"
+	"dts/backend/internal/domain"
 )
 
-// RC13 deliberately keeps the Dameng wire driver replaceable. QMigration owns
+// RC13 deliberately keeps the Dameng wire driver replaceable. DTS owns
 // metadata/full-load/schema/target-apply semantics; a DM database/sql driver
 // only transports authenticated SQL to DM8. This avoids vendoring/probing a
 // proprietary wire protocol while keeping third-party migration runtimes out
@@ -28,7 +28,7 @@ func NewFactory() *Factory { return &Factory{} }
 
 func (*Factory) Capabilities(t domain.DataSourceType) connector.Descriptor {
 	caps := []connector.Capability{connector.CapabilityProtocolProbe}
-	note := "TCP probe only; set QMIGRATION_EXPERIMENTAL_DAMENG_NATIVE=1 and register a DM database/sql driver to enable the experimental Dameng data plane"
+	note := "TCP probe only; set DTS_EXPERIMENTAL_DAMENG_NATIVE=1 and register a DM database/sql driver to enable the experimental Dameng data plane"
 	if experimentalEnabled() {
 		caps = append(caps,
 			connector.CapabilityMetadata,
@@ -42,12 +42,12 @@ func (*Factory) Capabilities(t domain.DataSourceType) connector.Descriptor {
 			connector.CapabilityPointLookup,
 			connector.CapabilityMigrationPrecheck,
 		)
-		note = "EXPERIMENTAL QMigration Dameng metadata/full-load/schema/target-apply data plane; SQL transport requires a registered DM database/sql driver"
+		note = "EXPERIMENTAL DTS Dameng metadata/full-load/schema/target-apply data plane; SQL transport requires a registered DM database/sql driver"
 		if experimentalCDCEnabled() {
 			caps = append(caps, connector.CapabilityCDCPosition, connector.CapabilityCDCRead, connector.CapabilityValidationSnapshot)
 			note += "; DBMS_LOGMNR archived-log CDC + DM_LSN flashback validation enabled behind the separate CDC gate"
 		} else {
-			note += "; source CDC remains disabled until QMIGRATION_EXPERIMENTAL_DAMENG_LOG_CDC=1"
+			note += "; source CDC remains disabled until DTS_EXPERIMENTAL_DAMENG_LOG_CDC=1"
 		}
 	}
 	return connector.Descriptor{
@@ -63,9 +63,9 @@ func (*Factory) New(ds domain.DataSource) (connector.Connector, error) {
 	return &Connector{ds: ds}, nil
 }
 
-func experimentalEnabled() bool { return envOn("QMIGRATION_EXPERIMENTAL_DAMENG_NATIVE") }
+func experimentalEnabled() bool { return envOn("DTS_EXPERIMENTAL_DAMENG_NATIVE") }
 func experimentalCDCEnabled() bool {
-	return experimentalEnabled() && envOn("QMIGRATION_EXPERIMENTAL_DAMENG_LOG_CDC")
+	return experimentalEnabled() && envOn("DTS_EXPERIMENTAL_DAMENG_LOG_CDC")
 }
 func envOn(name string) bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv(name))) {
@@ -206,7 +206,7 @@ func validateTransportSettings(ds domain.DataSource) error {
 		}
 		return nil
 	case domain.TLSModePreferred, domain.TLSModeRequired:
-		return fmt.Errorf("Dameng TLS mode %s is not qualified in RC13; QMigration refuses to silently downgrade the provider transport", mode)
+		return fmt.Errorf("Dameng TLS mode %s is not qualified in RC13; DTS refuses to silently downgrade the provider transport", mode)
 	default:
 		return fmt.Errorf("invalid Dameng TLS mode %q", ds.TLSMode)
 	}
@@ -216,12 +216,12 @@ var openRunner = func(ds domain.DataSource) (dmRunner, error) {
 	if err := validateTransportSettings(ds); err != nil {
 		return nil, err
 	}
-	if err := loadDriverPlugin(os.Getenv("QMIGRATION_DAMENG_DRIVER_PLUGIN")); err != nil {
+	if err := loadDriverPlugin(os.Getenv("DTS_DAMENG_DRIVER_PLUGIN")); err != nil {
 		return nil, err
 	}
 	driver := strings.TrimSpace(ds.DriverClass)
 	if driver == "" {
-		driver = strings.TrimSpace(os.Getenv("QMIGRATION_DAMENG_SQL_DRIVER"))
+		driver = strings.TrimSpace(os.Getenv("DTS_DAMENG_SQL_DRIVER"))
 	}
 	if driver == "" {
 		driver = "dm"
@@ -234,7 +234,7 @@ var openRunner = func(ds domain.DataSource) (dmRunner, error) {
 		}
 	}
 	if !found {
-		return nil, fmt.Errorf("Dameng database/sql driver %q is not registered in this QMigration binary", driver)
+		return nil, fmt.Errorf("Dameng database/sql driver %q is not registered in this DTS binary", driver)
 	}
 	dsn := strings.TrimSpace(ds.JDBCURL)
 	if dsn == "" || strings.HasPrefix(strings.ToLower(dsn), "jdbc:") {
@@ -1087,14 +1087,14 @@ func (c *Connector) PlanKeysetBoundaries(ctx context.Context, req connector.Keys
 func (c *Connector) MigrationPrechecks(ctx context.Context, source bool) []domain.PrecheckItem {
 	items := []domain.PrecheckItem{}
 	if !experimentalEnabled() {
-		return append(items, domain.PrecheckItem{Name: "Dameng native gate", Level: domain.PrecheckFailed, Message: "set QMIGRATION_EXPERIMENTAL_DAMENG_NATIVE=1 after qualification"})
+		return append(items, domain.PrecheckItem{Name: "Dameng native gate", Level: domain.PrecheckFailed, Message: "set DTS_EXPERIMENTAL_DAMENG_NATIVE=1 after qualification"})
 	}
 	if _, err := c.get(ctx); err != nil {
 		return append(items, domain.PrecheckItem{Name: "Dameng SQL driver", Level: domain.PrecheckFailed, Message: err.Error()})
 	}
 	if source {
 		if !experimentalCDCEnabled() {
-			items = append(items, domain.PrecheckItem{Name: "Dameng source CDC", Level: domain.PrecheckWarning, Message: "set QMIGRATION_EXPERIMENTAL_DAMENG_LOG_CDC=1 to enable the experimental DBMS_LOGMNR archived-log source reader"})
+			items = append(items, domain.PrecheckItem{Name: "Dameng source CDC", Level: domain.PrecheckWarning, Message: "set DTS_EXPERIMENTAL_DAMENG_LOG_CDC=1 to enable the experimental DBMS_LOGMNR archived-log source reader"})
 		} else {
 			items = append(items, c.damengCDCPrechecks(ctx)...)
 		}

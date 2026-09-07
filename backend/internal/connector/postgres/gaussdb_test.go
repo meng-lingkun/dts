@@ -7,16 +7,16 @@ import (
 	"strings"
 	"testing"
 
-	"qmigration/backend/internal/connector"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/connector"
+	"dts/backend/internal/domain"
 )
 
 func gv(s string) []byte { return []byte(s) }
 
 func TestGaussDBCapabilitiesAreQualificationGated(t *testing.T) {
 	f := NewFactory()
-	t.Setenv("QMIGRATION_EXPERIMENTAL_GAUSSDB_NATIVE", "")
-	t.Setenv("QMIGRATION_EXPERIMENTAL_GAUSSDB_LOGICAL_CDC", "")
+	t.Setenv("DTS_EXPERIMENTAL_GAUSSDB_NATIVE", "")
+	t.Setenv("DTS_EXPERIMENTAL_GAUSSDB_LOGICAL_CDC", "")
 	d := f.Capabilities(domain.DataSourceGaussDB)
 	if !d.Has(connector.CapabilityProtocolProbe) || d.Has(connector.CapabilityFullRead) || d.Has(connector.CapabilityCDCRead) {
 		t.Fatalf("default GaussDB descriptor must remain probe only: %+v", d)
@@ -25,7 +25,7 @@ func TestGaussDBCapabilitiesAreQualificationGated(t *testing.T) {
 		t.Fatalf("unexpected default GaussDB maturity: %+v", d)
 	}
 
-	t.Setenv("QMIGRATION_EXPERIMENTAL_GAUSSDB_NATIVE", "1")
+	t.Setenv("DTS_EXPERIMENTAL_GAUSSDB_NATIVE", "1")
 	d = f.Capabilities(domain.DataSourceGaussDB)
 	for _, cap := range []connector.Capability{connector.CapabilityMetadata, connector.CapabilityFullRead, connector.CapabilityFullWrite, connector.CapabilityCDCApply, connector.CapabilityCDCTransactional} {
 		if !d.Has(cap) {
@@ -39,7 +39,7 @@ func TestGaussDBCapabilitiesAreQualificationGated(t *testing.T) {
 		t.Fatalf("unexpected gated GaussDB maturity: %+v", d)
 	}
 
-	t.Setenv("QMIGRATION_EXPERIMENTAL_GAUSSDB_LOGICAL_CDC", "1")
+	t.Setenv("DTS_EXPERIMENTAL_GAUSSDB_LOGICAL_CDC", "1")
 	d = f.Capabilities(domain.DataSourceGaussDB)
 	for _, cap := range []connector.Capability{connector.CapabilityCDCRead, connector.CapabilityCDCPosition, connector.CapabilityCDCCheckpoint} {
 		if !d.Has(cap) {
@@ -59,7 +59,7 @@ func TestParseGaussDBLogicalTransaction(t *testing.T) {
 		{gv("0/104"), gv("42"), gv(`{"table_name":"public.orders","op_type":"DELETE","columns_name":[],"columns_type":[],"columns_val":[],"old_keys_name":["id"],"old_keys_type":["integer"],"old_keys_val":["1"]}`)},
 		{gv("0/105"), gv("42"), gv("COMMIT 42")},
 	}}
-	txs, err := ParseGaussDBLogicalRows(rows, "qmigration_slot")
+	txs, err := ParseGaussDBLogicalRows(rows, "dts_slot")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +74,7 @@ func TestParseGaussDBLogicalTransaction(t *testing.T) {
 		t.Fatalf("update=%+v", upd)
 	}
 	for i, ev := range txs[0].Events {
-		if ev.PositionType != "GAUSSDB_LSN" || ev.PositionValue != "0/105" || ev.Resource != "qmigration_slot" || !strings.HasPrefix(ev.ID, "gaussdb:42:0/105:") {
+		if ev.PositionType != "GAUSSDB_LSN" || ev.PositionValue != "0/105" || ev.Resource != "dts_slot" || !strings.HasPrefix(ev.ID, "gaussdb:42:0/105:") {
 			t.Fatalf("event %d checkpoint identity=%+v", i, ev)
 		}
 	}
@@ -112,7 +112,7 @@ func TestParseGaussDBLogicalArrayAndSafetyFailures(t *testing.T) {
 }
 
 func TestGaussDBCreateSlotForcesLSNOrder(t *testing.T) {
-	q, err := gaussDBCreateSlotQuery("qmigration_slot")
+	q, err := gaussDBCreateSlotQuery("dts_slot")
 	if err != nil {
 		t.Fatal(err)
 	}

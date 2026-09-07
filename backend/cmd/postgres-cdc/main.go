@@ -10,12 +10,12 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"qmigration/backend/internal/cdc/ddlsidecar"
-	"qmigration/backend/internal/cdc/pgoutput"
-	cdcruntime "qmigration/backend/internal/cdc/runtime"
-	"qmigration/backend/internal/connector"
-	postgresconnector "qmigration/backend/internal/connector/postgres"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/cdc/ddlsidecar"
+	"dts/backend/internal/cdc/pgoutput"
+	cdcruntime "dts/backend/internal/cdc/runtime"
+	"dts/backend/internal/connector"
+	postgresconnector "dts/backend/internal/connector/postgres"
+	"dts/backend/internal/domain"
 	"strconv"
 	"strings"
 	"time"
@@ -91,8 +91,8 @@ func waitCDCReady(ctx context.Context, client *http.Client, endpoint, token stri
 		if token != "" {
 			req.Header.Set("Authorization", "Bearer "+token)
 		}
-		if workerToken := strings.TrimSpace(os.Getenv("QMIGRATION_WORKER_TOKEN")); workerToken != "" {
-			req.Header.Set("X-QMigration-Worker-Token", workerToken)
+		if workerToken := strings.TrimSpace(os.Getenv("DTS_WORKER_TOKEN")); workerToken != "" {
+			req.Header.Set("X-DTS-Worker-Token", workerToken)
 		}
 		resp, err := client.Do(req)
 		if err == nil {
@@ -136,8 +136,8 @@ func postTransaction(ctx context.Context, client *http.Client, endpoint, token, 
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	if workerToken := strings.TrimSpace(os.Getenv("QMIGRATION_WORKER_TOKEN")); workerToken != "" {
-		req.Header.Set("X-QMigration-Worker-Token", workerToken)
+	if workerToken := strings.TrimSpace(os.Getenv("DTS_WORKER_TOKEN")); workerToken != "" {
+		req.Header.Set("X-DTS-Worker-Token", workerToken)
 	}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -146,7 +146,7 @@ func postTransaction(ctx context.Context, client *http.Client, endpoint, token, 
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("QMigration returned %s: %s", resp.Status, strings.TrimSpace(string(data)))
+		return nil, fmt.Errorf("DTS returned %s: %s", resp.Status, strings.TrimSpace(string(data)))
 	}
 	var out domain.CDCApplyResult
 	if len(data) > 0 {
@@ -158,59 +158,59 @@ func postTransaction(ctx context.Context, client *http.Client, endpoint, token, 
 }
 
 func run(ctx context.Context) error {
-	server := strings.TrimRight(env("QMIGRATION_SERVER", "http://127.0.0.1:8080"), "/")
-	taskID := env("QMIGRATION_TASK_ID", "")
+	server := strings.TrimRight(env("DTS_SERVER", "http://127.0.0.1:8080"), "/")
+	taskID := env("DTS_TASK_ID", "")
 	if taskID == "" {
-		return errors.New("QMIGRATION_TASK_ID is required")
+		return errors.New("DTS_TASK_ID is required")
 	}
-	direction := strings.ToLower(env("QMIGRATION_CDC_DIRECTION", "forward"))
+	direction := strings.ToLower(env("DTS_CDC_DIRECTION", "forward"))
 	if direction != "forward" && direction != "reverse" {
-		return errors.New("QMIGRATION_CDC_DIRECTION must be forward or reverse")
+		return errors.New("DTS_CDC_DIRECTION must be forward or reverse")
 	}
-	host := env("QMIGRATION_PG_HOST", "")
-	user := env("QMIGRATION_PG_USER", "")
-	slot := env("QMIGRATION_PG_SLOT", "")
-	publication := env("QMIGRATION_PG_PUBLICATION", "")
-	startLSN := env("QMIGRATION_PG_START_LSN", "")
+	host := env("DTS_PG_HOST", "")
+	user := env("DTS_PG_USER", "")
+	slot := env("DTS_PG_SLOT", "")
+	publication := env("DTS_PG_PUBLICATION", "")
+	startLSN := env("DTS_PG_START_LSN", "")
 	if host == "" || user == "" || slot == "" || publication == "" || startLSN == "" {
-		return errors.New("QMIGRATION_PG_HOST, USER, SLOT, PUBLICATION and START_LSN are required")
+		return errors.New("DTS_PG_HOST, USER, SLOT, PUBLICATION and START_LSN are required")
 	}
-	port, _ := strconv.Atoi(env("QMIGRATION_PG_PORT", "5432"))
+	port, _ := strconv.Atoi(env("DTS_PG_PORT", "5432"))
 	if port <= 0 {
 		port = 5432
 	}
-	sourceType := domain.DataSourceType(strings.ToLower(env("QMIGRATION_PG_SOURCE_TYPE", string(domain.DataSourcePostgreSQL))))
+	sourceType := domain.DataSourceType(strings.ToLower(env("DTS_PG_SOURCE_TYPE", string(domain.DataSourcePostgreSQL))))
 	switch sourceType {
 	case domain.DataSourcePostgreSQL, domain.DataSourcePolarDBPostgreSQL:
 	case domain.DataSourceKingbase:
-		if !envEnabled("QMIGRATION_EXPERIMENTAL_KINGBASE_LOGICAL_CDC") {
-			return errors.New("KingbaseES CDC requires QMIGRATION_EXPERIMENTAL_KINGBASE_LOGICAL_CDC=1")
+		if !envEnabled("DTS_EXPERIMENTAL_KINGBASE_LOGICAL_CDC") {
+			return errors.New("KingbaseES CDC requires DTS_EXPERIMENTAL_KINGBASE_LOGICAL_CDC=1")
 		}
 	default:
-		return fmt.Errorf("qmigration-postgres-cdc does not support source type %s", sourceType)
+		return fmt.Errorf("dts-postgres-cdc does not support source type %s", sourceType)
 	}
 	ds := domain.DataSource{
 		Type: sourceType, Host: host, Port: port, Username: user,
-		Password: os.Getenv(env("QMIGRATION_PG_PASSWORD_ENV", "PGPASSWORD")), Database: env("QMIGRATION_PG_DATABASE", user),
-		TLSMode: domain.TLSMode(env("QMIGRATION_PG_TLS_MODE", "PREFERRED")), TLSServerName: env("QMIGRATION_PG_TLS_SERVER_NAME", ""),
-		TLSCACert:     os.Getenv(env("QMIGRATION_PG_TLS_CA_ENV", "QMIGRATION_PG_TLS_CA")),
-		TLSClientCert: os.Getenv(env("QMIGRATION_PG_TLS_CLIENT_CERT_ENV", "QMIGRATION_PG_TLS_CLIENT_CERT")),
-		TLSClientKey:  os.Getenv(env("QMIGRATION_PG_TLS_CLIENT_KEY_ENV", "QMIGRATION_PG_TLS_CLIENT_KEY")),
+		Password: os.Getenv(env("DTS_PG_PASSWORD_ENV", "PGPASSWORD")), Database: env("DTS_PG_DATABASE", user),
+		TLSMode: domain.TLSMode(env("DTS_PG_TLS_MODE", "PREFERRED")), TLSServerName: env("DTS_PG_TLS_SERVER_NAME", ""),
+		TLSCACert:     os.Getenv(env("DTS_PG_TLS_CA_ENV", "DTS_PG_TLS_CA")),
+		TLSClientCert: os.Getenv(env("DTS_PG_TLS_CLIENT_CERT_ENV", "DTS_PG_TLS_CLIENT_CERT")),
+		TLSClientKey:  os.Getenv(env("DTS_PG_TLS_CLIENT_KEY_ENV", "DTS_PG_TLS_CLIENT_KEY")),
 	}
 	positionType, idPrefix := "LSN", "pg"
 	if sourceType == domain.DataSourceKingbase {
 		positionType, idPrefix = "KINGBASE_LSN", "kingbase"
 	}
-	endpoint := env("QMIGRATION_CDC_ENDPOINT", server+"/api/v1/migrations/"+taskID+"/cdc/events")
-	readyEndpoint := env("QMIGRATION_CDC_READY_ENDPOINT", "")
-	token := env("QMIGRATION_API_TOKEN", "")
+	endpoint := env("DTS_CDC_ENDPOINT", server+"/api/v1/migrations/"+taskID+"/cdc/events")
+	readyEndpoint := env("DTS_CDC_READY_ENDPOINT", "")
+	token := env("DTS_API_TOKEN", "")
 	client := &http.Client{Timeout: 90 * time.Second}
 	retryDelay := time.Second
-	if d, err := time.ParseDuration(env("QMIGRATION_CDC_RETRY_DELAY", "1s")); err == nil && d > 0 {
+	if d, err := time.ParseDuration(env("DTS_CDC_RETRY_DELAY", "1s")); err == nil && d > 0 {
 		retryDelay = d
 	}
 	publicationTables := []string{}
-	for _, item := range strings.Split(env("QMIGRATION_PG_PUBLICATION_TABLES", ""), ",") {
+	for _, item := range strings.Split(env("DTS_PG_PUBLICATION_TABLES", ""), ",") {
 		if v := strings.TrimSpace(item); v != "" {
 			publicationTables = append(publicationTables, v)
 		}
@@ -264,14 +264,14 @@ func run(ctx context.Context) error {
 			}
 		}
 		var reader cdcruntime.Reader = pgoutput.NewReaderWithDialect(stream, positionType, idPrefix)
-		if sourceType == domain.DataSourceKingbase && envEnabled("QMIGRATION_EXPERIMENTAL_KINGBASE_DDL_CDC") {
-			url := env("QMIGRATION_KINGBASE_DDL_SIDECAR_URL", "")
+		if sourceType == domain.DataSourceKingbase && envEnabled("DTS_EXPERIMENTAL_KINGBASE_DDL_CDC") {
+			url := env("DTS_KINGBASE_DDL_SIDECAR_URL", "")
 			if url == "" {
 				stream.Close()
 				raw.Close()
-				return errors.New("Kingbase DDL CDC requires QMIGRATION_KINGBASE_DDL_SIDECAR_URL")
+				return errors.New("Kingbase DDL CDC requires DTS_KINGBASE_DDL_SIDECAR_URL")
 			}
-			ddlClient, err := ddlsidecar.New(url, env("QMIGRATION_KINGBASE_DDL_SIDECAR_TOKEN", ""), env("QMIGRATION_KINGBASE_DDL_SIDECAR_SERVER_NAME", ""), os.Getenv(env("QMIGRATION_KINGBASE_DDL_SIDECAR_CA_ENV", "QMIGRATION_KINGBASE_DDL_SIDECAR_CA")))
+			ddlClient, err := ddlsidecar.New(url, env("DTS_KINGBASE_DDL_SIDECAR_TOKEN", ""), env("DTS_KINGBASE_DDL_SIDECAR_SERVER_NAME", ""), os.Getenv(env("DTS_KINGBASE_DDL_SIDECAR_CA_ENV", "DTS_KINGBASE_DDL_SIDECAR_CA")))
 			if err != nil {
 				stream.Close()
 				raw.Close()

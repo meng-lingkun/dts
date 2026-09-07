@@ -4,7 +4,7 @@ import (
 	"context"
 	"sort"
 
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/domain"
 )
 
 // ValidationHotPathProvider keeps large validation tasks bounded. Implementations

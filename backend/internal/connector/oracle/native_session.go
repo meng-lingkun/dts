@@ -85,7 +85,7 @@ func buildTTCStatementRequest(sql string, ttcVersion byte) ([]byte, error) {
 	w.compactUint(0, 4)
 	w.compactUint(0, 4)
 	w.compactUint(0x7fffffff, 4)
-	w.byte(0) // no bind variables; QMigration renders guarded literals
+	w.byte(0) // no bind variables; DTS renders guarded literals
 	w.byte(0)
 	w.byte(0)
 	w.byte(0)

@@ -1,19 +1,19 @@
-# QMigration V0.15.0-unified-dev13 Release Notes
+# DTS V0.15.0-unified-dev13 Release Notes
 
 ## Scope
 
-This snapshot continues the single QMigration Unified Engine and hardens the experimental Oracle Native TTC SQL layer added in dev12. The focus is dataset/cursor correctness: coalesced TTC messages, fetch continuation, complete OER Summary parsing, ROWID wire decoding and bounded BLOB/CLOB locator/chunk primitives. No external migration runtime is introduced and Oracle production metadata/full/CDC capabilities remain disabled.
+This snapshot continues the single DTS Unified Engine and hardens the experimental Oracle Native TTC SQL layer added in dev12. The focus is dataset/cursor correctness: coalesced TTC messages, fetch continuation, complete OER Summary parsing, ROWID wire decoding and bounded BLOB/CLOB locator/chunk primitives. No external migration runtime is introduced and Oracle production metadata/full/CDC capabilities remain disabled.
 
 ## TTC dataset and packet handling
 
-- SELECT responses no longer assume one TTC message per TNS DATA packet. QMigration now consumes multiple describe/header/row/RPA/summary/status messages coalesced in one packet while preserving packet-level safety bounds.
+- SELECT responses no longer assume one TTC message per TNS DATA packet. DTS now consumes multiple describe/header/row/RPA/summary/status messages coalesced in one packet while preserving packet-level safety bounds.
 - Added dataset row-header decoding including column count, row count, UAC length and Oracle's optional column-presence bit vector.
 - Added code-21 column bit-vector updates for subsequent row batches.
 - Added query return-parameter-area decoding for SCN fields, session timezone properties and bounded query-id bytes.
 
 ## OER Summary and cursor lifecycle
 
-- Added complete QMigration-owned SELECT/fetch OER Summary parsing for the TTC versions currently negotiated by the connector.
+- Added complete DTS-owned SELECT/fetch OER Summary parsing for the TTC versions currently negotiated by the connector.
 - Cursor id, current row, return code, error position, flags, warning state and ORA error text are retained instead of treating the summary as only a terminal return code.
 - `ORA-01403` is treated as cursor exhaustion rather than a migration error.
 - Added native TTC fetch continuation request generation (`function 3/5`) and cursor-state guards.
@@ -42,7 +42,7 @@ The full backend passes `go test ./...` and `go vet ./...`.
 
 ## Capability boundary
 
-`QMIGRATION_EXPERIMENTAL_ORACLE_TTC_QUERY=1` continues to imply negotiation and password authentication, but the production Connector descriptor still exposes only `protocol-probe`. This release does **not** claim real-Oracle Data Dictionary execution, Native Full Reader/Writer, real LOB qualification or Redo/LogMiner CDC.
+`DTS_EXPERIMENTAL_ORACLE_TTC_QUERY=1` continues to imply negotiation and password authentication, but the production Connector descriptor still exposes only `protocol-probe`. This release does **not** claim real-Oracle Data Dictionary execution, Native Full Reader/Writer, real LOB qualification or Redo/LogMiner CDC.
 
 ## Metadata
 

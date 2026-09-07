@@ -2,10 +2,10 @@
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-BIN=${QMIGRATION_SQLSERVER_QUALIFY_BIN:-"$ROOT/bin/qmigration-sqlserver-qualify"}
+BIN=${DTS_SQLSERVER_QUALIFY_BIN:-"$ROOT/bin/dts-sqlserver-qualify"}
 
 if [[ ! -x "$BIN" ]]; then
-  echo "building qmigration-sqlserver-qualify" >&2
+  echo "building dts-sqlserver-qualify" >&2
   (cd "$ROOT/backend" && go build -o "$BIN" ./cmd/sqlserver-qualify)
 fi
 

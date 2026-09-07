@@ -1,4 +1,4 @@
--- V0.15 unified-dev14 connects the QMigration-owned Oracle TTC query runtime
+-- V0.15 unified-dev14 connects the DTS-owned Oracle TTC query runtime
 -- to experimental Oracle Data Dictionary / Full Reader source capabilities and
 -- an experimental DBMS_LOGMNR/SCN CDC reader. Oracle target write/schema/DDL
 -- capabilities remain gated pending bind + large-LOB DML qualification.

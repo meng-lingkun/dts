@@ -1,4 +1,4 @@
-# QMigration V0.15.0-unified-dev2
+# DTS V0.15.0-unified-dev2
 
 ## 目标
 
@@ -19,7 +19,7 @@
    - 目标 Apply/Checkpoint 失败时绝不确认源端位点。
 
 4. **openGauss / Kingbase Native Full Load**
-   - 直接复用 QMigration 自研 PostgreSQL frontend/backend Wire Protocol。
+   - 直接复用 DTS 自研 PostgreSQL frontend/backend Wire Protocol。
    - 不依赖 JDBC/DataX/SeaTunnel/Flink。
    - 当前不声明 pgoutput CDC 能力。
 
@@ -28,5 +28,5 @@
 
 ## 兼容性
 
-- 旧 `engine` 字段继续归一化为 `qmigration`。
+- 旧 `engine` 字段继续归一化为 `dts`。
 - Oracle/SQL Server/DB2/DM/GaussDB/GBase 在 Native Connector 完成前仍会 fail-safe 拒绝迁移，不回退第三方 runtime。

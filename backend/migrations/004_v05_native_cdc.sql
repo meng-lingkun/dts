@@ -1,4 +1,4 @@
--- QMigration V0.5 native CDC, post-load DDL and resource-aware scheduling metadata.
+-- DTS V0.5 native CDC, post-load DDL and resource-aware scheduling metadata.
 ALTER TABLE migration_tasks ADD COLUMN IF NOT EXISTS paused_from_status text;
 ALTER TABLE migration_tasks ADD COLUMN IF NOT EXISTS post_load_ddl_mode text NOT NULL DEFAULT 'INDEXES';
 ALTER TABLE migration_tasks ADD COLUMN IF NOT EXISTS rollback_cdc_engine text;

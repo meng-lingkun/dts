@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"qmigration/backend/internal/cdc/obbinlog"
-	"qmigration/backend/internal/connector"
-	mysqlconnector "qmigration/backend/internal/connector/mysql"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/cdc/obbinlog"
+	"dts/backend/internal/connector"
+	mysqlconnector "dts/backend/internal/connector/mysql"
+	"dts/backend/internal/domain"
 )
 
 const toolVersion = "0.15.0-rc49"

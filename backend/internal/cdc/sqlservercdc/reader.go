@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	cdcruntime "qmigration/backend/internal/cdc/runtime"
-	sqlserverconnector "qmigration/backend/internal/connector/sqlserver"
-	"qmigration/backend/internal/domain"
+	cdcruntime "dts/backend/internal/cdc/runtime"
+	sqlserverconnector "dts/backend/internal/connector/sqlserver"
+	"dts/backend/internal/domain"
 	"strings"
 	"time"
 )

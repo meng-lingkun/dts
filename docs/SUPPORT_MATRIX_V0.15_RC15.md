@@ -1,11 +1,11 @@
-# QMigration V0.15.0-rc15 Support Matrix
+# DTS V0.15.0-rc15 Support Matrix
 
-This matrix describes QMigration-owned migration/runtime support. SQL-wire
+This matrix describes DTS-owned migration/runtime support. SQL-wire
 compatibility or a protocol probe alone does not imply source CDC support.
 Vendor client libraries may be required only where the database exposes a
 vendor API rather than a SQL/wire log API. Db2 uses IBM `db2ReadLog` on the
 source Log Agent host; Dameng uses its `database/sql` driver strictly as SQL
-transport while QMigration owns migration semantics.
+transport while DTS owns migration semantics.
 
 | Database | Metadata | Full Read | Full Write / CDC Apply | Source CDC | Schema / DDL | Status |
 |---|---:|---:|---:|---|---:|---|
@@ -21,17 +21,17 @@ transport while QMigration owns migration semantics.
 | Kingbase | Yes | Yes | Yes | Not advertised | Yes | NATIVE_FULL_ONLY |
 | Oracle | Yes | Yes | Yes | LogMiner / SCN | Yes | EXPERIMENTAL; qualification required |
 | SQL Server | Yes | Yes | Yes | SQL Server CDC / LSN | Yes | EXPERIMENTAL; qualification required |
-| **DB2 LUW** | **Yes** | **Yes, EXTDTA LOB + VECTOR_SERIALIZE source** | **Yes, Prepared SQLDTA/EXTDTA + VECTOR target** | **QMigration Log Agent + IBM db2ReadLog / DB2_LRI** | **Yes** | **EXPERIMENTAL; qualification required** |
+| **DB2 LUW** | **Yes** | **Yes, EXTDTA LOB + VECTOR_SERIALIZE source** | **Yes, Prepared SQLDTA/EXTDTA + VECTOR target** | **DTS Log Agent + IBM db2ReadLog / DB2_LRI** | **Yes** | **EXPERIMENTAL; qualification required** |
 | **Dameng / DM** | **Yes** | **Yes** | **Yes, prepared INSERT/MERGE + transactional CDC Apply** | **Not advertised** | **Table/PK/index/FK** | **EXPERIMENTAL; qualification required** |
 | **GaussDB** | **Yes** | **Yes** | **Yes** | **mppdb_decoding binary SQL API / GAUSSDB_LSN** | **Target schema yes; source DDL not advertised** | **EXPERIMENTAL; qualification required** |
 | GBase | No | No | No | No | No | PROBE_ONLY |
 
 ## GaussDB RC15 scope
 
-Implemented behind `QMIGRATION_EXPERIMENTAL_GAUSSDB_NATIVE=1` plus
-`QMIGRATION_EXPERIMENTAL_GAUSSDB_LOGICAL_CDC=1` for source CDC:
+Implemented behind `DTS_EXPERIMENTAL_GAUSSDB_NATIVE=1` plus
+`DTS_EXPERIMENTAL_GAUSSDB_LOGICAL_CDC=1` for source CDC:
 
-- QMigration PostgreSQL-wire Metadata, Full Read/Write, keyset/boundary, schema
+- DTS PostgreSQL-wire Metadata, Full Read/Write, keyset/boundary, schema
   and target transactional apply;
 - durable current position as `GAUSSDB_LSN` and explicit LSN-based
   `mppdb_decoding` slot (`output_order=0`);
@@ -42,8 +42,8 @@ Implemented behind `QMIGRATION_EXPERIMENTAL_GAUSSDB_NATIVE=1` plus
 - byte-preserving NUL/non-UTF8 handling, SQL NULL versus empty-value
   distinction, and OID 17 `bytea` conversion;
 - selected-table `white-table-list`, primary-key validation, transaction
-  event/byte safety bounds and QMigration TLS settings;
-- `qmigration-gaussdb-qualify` validates the actual temporary binary-peek path.
+  event/byte safety bounds and DTS TLS settings;
+- `dts-gaussdb-qualify` validates the actual temporary binary-peek path.
 
 Fail-closed/not advertised in RC15: source DDL replay, multi-primary logical
 CDC, malformed/unknown binary frame variants, and production maturity without
@@ -51,7 +51,7 @@ retained centralized/distributed real-instance reports.
 
 ## Dameng RC13 scope
 
-Implemented behind `QMIGRATION_EXPERIMENTAL_DAMENG_NATIVE=1`: QMigration-owned
+Implemented behind `DTS_EXPERIMENTAL_DAMENG_NATIVE=1`: DTS-owned
 catalog, Full Load, schema and target apply with a replaceable vendor
 `database/sql` transport provider. Source CDC remains unadvertised pending a
 supported and retained-qualified source-log API.
@@ -59,7 +59,7 @@ supported and retained-qualified source-log API.
 ## DB2 RC12 scope
 
 The existing qualification-gated DB2 LUW DRDA/DDM Full/target and source-side
-QMigration Log Agent + IBM `db2ReadLog` path remains unchanged in RC15,
+DTS Log Agent + IBM `db2ReadLog` path remains unchanged in RC15,
 including DB2_LRI durability, value compression, logged LOB/XML, multi-insert,
 row compensation, relocation/decomposed updates and VECTOR source/target
 software paths. Real DB2 11.5/12.1 and pureScale qualification remains a

@@ -4,7 +4,7 @@ import (
 	"context"
 	"log"
 	"os"
-	"qmigration/backend/internal/repository"
+	"dts/backend/internal/repository"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -67,22 +67,22 @@ func intEnv(name string, fallback int) int {
 
 func ConfigFromEnv() Config {
 	return Config{
-		Enabled:  boolEnv("QMIGRATION_METADATA_MAINTENANCE_ENABLED", true),
-		Interval: time.Duration(intEnv("QMIGRATION_METADATA_MAINTENANCE_INTERVAL_MINUTES", 10)) * time.Minute,
+		Enabled:  boolEnv("DTS_METADATA_MAINTENANCE_ENABLED", true),
+		Interval: time.Duration(intEnv("DTS_METADATA_MAINTENANCE_INTERVAL_MINUTES", 10)) * time.Minute,
 		Policy: repository.MetadataRetentionPolicy{
-			TaskLogMaxAge:                 time.Duration(intEnv("QMIGRATION_TASK_LOG_RETENTION_HOURS", 168)) * time.Hour,
-			TaskLogMaxRowsPerTask:         intEnv("QMIGRATION_TASK_LOG_MAX_ROWS_PER_TASK", 20000),
-			AuditMaxAge:                   time.Duration(intEnv("QMIGRATION_AUDIT_RETENTION_HOURS", 2160)) * time.Hour,
-			AuditMaxRows:                  intEnv("QMIGRATION_AUDIT_MAX_ROWS", 100000),
-			CDCPositionMaxAge:             time.Duration(intEnv("QMIGRATION_CDC_POSITION_RETENTION_HOURS", 168)) * time.Hour,
-			CDCPositionMaxRowsPerStream:   intEnv("QMIGRATION_CDC_POSITION_MAX_ROWS_PER_STREAM", 4096),
-			ValidationMaxAttemptsPerChunk: intEnv("QMIGRATION_VALIDATION_MAX_ATTEMPTS_PER_CHUNK", 1),
-			ValidationAttemptMaxAge:       time.Duration(intEnv("QMIGRATION_VALIDATION_ATTEMPT_RETENTION_HOURS", 24)) * time.Hour,
-			ValidationTerminalMaxAge:      time.Duration(intEnv("QMIGRATION_VALIDATION_TERMINAL_RETENTION_HOURS", 2160)) * time.Hour,
-			ValidationArchivePageSize:     intEnv("QMIGRATION_VALIDATION_ARCHIVE_PAGE_SIZE", 512),
-			ValidationArchiveTasksPerRun:  intEnv("QMIGRATION_VALIDATION_ARCHIVE_TASKS_PER_RUN", 8),
-			BatchRows:                     intEnv("QMIGRATION_METADATA_PRUNE_BATCH_ROWS", 5000),
-			MaxBatches:                    intEnv("QMIGRATION_METADATA_PRUNE_MAX_BATCHES", 4),
+			TaskLogMaxAge:                 time.Duration(intEnv("DTS_TASK_LOG_RETENTION_HOURS", 168)) * time.Hour,
+			TaskLogMaxRowsPerTask:         intEnv("DTS_TASK_LOG_MAX_ROWS_PER_TASK", 20000),
+			AuditMaxAge:                   time.Duration(intEnv("DTS_AUDIT_RETENTION_HOURS", 2160)) * time.Hour,
+			AuditMaxRows:                  intEnv("DTS_AUDIT_MAX_ROWS", 100000),
+			CDCPositionMaxAge:             time.Duration(intEnv("DTS_CDC_POSITION_RETENTION_HOURS", 168)) * time.Hour,
+			CDCPositionMaxRowsPerStream:   intEnv("DTS_CDC_POSITION_MAX_ROWS_PER_STREAM", 4096),
+			ValidationMaxAttemptsPerChunk: intEnv("DTS_VALIDATION_MAX_ATTEMPTS_PER_CHUNK", 1),
+			ValidationAttemptMaxAge:       time.Duration(intEnv("DTS_VALIDATION_ATTEMPT_RETENTION_HOURS", 24)) * time.Hour,
+			ValidationTerminalMaxAge:      time.Duration(intEnv("DTS_VALIDATION_TERMINAL_RETENTION_HOURS", 2160)) * time.Hour,
+			ValidationArchivePageSize:     intEnv("DTS_VALIDATION_ARCHIVE_PAGE_SIZE", 512),
+			ValidationArchiveTasksPerRun:  intEnv("DTS_VALIDATION_ARCHIVE_TASKS_PER_RUN", 8),
+			BatchRows:                     intEnv("DTS_METADATA_PRUNE_BATCH_ROWS", 5000),
+			MaxBatches:                    intEnv("DTS_METADATA_PRUNE_MAX_BATCHES", 4),
 		},
 	}
 }

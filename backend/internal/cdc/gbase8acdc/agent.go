@@ -17,13 +17,13 @@ import (
 	"strings"
 	"time"
 
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/domain"
 )
 
 // GBase 8a does not expose a single portable public SQL log API across every
-// deployment.  QMigration therefore uses a datasource-local provider contract:
+// deployment.  DTS therefore uses a datasource-local provider contract:
 // vendor SDK/C/C++ code supplies complete committed transactions plus explicit
-// lineage/schema/order proofs, while QMigration owns transaction apply,
+// lineage/schema/order proofs, while DTS owns transaction apply,
 // checkpoint durability and source ACK ordering.
 
 type SchemaColumn struct {
@@ -384,7 +384,7 @@ func (c *Client) Ack(ctx context.Context, r AckRequest) error {
 
 // ValidateReadResponseForAgent validates a native/local provider response before
 // it is exposed by the HTTP agent. It is intentionally the same strict proof
-// validation used by the remote QMigration reader.
+// validation used by the remote DTS reader.
 func ValidateReadResponseForAgent(resp *ReadResponse, after uint64, lineage string, selections []TableSelection) error {
 	return validateTransactions(resp, after, lineage, selections)
 }

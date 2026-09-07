@@ -15,11 +15,11 @@ import (
 	"strings"
 	"time"
 
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/domain"
 )
 
 // Item is one position in the source transaction order. Kind is DML or DDL.
-// DML entries are placeholders: QMigration substitutes the next event from the
+// DML entries are placeholders: DTS substitutes the next event from the
 // native DML decoder. DDL entries carry the exact vendor-observed statement.
 type Item struct {
 	Kind   string `json:"kind"`

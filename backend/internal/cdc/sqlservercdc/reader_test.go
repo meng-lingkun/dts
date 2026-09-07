@@ -3,10 +3,10 @@ package sqlservercdc
 import (
 	"context"
 	"errors"
-	cdcruntime "qmigration/backend/internal/cdc/runtime"
-	"qmigration/backend/internal/connector"
-	sqlserverconnector "qmigration/backend/internal/connector/sqlserver"
-	"qmigration/backend/internal/domain"
+	cdcruntime "dts/backend/internal/cdc/runtime"
+	"dts/backend/internal/connector"
+	sqlserverconnector "dts/backend/internal/connector/sqlserver"
+	"dts/backend/internal/domain"
 	"testing"
 	"time"
 )

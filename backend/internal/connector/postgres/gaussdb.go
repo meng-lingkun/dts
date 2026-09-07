@@ -6,13 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/domain"
 	"strconv"
 	"strings"
 )
 
 // GaussDBTransaction is one committed logical-decoding transaction returned by
-// GaussDB's pg_logical_slot_peek_changes SQL API.  QMigration applies Events
+// GaussDB's pg_logical_slot_peek_changes SQL API.  DTS applies Events
 // first and advances the source slot to CommitLSN only after target commit.
 type GaussDBTransaction struct {
 	XID       string
@@ -75,9 +75,9 @@ func gaussDBCreateSlotQuery(slot string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// output_order=0 is mandatory for QMigration. Recent GaussDB releases can
+	// output_order=0 is mandatory for DTS. Recent GaussDB releases can
 	// create CSN-ordered slots on CNs; pg_logical_slot_get_changes cannot
-	// advance those slots on a CN, while QMigration checkpoints are LSN based.
+	// advance those slots on a CN, while DTS checkpoints are LSN based.
 	return "SELECT * FROM pg_create_logical_replication_slot(" + pgLiteral(slot) + ",'mppdb_decoding',0)", nil
 }
 
@@ -356,7 +356,7 @@ func (c *Connector) PeekGaussDBTransactionsWithDDL(ctx context.Context, slot str
 	return mergeGaussDBDDLAndBinary(summaries, binaryTx)
 }
 
-// AcknowledgeGaussDBTransaction advances the slot only after QMigration has
+// AcknowledgeGaussDBTransaction advances the slot only after DTS has
 // committed the target transaction.  pg_logical_slot_get_changes with upto_lsn
 // consumes the previously peeked source range and therefore provides the same
 // apply-before-ACK ordering as the other native CDC readers.

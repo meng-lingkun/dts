@@ -3,7 +3,7 @@ package obbinlog
 import (
 	"testing"
 
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/domain"
 )
 
 func TestParseEndpoint(t *testing.T) {

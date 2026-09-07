@@ -1,4 +1,4 @@
-# QMigration V0.15.0-rc27 Release Notes
+# DTS V0.15.0-rc27 Release Notes
 
 ## Scope
 
@@ -6,7 +6,7 @@ RC27 closes two production-engineering gaps without overclaiming a GBase 8a sour
 
 ## GBase 8a target CDC apply
 
-- New gate: `QMIGRATION_EXPERIMENTAL_GBASE8A_TARGET_CDC=1` (also requires the existing native GBase 8a gate).
+- New gate: `DTS_EXPERIMENTAL_GBASE8A_TARGET_CDC=1` (also requires the existing native GBase 8a gate).
 - The connector now advertises `cdc-apply` and `point-lookup` under that gate.
 - INSERT/UPDATE use the already-hardened HASH layout validation + per-batch staging + `MERGE` replay path.
 - DELETE uses mapped stable-key delete.
@@ -25,7 +25,7 @@ RC27 adds opt-in failpoints around the durability ordering that matters most to 
 - after target apply before durable checkpoint;
 - after durable checkpoint before source ACK.
 
-`qmigration-chaos-qualify` runs three end-to-end synthetic crash windows and verifies durable spool reuse, checkpoint duplicate suppression, and no second target write after a lost source ACK.
+`dts-chaos-qualify` runs three end-to-end synthetic crash windows and verifies durable spool reuse, checkpoint duplicate suppression, and no second target write after a lost source ACK.
 
 Fault injection is disabled by default. A malformed explicitly enabled plan fails closed.
 

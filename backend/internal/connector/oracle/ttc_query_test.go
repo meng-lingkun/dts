@@ -9,7 +9,7 @@ import (
 	"net"
 	"testing"
 
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/domain"
 )
 
 func encodeFakeDescribeColumn(w *ttcEncoder, dataType byte, precision byte, maxLen uint64, charsetID uint64, charsetForm byte, maxCharLen uint64, nullable bool, name, typeName string, ttcVersion byte) {
@@ -69,7 +69,7 @@ func fakeDescribePayload(ttcVersion byte, columns ...func(*ttcEncoder)) []byte {
 }
 
 func TestBuildTTCSelectRequest(t *testing.T) {
-	const sql = "SELECT 1 AS QMIGRATION_PROBE FROM DUAL"
+	const sql = "SELECT 1 AS DTS_PROBE FROM DUAL"
 	b, err := buildTTCSelectRequest(sql, 12, 16)
 	if err != nil {
 		t.Fatal(err)
@@ -140,7 +140,7 @@ func domainDataSourceOracle(port int, password string) domain.DataSource {
 }
 
 func TestNativeOracleExperimentalTTCQueryTranscript(t *testing.T) {
-	t.Setenv("QMIGRATION_EXPERIMENTAL_ORACLE_TTC_QUERY", "1")
+	t.Setenv("DTS_EXPERIMENTAL_ORACLE_TTC_QUERY", "1")
 	const password = "Secret123!"
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -223,12 +223,12 @@ func TestNativeOracleExperimentalTTCQueryTranscript(t *testing.T) {
 
 		// OALL8 parse+execute request.
 		typ, body, err := readTNSPacket(c)
-		if err != nil || typ != tnsData || len(body) < 6 || body[2] != 3 || body[3] != 0x5e || !bytes.Contains(body, []byte("SELECT 1 AS QMIGRATION_PROBE FROM DUAL")) {
+		if err != nil || typ != tnsData || len(body) < 6 || body[2] != 3 || body[3] != 0x5e || !bytes.Contains(body, []byte("SELECT 1 AS DTS_PROBE FROM DUAL")) {
 			serverErr <- fmt.Errorf("query request typ=%d body=%x err=%v", typ, body, err)
 			return
 		}
 		describe := fakeDescribePayload(12, func(w *ttcEncoder) {
-			encodeFakeDescribeColumn(w, oracleTypeNUMBER, 38, 22, 0, 0, 0, false, "QMIGRATION_PROBE", "", 12)
+			encodeFakeDescribeColumn(w, oracleTypeNUMBER, 38, 22, 0, 0, 0, false, "DTS_PROBE", "", 12)
 		})
 		if err := sendTNSPacket(c, tnsData, append([]byte{0, 0, ttcDescribe}, describe...)); err != nil {
 			serverErr <- err

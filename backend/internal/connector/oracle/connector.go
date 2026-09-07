@@ -10,8 +10,8 @@ import (
 	"io"
 	"net"
 	"os"
-	"qmigration/backend/internal/connector"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/connector"
+	"dts/backend/internal/domain"
 	"strconv"
 	"strings"
 	"sync"
@@ -30,7 +30,7 @@ type Factory struct{}
 func NewFactory() *Factory { return &Factory{} }
 func (*Factory) Capabilities(t domain.DataSourceType) connector.Descriptor {
 	caps := []connector.Capability{connector.CapabilityProtocolProbe}
-	note := "QMigration native Oracle Net/TNS/TCPS + TTC transport is available; production data-plane capabilities remain gated until explicitly enabled"
+	note := "DTS native Oracle Net/TNS/TCPS + TTC transport is available; production data-plane capabilities remain gated until explicitly enabled"
 	if experimentalOracleNativeEnabled() {
 		caps = append(caps,
 			connector.CapabilityMetadata,
@@ -42,7 +42,7 @@ func (*Factory) Capabilities(t domain.DataSourceType) connector.Descriptor {
 			connector.CapabilityPointLookup,
 			connector.CapabilityMigrationPrecheck,
 		)
-		note = "EXPERIMENTAL QMigration native Oracle TTC source data plane enabled by QMIGRATION_EXPERIMENTAL_ORACLE_NATIVE"
+		note = "EXPERIMENTAL DTS native Oracle TTC source data plane enabled by DTS_EXPERIMENTAL_ORACLE_NATIVE"
 	}
 	if experimentalOracleTargetEnabled() {
 		caps = append(caps,
@@ -53,11 +53,11 @@ func (*Factory) Capabilities(t domain.DataSourceType) connector.Descriptor {
 			connector.CapabilityCDCTransactional,
 			connector.CapabilityDDLApply,
 		)
-		note += "; EXPERIMENTAL Oracle target bind/array-bind/prepared DML + LOB/schema/CDC apply enabled by QMIGRATION_EXPERIMENTAL_ORACLE_TARGET"
+		note += "; EXPERIMENTAL Oracle target bind/array-bind/prepared DML + LOB/schema/CDC apply enabled by DTS_EXPERIMENTAL_ORACLE_TARGET"
 	}
 	if experimentalOracleLogMinerCDCEnabled() {
 		caps = append(caps, connector.CapabilityCDCPosition, connector.CapabilityCDCRead, connector.CapabilityValidationSnapshot)
-		note += "; EXPERIMENTAL LogMiner/SCN CDC reader + exact AS OF SCN validation snapshot enabled by QMIGRATION_EXPERIMENTAL_ORACLE_LOGMINER_CDC"
+		note += "; EXPERIMENTAL LogMiner/SCN CDC reader + exact AS OF SCN validation snapshot enabled by DTS_EXPERIMENTAL_ORACLE_LOGMINER_CDC"
 	}
 	return connector.Descriptor{Type: t, Protocol: "oracle-tns", Native: true, Capabilities: caps, Maturity: connector.MaturityExperimental, QualificationRequired: true, Note: note}
 }
@@ -151,7 +151,7 @@ func (c *Connector) TestConnection(ctx context.Context) error {
 			c.sessionProperties = result.SessionProperties
 			c.version += "-auth"
 			if queryProbe {
-				query, err := c.executeTTCSelect(ctx, accepted, info, dataInfo, "SELECT 1 AS QMIGRATION_PROBE FROM DUAL")
+				query, err := c.executeTTCSelect(ctx, accepted, info, dataInfo, "SELECT 1 AS DTS_PROBE FROM DUAL")
 				if err != nil {
 					return err
 				}
@@ -173,22 +173,22 @@ func envEnabled(name string) bool {
 	return v == "1" || v == "true" || v == "yes" || v == "on"
 }
 func experimentalOracleTTCNegotiationEnabled() bool {
-	return envEnabled("QMIGRATION_EXPERIMENTAL_ORACLE_TTC_NEGOTIATION")
+	return envEnabled("DTS_EXPERIMENTAL_ORACLE_TTC_NEGOTIATION")
 }
 func experimentalOracleTTCAuthEnabled() bool {
-	return envEnabled("QMIGRATION_EXPERIMENTAL_ORACLE_TTC_AUTH")
+	return envEnabled("DTS_EXPERIMENTAL_ORACLE_TTC_AUTH")
 }
 func experimentalOracleTTCQueryEnabled() bool {
-	return envEnabled("QMIGRATION_EXPERIMENTAL_ORACLE_TTC_QUERY")
+	return envEnabled("DTS_EXPERIMENTAL_ORACLE_TTC_QUERY")
 }
 func experimentalOracleNativeEnabled() bool {
-	return envEnabled("QMIGRATION_EXPERIMENTAL_ORACLE_NATIVE")
+	return envEnabled("DTS_EXPERIMENTAL_ORACLE_NATIVE")
 }
 func experimentalOracleTargetEnabled() bool {
-	return experimentalOracleNativeEnabled() && envEnabled("QMIGRATION_EXPERIMENTAL_ORACLE_TARGET")
+	return experimentalOracleNativeEnabled() && envEnabled("DTS_EXPERIMENTAL_ORACLE_TARGET")
 }
 func experimentalOracleLogMinerCDCEnabled() bool {
-	return experimentalOracleNativeEnabled() && envEnabled("QMIGRATION_EXPERIMENTAL_ORACLE_LOGMINER_CDC")
+	return experimentalOracleNativeEnabled() && envEnabled("DTS_EXPERIMENTAL_ORACLE_LOGMINER_CDC")
 }
 
 // openAcceptedSession follows Oracle listener redirects and returns the same
@@ -206,7 +206,7 @@ func (c *Connector) openAcceptedSession(ctx context.Context) (*acceptedSession, 
 			return nil, err
 		}
 		_ = nc.SetDeadline(time.Now().Add(5 * time.Second))
-		descriptor := fmt.Sprintf("(DESCRIPTION=(CONNECT_DATA=(SERVICE_NAME=%s)(CID=(PROGRAM=QMigration)(HOST=qmigration)(USER=qmigration))))", sanitizeTNSValue(service))
+		descriptor := fmt.Sprintf("(DESCRIPTION=(CONNECT_DATA=(SERVICE_NAME=%s)(CID=(PROGRAM=DTS)(HOST=dts)(USER=dts))))", sanitizeTNSValue(service))
 		if _, err = nc.Write(buildConnectPacket(descriptor)); err != nil {
 			_ = nc.Close()
 			return nil, fmt.Errorf("TNS CONNECT write: %w", err)
@@ -337,7 +337,7 @@ func (c *Connector) probeEndpoint(ctx context.Context, host string, port int, se
 	}
 	defer nc.Close()
 	_ = nc.SetDeadline(time.Now().Add(5 * time.Second))
-	descriptor := fmt.Sprintf("(DESCRIPTION=(CONNECT_DATA=(SERVICE_NAME=%s)(CID=(PROGRAM=QMigration)(HOST=qmigration)(USER=qmigration))))", sanitizeTNSValue(service))
+	descriptor := fmt.Sprintf("(DESCRIPTION=(CONNECT_DATA=(SERVICE_NAME=%s)(CID=(PROGRAM=DTS)(HOST=dts)(USER=dts))))", sanitizeTNSValue(service))
 	if _, err = nc.Write(buildConnectPacket(descriptor)); err != nil {
 		return 0, nil, fmt.Errorf("TNS CONNECT write: %w", err)
 	}

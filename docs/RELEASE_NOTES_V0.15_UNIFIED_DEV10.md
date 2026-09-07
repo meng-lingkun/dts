@@ -1,20 +1,20 @@
-# QMigration V0.15.0-unified-dev10 Release Notes
+# DTS V0.15.0-unified-dev10 Release Notes
 
 ## Scope
 
-This snapshot continues the single QMigration Unified Engine. It does not add an external migration runtime.
+This snapshot continues the single DTS Unified Engine. It does not add an external migration runtime.
 
 ## S3-compatible CDC spool crash recovery
 
-- Adds native `ListMultipartUploads` support to the QMigration SigV4 S3 client.
-- `Reconcile` aborts only stale multipart uploads beneath the QMigration `pending/` prefix.
-- Default stale-upload threshold is 6 hours and is configurable with `QMIGRATION_CDC_SPOOL_S3_MULTIPART_ABORT_AFTER_HOURS`.
+- Adds native `ListMultipartUploads` support to the DTS SigV4 S3 client.
+- `Reconcile` aborts only stale multipart uploads beneath the DTS `pending/` prefix.
+- Default stale-upload threshold is 6 hours and is configurable with `DTS_CDC_SPOOL_S3_MULTIPART_ABORT_AFTER_HOURS`.
 - Fresh uploads are never aborted by reconciliation; uploads without a trustworthy `Initiated` timestamp are also left untouched.
 - Source ACK semantics do not change: a multipart upload must be completed and its Metadata row committed before the position can be acknowledged.
 
 ## Oracle Native TTC foundation
 
-- Adds a QMigration-owned TTC message stream on top of the existing accepted TNS DATA session.
+- Adds a DTS-owned TTC message stream on top of the existing accepted TNS DATA session.
 - Adds an explicit TTC session phase machine: transport -> protocol -> data type -> authenticated -> ready.
 - Adds native Oracle Data Dictionary query plans for users, tables, columns, primary keys and indexes.
 - Adds Oracle type normalization and identifier quoting helpers for the future native metadata/full-load path.

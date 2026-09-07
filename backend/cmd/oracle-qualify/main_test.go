@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"qmigration/backend/internal/connector"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/connector"
+	"dts/backend/internal/domain"
 )
 
 type fakeBase struct{ err error }

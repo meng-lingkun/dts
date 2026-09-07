@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"qmigration/backend/internal/cdc/db2log"
+	"dts/backend/internal/cdc/db2log"
 )
 
 func env(k, d string) string {
@@ -271,11 +271,11 @@ func (s *server) bootstrap(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, out)
 }
 func main() {
-	provider := env("QMIGRATION_DB2_READLOG_PROVIDER", "qmigration-db2-readlog-provider")
+	provider := env("DTS_DB2_READLOG_PROVIDER", "dts-db2-readlog-provider")
 	if _, err := exec.LookPath(provider); err != nil {
 		log.Fatalf("DB2 readlog provider %q not found: %v", provider, err)
 	}
-	s := &server{provider: commandProvider{path: provider}, token: strings.TrimSpace(os.Getenv("QMIGRATION_DB2_LOG_TOKEN"))}
+	s := &server{provider: commandProvider{path: provider}, token: strings.TrimSpace(os.Getenv("DTS_DB2_LOG_TOKEN"))}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/health", s.health)
 	mux.HandleFunc("/v1/position", s.position)
@@ -283,9 +283,9 @@ func main() {
 	mux.HandleFunc("/v1/streams", s.streams)
 	mux.HandleFunc("/v1/streams/", s.streamRecords)
 	mux.HandleFunc("/v1/bootstrap", s.bootstrap)
-	srv := &http.Server{Addr: env("QMIGRATION_DB2_LOG_LISTEN", ":8787"), Handler: mux, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 2 * time.Minute, WriteTimeout: 2 * time.Minute, IdleTimeout: 2 * time.Minute}
-	cert, key := strings.TrimSpace(os.Getenv("QMIGRATION_DB2_LOG_TLS_CERT_FILE")), strings.TrimSpace(os.Getenv("QMIGRATION_DB2_LOG_TLS_KEY_FILE"))
-	log.Printf("QMigration DB2 Log Agent listening on %s", srv.Addr)
+	srv := &http.Server{Addr: env("DTS_DB2_LOG_LISTEN", ":8787"), Handler: mux, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 2 * time.Minute, WriteTimeout: 2 * time.Minute, IdleTimeout: 2 * time.Minute}
+	cert, key := strings.TrimSpace(os.Getenv("DTS_DB2_LOG_TLS_CERT_FILE")), strings.TrimSpace(os.Getenv("DTS_DB2_LOG_TLS_KEY_FILE"))
+	log.Printf("DTS DB2 Log Agent listening on %s", srv.Addr)
 	var err error
 	if cert != "" || key != "" {
 		if cert == "" || key == "" {

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-BIN=${QMIGRATION_GAUSSDB_QUALIFY_BIN:-"$ROOT/bin/qmigration-gaussdb-qualify"}
+BIN=${DTS_GAUSSDB_QUALIFY_BIN:-"$ROOT/bin/dts-gaussdb-qualify"}
 if [[ ! -x "$BIN" ]]; then
-  echo "building qmigration-gaussdb-qualify" >&2
+  echo "building dts-gaussdb-qualify" >&2
   (cd "$ROOT/backend" && go build -o "$BIN" ./cmd/gaussdb-qualify)
 fi
 : "${GAUSSDB_HOST:?set GAUSSDB_HOST}"

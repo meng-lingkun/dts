@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-BIN=${QMIGRATION_DAMENG_QUALIFY_BIN:-"$ROOT/bin/qmigration-dameng-qualify"}
+BIN=${DTS_DAMENG_QUALIFY_BIN:-"$ROOT/bin/dts-dameng-qualify"}
 if [[ ! -x "$BIN" ]]; then
-  echo "building qmigration-dameng-qualify" >&2
+  echo "building dts-dameng-qualify" >&2
   (cd "$ROOT/backend" && go build -o "$BIN" ./cmd/dameng-qualify)
 fi
 : "${DAMENG_HOST:?set DAMENG_HOST}"

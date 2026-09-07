@@ -10,7 +10,7 @@ $repositoryRoot = [System.IO.Path]::GetFullPath((Join-Path $scriptDirectory "..\
 $version = (Get-Content -LiteralPath (Join-Path $repositoryRoot "VERSION") -Raw).Trim()
 if (-not $OutputDirectory) { $OutputDirectory = Join-Path $repositoryRoot "dist" }
 $outputRoot = [System.IO.Path]::GetFullPath($OutputDirectory)
-$packageName = "qmigration-offline-$version-linux-$Architecture"
+$packageName = "dts-kubernetes-offline-$version-linux-$Architecture"
 $stage = [System.IO.Path]::GetFullPath((Join-Path $outputRoot $packageName))
 $binaryDirectory = Join-Path $outputRoot ".offline-linux-$Architecture-bin"
 $archive = Join-Path $outputRoot "$packageName.tar.gz"
@@ -44,9 +44,9 @@ try {
     Pop-Location
 }
 
-Write-Host "[2/8] Cross-compiling Linux QMigration binaries"
+Write-Host "[2/8] Cross-compiling Linux DTS binaries"
 $commands = @(
-    "server", "worker", "qmigrationctl", "cdc-bridge", "binlog-inspect",
+    "server", "worker", "dtsctl", "cdc-bridge", "binlog-inspect",
     "mysql-cdc", "tidb-cdc", "postgres-cdc", "opengauss-cdc", "gaussdb-cdc",
     "sqlserver-cdc", "oracle-cdc", "db2-cdc", "dameng-cdc", "gbase-cdc", "gbase8s-cdc"
 )
@@ -59,10 +59,10 @@ $env:CGO_ENABLED = "0"
 Push-Location (Join-Path $repositoryRoot "backend")
 try {
     foreach ($command in $commands) {
-        $outputName = "qmigration-$command"
-        if ($command -eq "server") { $outputName = "qmigration-server" }
-        if ($command -eq "worker") { $outputName = "qmigration-worker" }
-        if ($command -eq "qmigrationctl") { $outputName = "qmigrationctl" }
+        $outputName = "dts-$command"
+        if ($command -eq "server") { $outputName = "dts-server" }
+        if ($command -eq "worker") { $outputName = "dts-worker" }
+        if ($command -eq "dtsctl") { $outputName = "dtsctl" }
         go build -trimpath -ldflags="-s -w" -o (Join-Path $binaryDirectory $outputName) "./cmd/$command"
         if ($LASTEXITCODE -ne 0) { throw "Go build failed for $command" }
     }
@@ -84,16 +84,13 @@ try {
 
 }
 
-Write-Host "[4/8] Staging pinned Docker Engine and Compose runtimes"
+Write-Host "[4/8] Staging pinned Kubernetes client"
 New-Item -ItemType Directory -Force -Path $runtimeDirectory | Out-Null
-Copy-Item -LiteralPath (Join-Path $runtimeSource "versions.env"), (Join-Path $runtimeSource "docker.service") -Destination $runtimeDirectory
+Copy-Item -LiteralPath (Join-Path $runtimeSource "versions.env") -Destination $runtimeDirectory
 $runtimeValues = @{}
 foreach ($line in Get-Content -LiteralPath (Join-Path $runtimeSource "versions.env")) {
     if ($line -match '^([A-Z0-9_]+)=(.+)$') { $runtimeValues[$Matches[1]] = $Matches[2] }
 }
-$dockerArchiveName = "docker-$($runtimeValues.DOCKER_ENGINE_VERSION).tgz"
-$dockerArchive = Join-Path $runtimeDirectory $dockerArchiveName
-$composeBinary = Join-Path $runtimeDirectory "docker-compose-linux-x86_64"
 $kubectlBinary = Join-Path $runtimeDirectory "kubectl"
 
 function Get-VerifiedRuntimeFile {
@@ -117,41 +114,34 @@ function Get-VerifiedRuntimeFile {
     }
 }
 
-Get-VerifiedRuntimeFile -Uri "https://download.docker.com/linux/static/stable/x86_64/$dockerArchiveName" -Destination $dockerArchive -ExpectedSHA256 $runtimeValues.DOCKER_ENGINE_SHA256
-Get-VerifiedRuntimeFile -Uri "https://github.com/docker/compose/releases/download/v$($runtimeValues.DOCKER_COMPOSE_VERSION)/docker-compose-linux-x86_64" -Destination $composeBinary -ExpectedSHA256 $runtimeValues.DOCKER_COMPOSE_SHA256
 Get-VerifiedRuntimeFile -Uri "https://dl.k8s.io/release/v$($runtimeValues.KUBECTL_VERSION)/bin/linux/amd64/kubectl" -Destination $kubectlBinary -ExpectedSHA256 $runtimeValues.KUBECTL_SHA256
-$dockerArchiveEntries = @(tar -tzf $dockerArchive)
-foreach ($binary in "ctr", "docker", "docker-init", "containerd", "containerd-shim-runc-v2", "dockerd", "docker-proxy", "runc") {
-    if ($dockerArchiveEntries -notcontains "docker/$binary") { throw "Docker runtime archive is missing $binary" }
-}
-
 Write-Host "[5/8] Staging installer and operational material"
-foreach ($file in "docker-compose.offline.yml", "install.sh", "install-kubernetes.sh", "load-images-kubernetes.sh", "install-container-runtime.sh", "verify.sh", "uninstall.sh", "README.md") {
+foreach ($file in "install.sh", "install-kubernetes.sh", "load-images-kubernetes.sh", "verify.sh", "uninstall.sh", "README.md") {
     Copy-Item -LiteralPath (Join-Path $scriptDirectory $file) -Destination $stage
 }
 Copy-Item -Path (Join-Path $repositoryRoot "deployments\kubernetes\*.yaml") -Destination (Join-Path $stage "kubernetes")
 Copy-Item -LiteralPath (Join-Path $repositoryRoot "VERSION") -Destination $stage
-Copy-Item -LiteralPath (Join-Path $binaryDirectory "qmigrationctl") -Destination (Join-Path $stage "bin")
+if (-not $FinalizeOnly) {
+    Copy-Item -LiteralPath (Join-Path $binaryDirectory "dtsctl") -Destination (Join-Path $stage "bin")
+} elseif (-not (Test-Path -LiteralPath (Join-Path $stage "bin/dtsctl"))) {
+    throw "FinalizeOnly requires a staged dtsctl from the matching image release"
+}
 Copy-Item -Path (Join-Path $repositoryRoot "backend\migrations\*.sql") -Destination (Join-Path $stage "migrations")
-foreach ($doc in "USER_GUIDE.md", "MAINTENANCE_GUIDE.md", "PROJECT_ARCHITECTURE.md", "ARCHITECTURE_ASSESSMENT.md") {
+foreach ($doc in "USER_GUIDE.md", "MAINTENANCE_GUIDE.md", "PROJECT_ARCHITECTURE.md", "ARCHITECTURE_ASSESSMENT.md", "DTS_RENAME_UPGRADE.md") {
     Copy-Item -LiteralPath (Join-Path $repositoryRoot "docs\$doc") -Destination (Join-Path $stage "docs")
 }
 
 Write-Host "[6/8] Writing package manifest"
 $imageFiles = Get-ChildItem -LiteralPath (Join-Path $stage "images") -File | Sort-Object Name
 $manifest = [ordered]@{
-    name = "QMigration offline installation package"
+    name = "DTS offline installation package"
     version = $version
     platform = "linux/$Architecture"
     created_at = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
     base_images = @("alpine:3.22", "nginxinc/nginx-unprivileged:1.29-alpine", "postgres:17")
-    container_runtime = [ordered]@{
-        docker_engine_version = $runtimeValues.DOCKER_ENGINE_VERSION
-        docker_engine_archive = "runtime/$dockerArchiveName"
-        docker_engine_sha256 = $runtimeValues.DOCKER_ENGINE_SHA256
-        docker_compose_version = $runtimeValues.DOCKER_COMPOSE_VERSION
-        docker_compose_archive = "runtime/docker-compose-linux-x86_64"
-        docker_compose_sha256 = $runtimeValues.DOCKER_COMPOSE_SHA256
+    deployment = "kubernetes"
+    node_runtime = "containerd (provided by existing Kubernetes cluster)"
+    kubernetes_client = [ordered]@{
         kubectl_version = $runtimeValues.KUBECTL_VERSION
         kubectl_archive = "runtime/kubectl"
         kubectl_sha256 = $runtimeValues.KUBECTL_SHA256
@@ -162,6 +152,17 @@ $manifest = [ordered]@{
 }
 $manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $stage "manifest.json") -Encoding utf8
 
+# Fail closed when an old Compose payload is accidentally reused.
+foreach ($obsolete in "docker-compose.offline.yml", "install-container-runtime.sh", "runtime/docker.service", "runtime/docker-compose-linux-x86_64") {
+    if (Test-Path -LiteralPath (Join-Path $stage $obsolete)) { throw "Obsolete runtime payload in stage: $obsolete. Use a clean Kubernetes stage." }
+}
+if (Get-ChildItem -LiteralPath $runtimeDirectory -Filter "docker-*.tgz") { throw "Docker Engine must not be shipped in the Kubernetes package" }
+# Normalize Linux text assets even when checked out with core.autocrlf=true.
+$utf8 = [System.Text.UTF8Encoding]::new($false)
+Get-ChildItem -LiteralPath $stage -File -Recurse | Where-Object { $_.Extension -in ".sh", ".env", ".yaml", ".yml", ".md", ".sql", ".json" -or $_.Name -eq "VERSION" } | ForEach-Object {
+    $content = [System.IO.File]::ReadAllText($_.FullName).Replace("`r`n", "`n")
+    [System.IO.File]::WriteAllText($_.FullName, $content, $utf8)
+}
 Write-Host "[7/8] Writing SHA-256 inventory"
 $checksumLines = Get-ChildItem -LiteralPath $stage -File -Recurse | Where-Object Name -ne "SHA256SUMS" | Sort-Object FullName | ForEach-Object {
     $relative = [System.IO.Path]::GetRelativePath($stage, $_.FullName).Replace("\", "/")

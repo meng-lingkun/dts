@@ -11,7 +11,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/domain"
 )
 
 const (
@@ -156,7 +156,7 @@ type ParsedRecord struct {
 
 // ParsedRow is one logical row mutation inside a DMS record. Most DMS records
 // contain exactly one row; DMSMultiInsert contains multiple row descriptions in
-// one log record and is expanded into one QMigration CDC event per row.
+// one log record and is expanded into one DTS CDC event per row.
 type ParsedRow struct {
 	RID    string
 	Before []domain.CDCField
@@ -306,7 +306,7 @@ func rowOuterTypeAt(dms []byte, pos int, bo binary.ByteOrder) (byte, int, error)
 }
 
 // ParseDataManager parses the documented propagatable Data Manager records
-// QMigration needs for row CDC. Unsupported/ambiguous formats fail closed.
+// DTS needs for row CDC. Unsupported/ambiguous formats fail closed.
 func ParseDataManager(e RecordEnvelope, selection *Selection, desc *TableDescriptor) (*ParsedRecord, error) {
 	return ParseDataManagerWithLOB(e, selection, desc, nil)
 }
@@ -554,7 +554,7 @@ func parseMultiInsertRows(dms []byte, td *TableDescriptor, cols []domain.ColumnI
 }
 
 // parseMultiInsertRowsWithLOB reconstructs DMS 167 while preserving the only
-// row association QMigration can prove from the documented format. The multi-
+// row association DTS can prove from the documented format. The multi-
 // insert record has a RID and row image per row, but LOB/XML/VECTOR manager
 // records carry table/column identity rather than a multi-insert row ordinal.
 // Therefore one pending out-of-row group can be assigned only when exactly one
@@ -907,7 +907,7 @@ func decodeValueCompressedRowWithLOB(inner []byte, td *TableDescriptor, cols []d
 		return nil, errors.New("DB2 VALUE COMPRESSION inner row header is truncated")
 	}
 	n := int(bo.Uint16(inner[2:4]))
-	// QMigration target apply requires full after-images.  The documented
+	// DTS target apply requires full after-images.  The documented
 	// format can describe fewer columns, but until column-id mapping for that
 	// partial form is qualified we refuse it instead of guessing positions.
 	if n != len(td.Fields) || n != len(cols) {
@@ -1021,7 +1021,7 @@ func compressedSystemDefault(f DescriptorField) ([]byte, bool, error) {
 	case FieldSmallInt, FieldInteger, FieldDecimal, FieldDouble, FieldReal, FieldBigInt, FieldDecFloat64, FieldDecFloat128:
 		return []byte("0"), false, nil
 	case FieldChar, FieldGraphic:
-		// Db2's type default is blanks.  QMigration normalizes fixed CHAR/
+		// Db2's type default is blanks.  DTS normalizes fixed CHAR/
 		// GRAPHIC values by trimming right-padding in the non-compressed path,
 		// therefore the equivalent visible value is the empty string.
 		return []byte{}, false, nil

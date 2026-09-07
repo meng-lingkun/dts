@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/domain"
 	"testing"
 )
 

@@ -1,4 +1,4 @@
-# QMigration V0.15.0-rc40 Release Notes
+# DTS V0.15.0-rc40 Release Notes
 
 RC40 closes the main RC39 fault-domain scheduling gap: a risky rack/zone/region now converges work that was already RUNNING before the peer failure, not only future claims.
 
@@ -8,10 +8,10 @@ When correlated peer risk establishes a domain cap, numeric range and bounded-ke
 
 Default caps remain those introduced by RC39:
 
-- DEGRADED peer evidence: `QMIGRATION_TOPOLOGY_FAULT_DOMAIN_DEGRADED_MAX_CONCURRENCY=2`
-- HALF_OPEN/CIRCUIT_OPEN evidence: `QMIGRATION_TOPOLOGY_FAULT_DOMAIN_CRITICAL_MAX_CONCURRENCY=1`
+- DEGRADED peer evidence: `DTS_TOPOLOGY_FAULT_DOMAIN_DEGRADED_MAX_CONCURRENCY=2`
+- HALF_OPEN/CIRCUIT_OPEN evidence: `DTS_TOPOLOGY_FAULT_DOMAIN_CRITICAL_MAX_CONCURRENCY=1`
 
-`QMIGRATION_TOPOLOGY_FAULT_DOMAIN_RUNNING_SHED=true` enables the convergence path by default.
+`DTS_TOPOLOGY_FAULT_DOMAIN_RUNNING_SHED=true` enables the convergence path by default.
 
 ## Survivor safety
 
@@ -27,7 +27,7 @@ RC40 also fixes an RC39 edge: cooperative remainders now copy `fault_domain_json
 
 - task field `adaptive_fault_domain_yields`
 - WebSocket task progress field `adaptive_fault_domain_yields`
-- Prometheus `qmigration_task_adaptive_fault_domain_yields_total`
+- Prometheus `dts_task_adaptive_fault_domain_yields_total`
 - task detail UI item `故障域让出`
 
 ## Qualification boundary

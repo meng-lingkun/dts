@@ -13,9 +13,9 @@ import (
 	"strings"
 	"time"
 
-	"qmigration/backend/internal/cdc/gbase8acdc"
-	cdcruntime "qmigration/backend/internal/cdc/runtime"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/cdc/gbase8acdc"
+	cdcruntime "dts/backend/internal/cdc/runtime"
+	"dts/backend/internal/domain"
 )
 
 func env(k, d string) string {
@@ -44,8 +44,8 @@ func post(ctx context.Context, c *http.Client, url, token, direction string, eve
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	if wt := strings.TrimSpace(os.Getenv("QMIGRATION_WORKER_TOKEN")); wt != "" {
-		req.Header.Set("X-QMigration-Worker-Token", wt)
+	if wt := strings.TrimSpace(os.Getenv("DTS_WORKER_TOKEN")); wt != "" {
+		req.Header.Set("X-DTS-Worker-Token", wt)
 	}
 	resp, e := c.Do(req)
 	if e != nil {
@@ -54,7 +54,7 @@ func post(ctx context.Context, c *http.Client, url, token, direction string, eve
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("QMigration returned %s: %s", resp.Status, strings.TrimSpace(string(data)))
+		return nil, fmt.Errorf("DTS returned %s: %s", resp.Status, strings.TrimSpace(string(data)))
 	}
 	var out domain.CDCApplyResult
 	if len(data) > 0 {
@@ -65,35 +65,35 @@ func post(ctx context.Context, c *http.Client, url, token, direction string, eve
 	return &out, nil
 }
 func run(ctx context.Context) error {
-	if !on("QMIGRATION_EXPERIMENTAL_GBASE8A_NATIVE") || !on("QMIGRATION_EXPERIMENTAL_GBASE8A_SOURCE_CDC") {
-		return errors.New("GBase 8a CDC requires QMIGRATION_EXPERIMENTAL_GBASE8A_NATIVE=1 and QMIGRATION_EXPERIMENTAL_GBASE8A_SOURCE_CDC=1")
+	if !on("DTS_EXPERIMENTAL_GBASE8A_NATIVE") || !on("DTS_EXPERIMENTAL_GBASE8A_SOURCE_CDC") {
+		return errors.New("GBase 8a CDC requires DTS_EXPERIMENTAL_GBASE8A_NATIVE=1 and DTS_EXPERIMENTAL_GBASE8A_SOURCE_CDC=1")
 	}
-	raw, start, database := env("QMIGRATION_GBASE8A_CDC_URL", ""), env("QMIGRATION_GBASE8A_CDC_START_POSITION", ""), env("QMIGRATION_GBASE8A_CDC_DATABASE", "")
+	raw, start, database := env("DTS_GBASE8A_CDC_URL", ""), env("DTS_GBASE8A_CDC_START_POSITION", ""), env("DTS_GBASE8A_CDC_DATABASE", "")
 	if raw == "" || start == "" {
 		return errors.New("GBase 8a CDC URL and start position are required")
 	}
 	var selections []gbase8acdc.TableSelection
-	if e := json.Unmarshal([]byte(env("QMIGRATION_GBASE8A_CDC_SELECTIONS_JSON", "")), &selections); e != nil || len(selections) == 0 {
+	if e := json.Unmarshal([]byte(env("DTS_GBASE8A_CDC_SELECTIONS_JSON", "")), &selections); e != nil || len(selections) == 0 {
 		return fmt.Errorf("invalid GBase 8a CDC selections: %v", e)
 	}
-	agent, e := gbase8acdc.NewClient(raw, os.Getenv("QMIGRATION_GBASE8A_CDC_CA_PEM"), os.Getenv("QMIGRATION_GBASE8A_CDC_SERVER_NAME"), os.Getenv("QMIGRATION_GBASE8A_CDC_TOKEN"))
+	agent, e := gbase8acdc.NewClient(raw, os.Getenv("DTS_GBASE8A_CDC_CA_PEM"), os.Getenv("DTS_GBASE8A_CDC_SERVER_NAME"), os.Getenv("DTS_GBASE8A_CDC_TOKEN"))
 	if e != nil {
 		return e
 	}
 	if e = agent.Health(ctx); e != nil {
 		return fmt.Errorf("GBase 8a CDC provider health: %w", e)
 	}
-	server := strings.TrimRight(env("QMIGRATION_SERVER", "http://127.0.0.1:8080"), "/")
-	task := env("QMIGRATION_TASK_ID", "")
+	server := strings.TrimRight(env("DTS_SERVER", "http://127.0.0.1:8080"), "/")
+	task := env("DTS_TASK_ID", "")
 	if task == "" {
-		return errors.New("QMIGRATION_TASK_ID is required")
+		return errors.New("DTS_TASK_ID is required")
 	}
-	direction := strings.ToLower(env("QMIGRATION_CDC_DIRECTION", "forward"))
+	direction := strings.ToLower(env("DTS_CDC_DIRECTION", "forward"))
 	if direction != "forward" && direction != "reverse" {
 		return errors.New("invalid CDC direction")
 	}
-	endpoint := env("QMIGRATION_CDC_ENDPOINT", server+"/api/v1/migrations/"+task+"/cdc/events")
-	token := env("QMIGRATION_API_TOKEN", "")
+	endpoint := env("DTS_CDC_ENDPOINT", server+"/api/v1/migrations/"+task+"/cdc/events")
+	token := env("DTS_API_TOKEN", "")
 	hc := &http.Client{Timeout: 90 * time.Second}
 	r, e := gbase8acdc.NewReader(agent, database, start, selections, raw)
 	if e != nil {

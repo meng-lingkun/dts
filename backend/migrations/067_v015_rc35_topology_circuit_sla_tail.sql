@@ -1,4 +1,4 @@
--- QMigration V0.15.0-rc35: topology circuit scheduling and P95/P99 SLA tail-risk telemetry.
+-- DTS V0.15.0-rc35: topology circuit scheduling and P95/P99 SLA tail-risk telemetry.
 ALTER TABLE migration_tasks ADD COLUMN IF NOT EXISTS sla_p95_eta_seconds bigint NOT NULL DEFAULT 0;
 ALTER TABLE migration_tasks ADD COLUMN IF NOT EXISTS sla_p99_eta_seconds bigint NOT NULL DEFAULT 0;
 ALTER TABLE migration_tasks ADD COLUMN IF NOT EXISTS sla_risk_level text;

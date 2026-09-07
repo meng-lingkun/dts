@@ -3,9 +3,9 @@ package mysqlbinlog
 import (
 	"context"
 	"fmt"
-	cdcruntime "qmigration/backend/internal/cdc/runtime"
-	"qmigration/backend/internal/connector"
-	"qmigration/backend/internal/domain"
+	cdcruntime "dts/backend/internal/cdc/runtime"
+	"dts/backend/internal/connector"
+	"dts/backend/internal/domain"
 	"strings"
 	"time"
 )
@@ -31,7 +31,7 @@ type nativeAck struct {
 }
 
 // NativeReader adapts a MySQL replication stream to the protocol-independent
-// QMigration CDC Reader SPI. It owns protocol parsing and transaction assembly;
+// DTS CDC Reader SPI. It owns protocol parsing and transaction assembly;
 // apply/checkpoint ordering is enforced by internal/cdc/runtime.
 type NativeReader struct {
 	stream   connector.RawCDCStream

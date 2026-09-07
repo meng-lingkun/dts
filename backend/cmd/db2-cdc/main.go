@@ -14,10 +14,10 @@ import (
 	"strings"
 	"time"
 
-	"qmigration/backend/internal/cdc/db2log"
-	cdcruntime "qmigration/backend/internal/cdc/runtime"
-	db2connector "qmigration/backend/internal/connector/db2"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/cdc/db2log"
+	cdcruntime "dts/backend/internal/cdc/runtime"
+	db2connector "dts/backend/internal/connector/db2"
+	"dts/backend/internal/domain"
 )
 
 func env(k, d string) string {
@@ -48,8 +48,8 @@ func waitReady(ctx context.Context, client *http.Client, endpoint, token string)
 		if token != "" {
 			req.Header.Set("Authorization", "Bearer "+token)
 		}
-		if wt := strings.TrimSpace(os.Getenv("QMIGRATION_WORKER_TOKEN")); wt != "" {
-			req.Header.Set("X-QMigration-Worker-Token", wt)
+		if wt := strings.TrimSpace(os.Getenv("DTS_WORKER_TOKEN")); wt != "" {
+			req.Header.Set("X-DTS-Worker-Token", wt)
 		}
 		resp, err := client.Do(req)
 		if err == nil {
@@ -91,8 +91,8 @@ func postTx(ctx context.Context, client *http.Client, endpoint, token, direction
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	if wt := strings.TrimSpace(os.Getenv("QMIGRATION_WORKER_TOKEN")); wt != "" {
-		req.Header.Set("X-QMigration-Worker-Token", wt)
+	if wt := strings.TrimSpace(os.Getenv("DTS_WORKER_TOKEN")); wt != "" {
+		req.Header.Set("X-DTS-Worker-Token", wt)
 	}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -101,7 +101,7 @@ func postTx(ctx context.Context, client *http.Client, endpoint, token, direction
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("QMigration returned %s: %s", resp.Status, strings.TrimSpace(string(data)))
+		return nil, fmt.Errorf("DTS returned %s: %s", resp.Status, strings.TrimSpace(string(data)))
 	}
 	var out domain.CDCApplyResult
 	if len(data) > 0 {
@@ -112,20 +112,20 @@ func postTx(ctx context.Context, client *http.Client, endpoint, token, direction
 	return &out, nil
 }
 func run(ctx context.Context) error {
-	if !envOn("QMIGRATION_EXPERIMENTAL_DB2_NATIVE") || !envOn("QMIGRATION_EXPERIMENTAL_DB2_LOG_CDC") {
-		return errors.New("DB2 CDC requires QMIGRATION_EXPERIMENTAL_DB2_NATIVE=1 and QMIGRATION_EXPERIMENTAL_DB2_LOG_CDC=1")
+	if !envOn("DTS_EXPERIMENTAL_DB2_NATIVE") || !envOn("DTS_EXPERIMENTAL_DB2_LOG_CDC") {
+		return errors.New("DB2 CDC requires DTS_EXPERIMENTAL_DB2_NATIVE=1 and DTS_EXPERIMENTAL_DB2_LOG_CDC=1")
 	}
-	taskID := env("QMIGRATION_TASK_ID", "")
+	taskID := env("DTS_TASK_ID", "")
 	if taskID == "" {
-		return errors.New("QMIGRATION_TASK_ID is required")
+		return errors.New("DTS_TASK_ID is required")
 	}
-	server := strings.TrimRight(env("QMIGRATION_SERVER", "http://127.0.0.1:8080"), "/")
-	direction := strings.ToLower(env("QMIGRATION_CDC_DIRECTION", "forward"))
+	server := strings.TrimRight(env("DTS_SERVER", "http://127.0.0.1:8080"), "/")
+	direction := strings.ToLower(env("DTS_CDC_DIRECTION", "forward"))
 	if direction != "forward" && direction != "reverse" {
-		return errors.New("QMIGRATION_CDC_DIRECTION must be forward or reverse")
+		return errors.New("DTS_CDC_DIRECTION must be forward or reverse")
 	}
-	port, _ := strconv.Atoi(env("QMIGRATION_DB2_PORT", "50000"))
-	ds := domain.DataSource{Type: domain.DataSourceDB2, Host: env("QMIGRATION_DB2_HOST", ""), Port: port, Username: env("QMIGRATION_DB2_USER", ""), Password: env("QMIGRATION_DB2_PASSWORD", ""), Database: env("QMIGRATION_DB2_DATABASE", ""), Schema: env("QMIGRATION_DB2_SCHEMA", ""), CDCURL: env("QMIGRATION_DB2_LOG_URL", ""), TLSMode: domain.TLSMode(strings.ToUpper(env("QMIGRATION_DB2_TLS_MODE", "PREFERRED"))), TLSServerName: env("QMIGRATION_DB2_TLS_SERVER_NAME", ""), TLSCACert: os.Getenv("QMIGRATION_DB2_TLS_CA"), TLSClientCert: os.Getenv("QMIGRATION_DB2_TLS_CLIENT_CERT"), TLSClientKey: os.Getenv("QMIGRATION_DB2_TLS_CLIENT_KEY")}
+	port, _ := strconv.Atoi(env("DTS_DB2_PORT", "50000"))
+	ds := domain.DataSource{Type: domain.DataSourceDB2, Host: env("DTS_DB2_HOST", ""), Port: port, Username: env("DTS_DB2_USER", ""), Password: env("DTS_DB2_PASSWORD", ""), Database: env("DTS_DB2_DATABASE", ""), Schema: env("DTS_DB2_SCHEMA", ""), CDCURL: env("DTS_DB2_LOG_URL", ""), TLSMode: domain.TLSMode(strings.ToUpper(env("DTS_DB2_TLS_MODE", "PREFERRED"))), TLSServerName: env("DTS_DB2_TLS_SERVER_NAME", ""), TLSCACert: os.Getenv("DTS_DB2_TLS_CA"), TLSClientCert: os.Getenv("DTS_DB2_TLS_CLIENT_CERT"), TLSClientKey: os.Getenv("DTS_DB2_TLS_CLIENT_KEY")}
 	if ds.Host == "" || ds.Username == "" || ds.Database == "" || ds.CDCURL == "" {
 		return errors.New("DB2 HOST, USER, DATABASE and DB2_LOG_URL are required")
 	}
@@ -139,13 +139,13 @@ func run(ctx context.Context) error {
 	}
 	defer src.Close()
 	tables := []string{}
-	for _, v := range strings.Split(env("QMIGRATION_DB2_TABLES", ""), ",") {
+	for _, v := range strings.Split(env("DTS_DB2_TABLES", ""), ",") {
 		if x := strings.TrimSpace(v); x != "" {
 			tables = append(tables, x)
 		}
 	}
 	if len(tables) == 0 {
-		return errors.New("QMIGRATION_DB2_TABLES is required")
+		return errors.New("DTS_DB2_TABLES is required")
 	}
 	specs, err := src.CDCSelections(ctx, tables)
 	if err != nil {
@@ -155,7 +155,7 @@ func run(ctx context.Context) error {
 	for _, s := range specs {
 		sels = append(sels, db2log.Selection{Schema: s.Schema, Table: s.Table, TablespaceID: s.TablespaceID, TableID: s.TableID, Columns: s.Columns, PrimaryKeys: s.PrimaryKeys})
 	}
-	agent, err := db2log.NewClient(ds.CDCURL, os.Getenv("QMIGRATION_DB2_LOG_TLS_CA"), env("QMIGRATION_DB2_LOG_TLS_SERVER_NAME", ""), os.Getenv("QMIGRATION_DB2_LOG_TOKEN"))
+	agent, err := db2log.NewClient(ds.CDCURL, os.Getenv("DTS_DB2_LOG_TLS_CA"), env("DTS_DB2_LOG_TLS_SERVER_NAME", ""), os.Getenv("DTS_DB2_LOG_TOKEN"))
 	if err != nil {
 		return err
 	}
@@ -163,9 +163,9 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("DB2 Log Agent health: %w", err)
 	}
 	var reader cdcruntime.Reader
-	if rawVector := strings.TrimSpace(os.Getenv("QMIGRATION_DB2_START_VECTOR")); rawVector != "" || envOn("QMIGRATION_EXPERIMENTAL_DB2_PURESCALE") {
-		if !envOn("QMIGRATION_EXPERIMENTAL_DB2_PURESCALE") {
-			return errors.New("DB2 pureScale vector requires QMIGRATION_EXPERIMENTAL_DB2_PURESCALE=1")
+	if rawVector := strings.TrimSpace(os.Getenv("DTS_DB2_START_VECTOR")); rawVector != "" || envOn("DTS_EXPERIMENTAL_DB2_PURESCALE") {
+		if !envOn("DTS_EXPERIMENTAL_DB2_PURESCALE") {
+			return errors.New("DB2 pureScale vector requires DTS_EXPERIMENTAL_DB2_PURESCALE=1")
 		}
 		var startVector *db2log.PureScaleVector
 		if rawVector != "" {
@@ -177,7 +177,7 @@ func run(ctx context.Context) error {
 		}
 		reader, err = db2log.NewPureScaleReader(ctx, agent, startVector, sels, ds.CDCURL)
 	} else {
-		start, e := db2log.ParseLRI(env("QMIGRATION_DB2_START_LRI", ""))
+		start, e := db2log.ParseLRI(env("DTS_DB2_START_LRI", ""))
 		if e != nil {
 			return e
 		}
@@ -186,9 +186,9 @@ func run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	endpoint := env("QMIGRATION_CDC_ENDPOINT", server+"/api/v1/migrations/"+taskID+"/cdc/events")
-	ready := env("QMIGRATION_CDC_READY_ENDPOINT", "")
-	token := env("QMIGRATION_API_TOKEN", "")
+	endpoint := env("DTS_CDC_ENDPOINT", server+"/api/v1/migrations/"+taskID+"/cdc/events")
+	ready := env("DTS_CDC_READY_ENDPOINT", "")
+	token := env("DTS_API_TOKEN", "")
 	client := &http.Client{Timeout: 90 * time.Second}
 	total := 0
 	return (cdcruntime.Runner{Reader: reader, Gate: func(c context.Context) error { return waitReady(c, client, ready, token) }, Apply: func(c context.Context, events []domain.CDCEvent) (*domain.CDCApplyResult, error) {

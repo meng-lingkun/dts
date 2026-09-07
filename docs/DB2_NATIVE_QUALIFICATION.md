@@ -1,8 +1,8 @@
 # DB2 Native DRDA + db2ReadLog Qualification
 
 RC12 DB2 support remains experimental until retained reports exist for every DB2
-release/deployment class QMigration claims. Full/target data uses QMigration's
-pure-Go DRDA/DDM stack. Source CDC uses a QMigration Log Agent and IBM's
+release/deployment class DTS claims. Full/target data uses DTS's
+pure-Go DRDA/DDM stack. Source CDC uses a DTS Log Agent and IBM's
 `db2ReadLog` API on the source host.
 
 ## Full / target qualification
@@ -11,7 +11,7 @@ pure-Go DRDA/DDM stack. Source CDC uses a QMigration Log Agent and IBM's
 export DB2_HOST=db2.example.internal
 export DB2_PORT=50000
 export DB2_DATABASE=SAMPLE
-export DB2_USER=qmigration
+export DB2_USER=dts
 export DB2_PASSWORD='***'
 export DB2_SCHEMA=APP
 
@@ -41,7 +41,7 @@ DB2_QUALIFY_TARGET_WRITE=1 DB2_QUALIFY_TARGET_VECTOR=1 deployments/scripts/quali
 ```
 
 The VECTOR check creates `VECTOR(3,FLOAT32)` and `VECTOR(4,INT8)`, writes both
-through the QMigration prepared path, and reads them back with
+through the DTS prepared path, and reads them back with
 `VECTOR_SERIALIZE()`. Source CDC VECTOR qualification still requires Db2
 12.1.4+ because DMS function 213 is the source log representation used by RC12.
 
@@ -66,29 +66,29 @@ export DB2_HOME=/opt/ibm/db2/V11.5
 deployments/scripts/build-db2-readlog-provider.sh
 ```
 
-The QMigration Go Server/Worker does not link `libdb2`.
+The DTS Go Server/Worker does not link `libdb2`.
 
 ## Run the DB2 Log Agent
 
 The provider reuses the DB2 connection environment:
 
 ```bash
-export QMIGRATION_DB2_DATABASE=SAMPLE
-export QMIGRATION_DB2_USER=qmigration
-export QMIGRATION_DB2_PASSWORD='***'
-export QMIGRATION_DB2_READLOG_PROVIDER=/opt/qmigration/bin/qmigration-db2-readlog-provider
-export QMIGRATION_DB2_LOG_LISTEN=:8787
-export QMIGRATION_DB2_LOG_TOKEN='replace-with-a-secret'
+export DTS_DB2_DATABASE=SAMPLE
+export DTS_DB2_USER=dts
+export DTS_DB2_PASSWORD='***'
+export DTS_DB2_READLOG_PROVIDER=/opt/dts/bin/dts-db2-readlog-provider
+export DTS_DB2_LOG_LISTEN=:8787
+export DTS_DB2_LOG_TOKEN='replace-with-a-secret'
 
-bin/qmigration-db2-log-agent
+bin/dts-db2-log-agent
 ```
 
 For TLS:
 
 ```bash
-export QMIGRATION_DB2_LOG_TLS_CERT_FILE=/etc/qmigration/db2-log-agent.crt
-export QMIGRATION_DB2_LOG_TLS_KEY_FILE=/etc/qmigration/db2-log-agent.key
-bin/qmigration-db2-log-agent
+export DTS_DB2_LOG_TLS_CERT_FILE=/etc/dts/db2-log-agent.crt
+export DTS_DB2_LOG_TLS_KEY_FILE=/etc/dts/db2-log-agent.key
+bin/dts-db2-log-agent
 ```
 
 Do not place the bearer token in `cdc_url`; inject it by environment/secret.
@@ -97,8 +97,8 @@ Do not place the bearer token in `cdc_url`; inject it by environment/secret.
 
 ```bash
 export DB2_CDC_URL='db2logs://db2-agent.example.internal:8787?server_name=db2-agent.example.internal'
-export DB2_CDC_TOKEN_ENV=QMIGRATION_DB2_LOG_TOKEN
-export QMIGRATION_DB2_LOG_TOKEN='replace-with-a-secret'
+export DB2_CDC_TOKEN_ENV=DTS_DB2_LOG_TOKEN
+export DTS_DB2_LOG_TOKEN='replace-with-a-secret'
 export DB2_QUALIFY_CDC=1
 export DB2_TABLE=ORDERS
 
@@ -108,7 +108,7 @@ deployments/scripts/qualify-db2.sh
 Optional Log Agent CA:
 
 ```bash
-export DB2_CDC_CA_FILE=/etc/qmigration/db2-log-agent-ca.pem
+export DB2_CDC_CA_FILE=/etc/dts/db2-log-agent-ca.pem
 export DB2_CDC_SERVER_NAME=db2-agent.example.internal
 ```
 
@@ -174,17 +174,17 @@ Use one of `DISABLE`, `PREFERRED`, or `REQUIRED`:
 ```bash
 export DB2_TLS_MODE=REQUIRED
 export DB2_TLS_SERVER_NAME=db2.example.internal
-export DB2_TLS_CA_FILE=/etc/qmigration/db2-ca.pem
+export DB2_TLS_CA_FILE=/etc/dts/db2-ca.pem
 ```
 
 Optional mTLS:
 
 ```bash
-export DB2_TLS_CERT_FILE=/etc/qmigration/db2-client.pem
-export DB2_TLS_KEY_FILE=/etc/qmigration/db2-client-key.pem
+export DB2_TLS_CERT_FILE=/etc/dts/db2-client.pem
+export DB2_TLS_KEY_FILE=/etc/dts/db2-client-key.pem
 ```
 
-QMigration never emits passwords, bearer-token values or private-key contents in
+DTS never emits passwords, bearer-token values or private-key contents in
 the JSON qualification report.
 
 ## Exit criteria

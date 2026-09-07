@@ -1,0 +1,11 @@
+# Deployment merge patch, not a standalone Kubernetes resource.
+# Copy outside the package and replace the example addresses before use.
+spec:
+  template:
+    spec:
+      dnsPolicy: ClusterFirst
+      hostAliases:
+      - ip: "192.0.2.10"
+        hostnames: ["source-db.customer.example"]
+      - ip: "192.0.2.20"
+        hostnames: ["target-db.customer.example"]

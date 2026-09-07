@@ -1,6 +1,6 @@
 # Oracle Native real-instance qualification matrix
 
-`0.15.0-rc1` contains the complete QMigration-owned Oracle software data plane
+`0.15.0-rc1` contains the complete DTS-owned Oracle software data plane
 plus a repeatable qualification executable. Experimental gates remain until this
 matrix is executed against representative real Oracle instances.
 
@@ -18,9 +18,9 @@ Provide the password through the environment instead of a command-line argument:
 export ORACLE_HOST=10.0.0.10
 export ORACLE_PORT=1521
 export ORACLE_SERVICE=ORCLPDB1
-export ORACLE_USER=QMIGRATION_TEST
+export ORACLE_USER=DTS_TEST
 export ORACLE_PASSWORD='...'
-export ORACLE_SCHEMA=QMIGRATION_TEST
+export ORACLE_SCHEMA=DTS_TEST
 export ORACLE_TABLE=QUAL_SOURCE
 
 # Read-only/source qualification.
@@ -132,4 +132,4 @@ A single run is accepted only when:
 - Large LOB and split/coalesced TTC packet soak tests remain stable under reconnect and backpressure.
 - Operational privilege requirements are documented for self-managed and managed Oracle services.
 - Qualification JSON reports are retained for every supported Oracle release and
-  deployment class that QMigration claims.
+  deployment class that DTS claims.

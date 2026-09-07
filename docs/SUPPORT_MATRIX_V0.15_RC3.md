@@ -1,11 +1,11 @@
-# QMigration V0.15.0-rc3 Support Matrix
+# DTS V0.15.0-rc3 Support Matrix
 
-This matrix describes QMigration-owned runtime support. SQL wire compatibility
+This matrix describes DTS-owned runtime support. SQL wire compatibility
 alone does not imply source CDC support.
 
 ## Maturity levels
 
-- `NATIVE`: enabled QMigration-native path for advertised capabilities.
+- `NATIVE`: enabled DTS-native path for advertised capabilities.
 - `NATIVE_FULL_ONLY`: Full Load/target apply exists; source CDC is not advertised.
 - `EXPERIMENTAL`: software path exists but requires retained real-instance qualification.
 - `PROBE_ONLY`: migration planning must reject the datasource.
@@ -18,7 +18,7 @@ alone does not imply source CDC support.
 | MariaDB | Yes | Yes | Yes | Native Binlog | Yes | NATIVE |
 | PolarDB MySQL | Yes | Yes | Yes | MySQL-compatible Binlog + precheck | Yes | NATIVE |
 | PolarDB-X | Yes | Yes | Yes | MySQL-compatible global Binlog + precheck | Yes | NATIVE |
-| TiDB | Yes | Yes | Yes | **TiCDC OpenAPI + QMigration Native Kafka Canal-JSON / TIDB_TSO** | Yes | EXPERIMENTAL; qualification required |
+| TiDB | Yes | Yes | Yes | **TiCDC OpenAPI + DTS Native Kafka Canal-JSON / TIDB_TSO** | Yes | EXPERIMENTAL; qualification required |
 | OceanBase MySQL | Yes | Yes | Yes | Not advertised on SQL endpoint; Binlog Service adapter pending | Yes | NATIVE_FULL_ONLY |
 | PostgreSQL | Yes | Yes | Yes | pgoutput + durable slot checkpoint | Yes | NATIVE |
 | PolarDB PostgreSQL | Yes | Yes | Yes | pgoutput + durable slot checkpoint + precheck | Yes | NATIVE |
@@ -33,15 +33,15 @@ alone does not imply source CDC support.
 
 ## TiDB RC3 details
 
-- SQL endpoint: QMigration MySQL-wire Metadata / Full Reader / Full Writer / Schema / CDC target apply.
+- SQL endpoint: DTS MySQL-wire Metadata / Full Reader / Full Writer / Schema / CDC target apply.
 - CDC endpoint: `cdc_url=ticdc://<ticdc>:8300?brokers=<kafka>:9092,...`.
 - Capture position: TiDB current TSO.
-- Transport: TiCDC -> Kafka Canal-JSON with TiDB extension -> QMigration native Kafka consumer.
+- Transport: TiCDC -> Kafka Canal-JSON with TiDB extension -> DTS native Kafka consumer.
 - Ordering: one partition in RC3.
 - Transaction boundary: consecutive identical `commitTs`.
 - Durable checkpoint: `tso=<TSO>;kafka=<nextOffset>`.
 - ACK order: target atomic apply + durable checkpoint, then reader ACK.
-- Qualification: `qmigration-tidb-qualify` / `TIDB_TICDC_QUALIFICATION.md`.
+- Qualification: `dts-tidb-qualify` / `TIDB_TICDC_QUALIFICATION.md`.
 
 ## Shared native engine capabilities
 

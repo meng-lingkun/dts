@@ -12,7 +12,7 @@ import (
 )
 
 // Cipher encrypts datasource credentials at rest with AES-256-GCM.
-// The key is derived from QMIGRATION_MASTER_KEY using SHA-256 so operators can
+// The key is derived from DTS_MASTER_KEY using SHA-256 so operators can
 // provide a human-manageable secret while the cipher always receives 32 bytes.
 type Cipher struct{ aead cipher.AEAD }
 
@@ -40,7 +40,7 @@ func (c *Cipher) Encrypt(plain string) (string, error) {
 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
 		return "", err
 	}
-	sealed := c.aead.Seal(nil, nonce, []byte(plain), []byte("qmigration-datasource-v1"))
+	sealed := c.aead.Seal(nil, nonce, []byte(plain), []byte("dts-datasource-v1"))
 	payload := append(nonce, sealed...)
 	return "v1:" + base64.RawStdEncoding.EncodeToString(payload), nil
 }
@@ -60,7 +60,7 @@ func (c *Cipher) Decrypt(encoded string) (string, error) {
 	if len(payload) < n {
 		return "", errors.New("ciphertext too short")
 	}
-	plain, err := c.aead.Open(nil, payload[:n], payload[n:], []byte("qmigration-datasource-v1"))
+	plain, err := c.aead.Open(nil, payload[:n], payload[n:], []byte("dts-datasource-v1"))
 	if err != nil {
 		return "", err
 	}

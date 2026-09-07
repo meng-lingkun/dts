@@ -1,4 +1,4 @@
--- QMigration metadata schema (PostgreSQL target repository).
+-- DTS metadata schema (PostgreSQL target repository).
 -- Runtime V0.2 still defaults to Memory Repository; this schema tracks the
 -- persistent model used by the control plane.
 CREATE TABLE IF NOT EXISTS datasources (

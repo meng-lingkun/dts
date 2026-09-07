@@ -5,8 +5,8 @@ RC27 can use GBase 8a MPP Cluster as a **target** for incremental row apply behi
 ## Enable
 
 ```bash
-export QMIGRATION_EXPERIMENTAL_GBASE8A_NATIVE=1
-export QMIGRATION_EXPERIMENTAL_GBASE8A_TARGET_CDC=1
+export DTS_EXPERIMENTAL_GBASE8A_NATIVE=1
+export DTS_EXPERIMENTAL_GBASE8A_TARGET_CDC=1
 ```
 
 For a real-instance qualification run:
@@ -24,9 +24,9 @@ export GBASE_PASSWORD='...'
 
 - INSERT/UPDATE: validated HASH staging table + GBase `MERGE`.
 - DELETE: stable mapped primary/migration key.
-- Retry: safe for the same source position/event because MERGE/delete are idempotent and QMigration persists durable source positions.
+- Retry: safe for the same source position/event because MERGE/delete are idempotent and DTS persists durable source positions.
 - LAST_WRITE_WINS: target point lookup is available.
-- Transaction atomicity: **not advertised**. QMigration does not expose `cdc-transactional-apply` for GBase 8a. A multi-event source transaction can be transiently visible event-by-event.
+- Transaction atomicity: **not advertised**. DTS does not expose `cdc-transactional-apply` for GBase 8a. A multi-event source transaction can be transiently visible event-by-event.
 
 ## Source CDC boundary
 

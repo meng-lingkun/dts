@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/domain"
 )
 
 type Address struct {
@@ -21,7 +21,7 @@ func (a Address) String() string { return net.JoinHostPort(a.Host, strconv.Itoa(
 // Endpoint describes OceanBase Binlog subscription endpoints exposed through
 // ODP. Binlog Server itself has a management/service port (commonly 2983), but
 // downstream MySQL binlog subscribers are expected to connect through a
-// tenant-aware ODP endpoint. QMigration therefore stores the subscription
+// tenant-aware ODP endpoint. DTS therefore stores the subscription
 // endpoint explicitly instead of guessing it from the SQL datasource address.
 //
 // Supported datasource cdc_url forms:
@@ -31,7 +31,7 @@ func (a Address) String() string { return net.JoinHostPort(a.Host, strconv.Itoa(
 //	obbinlogs://odp1:2883?server_name=binlog.example.internal&fallback=odp2:2883
 //
 // Credentials are deliberately not accepted in the URL. The OceanBase tenant
-// datasource username/password remain encrypted in QMigration and are reused for
+// datasource username/password remain encrypted in DTS and are reused for
 // ODP binlog subscription connections.
 type Endpoint struct {
 	Host       string

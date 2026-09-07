@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"qmigration/backend/internal/connector"
-	gbaseconnector "qmigration/backend/internal/connector/gbase"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/connector"
+	gbaseconnector "dts/backend/internal/connector/gbase"
+	"dts/backend/internal/domain"
 )
 
 const toolVersion = "0.15.0-rc49"
@@ -99,9 +99,9 @@ func main() {
 		fmt.Fprintf(os.Stderr, "password environment variable %s is empty\n", *passwordEnv)
 		os.Exit(2)
 	}
-	_ = os.Setenv("QMIGRATION_EXPERIMENTAL_GBASE8A_NATIVE", "1")
+	_ = os.Setenv("DTS_EXPERIMENTAL_GBASE8A_NATIVE", "1")
 	if *targetCDC {
-		_ = os.Setenv("QMIGRATION_EXPERIMENTAL_GBASE8A_TARGET_CDC", "1")
+		_ = os.Setenv("DTS_EXPERIMENTAL_GBASE8A_TARGET_CDC", "1")
 	}
 	ds := domain.DataSource{Type: domain.DataSourceGBase, Host: strings.TrimSpace(*host), Port: *port, Username: strings.TrimSpace(*user), Password: password, Database: strings.TrimSpace(*database)}
 	f := gbaseconnector.NewFactory()
@@ -128,7 +128,7 @@ func main() {
 				if !desc.Has(connector.CapabilityCDCApply) || desc.Has(connector.CapabilityCDCTransactional) {
 					return "", nil, fmt.Errorf("unexpected GBase target CDC capability contract: %+v", desc.Capabilities)
 				}
-				name := fmt.Sprintf("qmigration_cdc_q_%x", uint64(time.Now().UnixNano()))
+				name := fmt.Sprintf("dts_cdc_q_%x", uint64(time.Now().UnixNano()))
 				cols := []domain.ColumnInfo{{Name: "id", DataType: "bigint", Nullable: false}, {Name: "txt", DataType: "varchar", ColumnType: "varchar(200)", Nullable: true}}
 				if err := c.CreateTableWithPrimaryKeys(ctx, ds.Database, name, cols, []string{"id"}); err != nil {
 					return "", nil, err
@@ -228,7 +228,7 @@ func main() {
 	} else {
 		c := raw.(*gbaseconnector.Connector)
 		rr.run("target-write", func() (string, map[string]any, error) {
-			name := fmt.Sprintf("qmigration_q_%x", uint64(time.Now().UnixNano()))
+			name := fmt.Sprintf("dts_q_%x", uint64(time.Now().UnixNano()))
 			cols := []domain.ColumnInfo{{Name: "id", DataType: "bigint", Nullable: false}, {Name: "txt", DataType: "varchar", ColumnType: "varchar(200)", Nullable: true}, {Name: "payload", DataType: "longblob", Nullable: true}}
 			if err := c.CreateTableWithPrimaryKeys(ctx, ds.Database, name, cols, []string{"id"}); err != nil {
 				return "", nil, err

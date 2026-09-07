@@ -1,5 +1,7 @@
 # V0.15.0-rc49
 
+- Standardized deployment and lifecycle operations on Kubernetes/containerd; removed Compose deployment files, Docker Engine/Compose payloads and runtime auto-installation. Docker remains an image build/export tool.
+
 - Closed remaining software-level connector/runtime gaps: GBase 8a provider CDC + transactional target path + C ABI agent, DB2 pureScale vector merge, GaussDB multi-primary/hybrid DDL+DML, openGauss/Kingbase DDL proof sidecars, Kafka compression/SASL extensions, relocation proof and validation snapshot capability levels.
 - Added safe schema-program translation provider, external signer HA/scheduled rotation, RFC3161 timestamping, Unicode PDF renderer interface, and release qualification manifest builder.
 - Fixed Worker capability/runtime mismatches for DB2/Oracle and preserved fail-closed production qualification boundaries.
@@ -14,7 +16,7 @@
 
 - Added multi-key Ed25519 report Trust Store with ACTIVE/RETIRED/REVOKED lifecycle.
 - Added old-key-signed transition certificates for controlled key rotation and new/current-key-signed revocation certificates.
-- Added `qmigrationctl trust-init`, `trust-apply-transition`, `trust-apply-revocation`, `trust-show`, and `verify-report --trust-store`.
+- Added `dtsctl trust-init`, `trust-apply-transition`, `trust-apply-revocation`, `trust-show`, and `verify-report --trust-store`.
 - Historical reports signed before retirement remain verifiable; reports signed by REVOKED keys fail closed.
 - Transitioned keys are rejected for reports that predate their signed transition time.
 - Added server APIs to issue key-transition and key-revocation certificates without exporting the current private key.
@@ -23,7 +25,7 @@
 # V0.15.0-rc47
 
 - Added optional Ed25519 public signatures for acceptance artifacts and manifests, with downloadable public-key fingerprint metadata.
-- Added offline `qmigrationctl verify-report` with external trusted-key pinning, artifact SHA/signature checks, evidence identity checks and READY commit verification.
+- Added offline `dtsctl verify-report` with external trusted-key pinning, artifact SHA/signature checks, evidence identity checks and READY commit verification.
 - Added immutable `validation_report_archives` metadata registry for S3/WORM URI, Manifest SHA-256, signer identity and observed retention information.
 - S3 delivery includes `ED25519SIGNATURES` when public signing is configured; conflicting archive registry rewrites fail closed.
 
@@ -128,14 +130,14 @@
 - Added GBase 8s event-owned smart BLOB/CLOB CDC image contract with per-field length/SHA-256/acquisition proofs; current-row SELECT fallback remains forbidden.
 - GBase 8s Agent API and native C provider ABI advance to v4; older experimental providers are rejected until rebuilt.
 - Added durable `COMMIT_UNCERTAIN` CDC dead-letter protection for target COMMIT response loss; automatic replay is blocked until an operator resolves COMMITTED vs NOT_COMMITTED.
-- Added API/UI/Prometheus visibility for uncertain commits and extended `qmigration-chaos-qualify` with a target-commit-unknown scenario.
+- Added API/UI/Prometheus visibility for uncertain commits and extended `dts-chaos-qualify` with a target-commit-unknown scenario.
 - Added metadata migration `060_v015_rc28_gbase8s_lob_commit_unknown.sql`.
 
 ## 0.15.0-rc27
 
 - Added qualification-gated GBase 8a target CDC apply using existing validated HASH staging+MERGE and keyed delete; source-transaction atomicity remains deliberately unadvertised.
 - Added deterministic opt-in CDC failpoints for spool/apply/checkpoint/source-ACK failure windows.
-- Added `qmigration-chaos-qualify` and `qualify-chaos.sh` to prove durable retry behavior without external databases.
+- Added `dts-chaos-qualify` and `qualify-chaos.sh` to prove durable retry behavior without external databases.
 - Added target CDC atomicity precheck warnings when a target supports idempotent CDC apply but not transactional apply.
 
 ## 0.15.0-rc26
@@ -143,13 +145,13 @@
 - Added qualification-gated openGauss `mppdb_decoding` Source CDC with durable `OPENGAUSS_LSN` and apply-before-slot-advance semantics.
 - Added qualification-gated KingbaseES `kboutput` Source CDC with `KINGBASE_LSN`, `sys_*` slot/catalog integration and selected-table publications.
 - Added strict Kingbase slot-plugin identity validation so a replaced/non-`kboutput` slot fails before stream startup.
-- Added `qmigration-opengauss-cdc`, `qmigration-opengauss-qualify` and `qmigration-kingbase-qualify`.
+- Added `dts-opengauss-cdc`, `dts-opengauss-qualify` and `dts-kingbase-qualify`.
 - Preserved fail-closed boundaries for openGauss binary/DDL and unqualified Kingbase `kboutput` wire variants.
 
 ## 0.15.0-rc25
 
 - TiCDC Kafka source CDC now supports multi-partition topics with per-partition durable offsets and Resolved-TS global ordering fences.
-- Added Kafka TLS/custom-CA/ServerName/mTLS plus SASL PLAIN, SCRAM-SHA-256 and SCRAM-SHA-512 to the QMigration native consumer.
+- Added Kafka TLS/custom-CA/ServerName/mTLS plus SASL PLAIN, SCRAM-SHA-256 and SCRAM-SHA-512 to the DTS native consumer.
 - Existing TiCDC changefeeds are checked for partition/security compatibility; qualification output redacts SASL passwords.
 - Fixed `VALIDATING` CDC routing: target apply freezes atomically at the durable barrier while new source transactions continue into the Durable CDC Spool.
 - Added `validation-snapshot` Connector SPI and TiDB exact TSO validation via `SESSION tidb_snapshot`.
@@ -157,7 +159,7 @@
 - Added Oracle exact-watermark validation snapshots through native `AS OF SCN` when LogMiner/`ORACLE_SCN` CDC is enabled.
 - Added experimental DM8 source CDC through archived `DBMS_LOGMNR` + flashback row reconstruction with durable `DM_LSN` checkpoints and exact `AS OF SCN` validation.
 - DM8 CDC now rewinds to committed `START_SCN` for transactions that began before the current checkpoint and aggregates same-`COMMIT_SCN` XIDs into one durable target transaction.
-- Added `qmigration-dameng-cdc`, `--cdc` Dameng qualification, and migration `057_v015_rc25_oracle_dameng_exact_cdc.sql`.
+- Added `dts-dameng-cdc`, `--cdc` Dameng qualification, and migration `057_v015_rc25_oracle_dameng_exact_cdc.sql`.
 
 ## 0.15.0-rc24
 
@@ -185,7 +187,7 @@
 
 ## 0.15.0-rc21
 
-- Added preferred Linux native C ABI v1 provider for GBase 8s syscdcv1/CSDK source CDC, loaded by the QMigration agent with `dlopen`; legacy Go plugin remains compatibility-only.
+- Added preferred Linux native C ABI v1 provider for GBase 8s syscdcv1/CSDK source CDC, loaded by the DTS agent with `dlopen`; legacy Go plugin remains compatibility-only.
 - Added provider ABI/version checks, optional exact SHA-256 pinning, local config permission/size checks, synthetic shared-library integration tests and a compileable C ABI example.
 - Hardened GBase 8s CDC provider conformance: complete selected-column/order checks, NULL/base64 validation, response bounds and UPDATE_BEFORE memory accounting.
 - Empty committed GBase 8s source transactions now emit CHECKPOINT events so `GBASE8S_CDC_SEQ` advances without inventing row DML.
@@ -197,7 +199,7 @@
 - Added qualification-gated GBase 8s syscdcv1/CSDK source CDC through a datasource-local smart-LOB provider agent.
 - Added selection-aware pre-Full checkpoint capture and durable `GBASE8S_CDC_SEQ` restart/commit watermarks that preserve older open transactions across Worker restarts.
 - Added BEGIN/COMMIT/ROLLBACK, DML before/after, DISCARD and duplicate-commit transaction semantics with shared apply-before-ACK runtime ordering.
-- Added `qmigration-gbase8s-cdc`, `qmigration-gbase8s-cdc-agent`, provider plugin protocol/build helper and CDC qualification.
+- Added `dts-gbase8s-cdc`, `dts-gbase8s-cdc-agent`, provider plugin protocol/build helper and CDC qualification.
 - TRUNCATE and smart BLOB/CLOB/complex source columns remain fail-closed pending retained CSDK qualification.
 
 ## 0.15.0-rc19
@@ -206,8 +208,8 @@
 - Added systables/syscolumnsext/sysconstraints/sysindexes Metadata, stable numeric/composite keyset Full Read and ordered NTILE boundaries.
 - Added GBase 8s target type conversion, owner/table/PK/index/FK schema, stable-key prepared UPDATE/existence/INSERT replay, exact BLOB binds and transactional target CDC apply.
 - Added credential-safe ODBC DSN handling: persisted DSN properties may not contain UID/PWD; encrypted datasource credentials are injected only in memory.
-- Added runtime provider-plugin build helper, `qmigration-gbase8s-qualify`, `qualify-gbase8s.sh` and metadata migration `050_v015_rc19_gbase8s_native_full.sql`.
-- GBase 8s source CDC and QMigration-managed CSDK TLS remain fail-closed/unadvertised pending supported real-instance qualification.
+- Added runtime provider-plugin build helper, `dts-gbase8s-qualify`, `qualify-gbase8s.sh` and metadata migration `050_v015_rc19_gbase8s_native_full.sql`.
+- GBase 8s source CDC and DTS-managed CSDK TLS remain fail-closed/unadvertised pending supported real-instance qualification.
 
 ## 0.15.0-rc18
 
@@ -220,18 +222,18 @@
 ## 0.15.0-rc17
 
 - Added qualification-gated GBase 8a MPP native Metadata/Full Read/Full Write; GBase 8s/8c remain out of scope.
-- Removed GBase from the external/generic migration placeholder and added a distinct `gbase8a` Connector capability surface over QMigration's native packet transport.
+- Removed GBase from the external/generic migration placeholder and added a distinct `gbase8a` Connector capability surface over DTS's native packet transport.
 - Added GBase-specific `ENGINE=EXPRESS` target DDL and conservative random-distribution default; workload-specific HASH/REPLICATED targets remain pre-created/qualification-driven.
 - Added key-required per-batch staging + `MERGE` target replay instead of inheriting MySQL `ON DUPLICATE KEY UPDATE`; keyless GBase Full Write fails closed.
 - GBase source CDC, transactional target CDC apply, FK replay and post-load schema remain unadvertised.
-- Added `qmigration-gbase-qualify`, `qualify-gbase.sh`, `GBASE8A_NATIVE_QUALIFICATION.md` and metadata migration `048_v015_rc17_gbase8a_native.sql`.
+- Added `dts-gbase-qualify`, `qualify-gbase.sh`, `GBASE8A_NATIVE_QUALIFICATION.md` and metadata migration `048_v015_rc17_gbase8a_native.sql`.
 
 ## 0.15.0-rc15
 
 ## V0.15.0-rc16
 
 - GaussDB: added optional DDL-only logical decoding classification while preserving RC15 binary DML values and apply-before-ACK.
-- GaussDB: DDL replay requires `cdc_ddl_mode=SAME_FAMILY`, GaussDB -> GaussDB identity mappings and explicit `QMIGRATION_GAUSSDB_DDL_ONLY_TRANSACTIONS=1` source policy acknowledgement.
+- GaussDB: DDL replay requires `cdc_ddl_mode=SAME_FAMILY`, GaussDB -> GaussDB identity mappings and explicit `DTS_GAUSSDB_DDL_ONLY_TRANSACTIONS=1` source policy acknowledgement.
 - GaussDB: safe DDL subset is selected-table ALTER TABLE, TRUNCATE and CREATE [UNIQUE] INDEX; mixed DDL/DML and unsupported DDL fail closed.
 - GaussDB: DDL-only transactions ACK with text get_changes; DML remains on binary get_changes.
 
@@ -250,17 +252,17 @@
 - Added `GAUSSDB_LSN` capture and explicit LSN-ordered `mppdb_decoding` logical slots.
 - Added transaction-safe SQL logical decoding through `pg_logical_slot_peek_changes`, documented JSON DML decoding and apply-before-`get_changes` source ACK.
 - Added primary-key/binary safety checks, logical-replication GUC/permission prechecks and strict transaction bounds.
-- Added `qmigration-gaussdb-cdc`, `qmigration-gaussdb-qualify`, `qualify-gaussdb.sh` and metadata migration `045_v015_rc14_gaussdb_native_cdc.sql`.
+- Added `dts-gaussdb-cdc`, `dts-gaussdb-qualify`, `qualify-gaussdb.sh` and metadata migration `045_v015_rc14_gaussdb_native_cdc.sql`.
 - GaussDB source DDL, binary/NUL-sensitive JSON CDC and multi-primary logical decoding remain unadvertised pending implementation/qualification.
 
 ## 0.15.0-rc13
 
-- Added qualification-gated QMigration Dameng/DM8 metadata, Full Read, schema and target-apply Connector; Dameng no longer uses the generic external-JDBC placeholder.
+- Added qualification-gated DTS Dameng/DM8 metadata, Full Read, schema and target-apply Connector; Dameng no longer uses the generic external-JDBC placeholder.
 - Added catalog discovery, numeric/composite keyset reads, NTILE boundary planning and table/PK/index/FK target schema support.
 - Added prepared keyless INSERT and keyed MERGE, numeric fail-closed validation, BLOB/binary binding, point lookup/delete and transactional target CDC apply.
 - Added Linux runtime loading for a vendor DM `database/sql` provider plugin without vendoring proprietary driver source.
 - Dameng provider TLS modes remain fail-closed and Dameng source CDC remains unadvertised pending qualification.
-- Added `qmigration-dameng-qualify`, provider build helper and metadata migration `044_v015_rc13_dameng_native.sql`.
+- Added `dts-dameng-qualify`, provider build helper and metadata migration `044_v015_rc13_dameng_native.sql`.
 
 ## 0.15.0-rc12
 
@@ -306,12 +308,12 @@
 
 ## 0.15.0-rc7
 
-- Added experimental DB2 LUW source CDC through QMigration DB2 Log Agent + IBM `db2ReadLog`, using durable `DB2_LRI` checkpoints.
+- Added experimental DB2 LUW source CDC through DTS DB2 Log Agent + IBM `db2ReadLog`, using durable `DB2_LRI` checkpoints.
 - Added source-local Initialize Table descriptor bootstrap, ordinary INSERT/UPDATE/DELETE row decode, transaction/subtransaction assembly and COMMIT/ABORT handling.
 - Added strict Apply -> durable checkpoint -> ACK ordering plus transaction/open-transaction safety bounds.
 - Added fail-closed detection for value compression, out-of-row LOB, multi-insert, compensation/undo and unknown selected-table log actions.
 - Added envelope/raw-header corruption checks and removed the provider's hard dependency on the 11.5.8-only `finalLRI` field.
-- Added `qmigration-db2-cdc`, `qmigration-db2-log-agent`, provider build script and CDC qualification workflow.
+- Added `dts-db2-cdc`, `dts-db2-log-agent`, provider build script and CDC qualification workflow.
 - Added metadata migration `038_v015_rc7_db2_readlog_cdc.sql`.
 
 ## 0.15.0-rc6
@@ -320,28 +322,28 @@
 - Added SQLDTA FDODSC/FDODTA encoding for integer, exact DECIMAL, float, boolean, date/time/timestamp, character and binary families.
 - Added out-of-line EXTDTA target streaming for BLOB/CLOB values above 32 KiB and generalized extended DSS continuation to arbitrary multi-segment DDM objects.
 - Added 256 MiB per-object request/response safety bounds and exact DECIMAL no-rounding validation.
-- Extended `qmigration-db2-qualify --target-write` with multi-megabyte BLOB/CLOB round-trip qualification.
+- Extended `dts-db2-qualify --target-write` with multi-megabyte BLOB/CLOB round-trip qualification.
 - DB2 source CDC remains deliberately unadvertised.
 
 ## 0.15.0-rc5
 
-- Added QMigration-owned DB2 LUW DRDA/DDM transport, encrypted authentication, TLS/mTLS and native Metadata/Full Read.
+- Added DTS-owned DB2 LUW DRDA/DDM transport, encrypted authentication, TLS/mTLS and native Metadata/Full Read.
 - Added DB2 composite keyset reads and ordered NTILE keyset boundary planning.
 - Added experimental DB2 target schema/table/index/FK plus transactional MERGE/INSERT/delete/point-lookup apply.
 - Added DB2 identity START/INCREMENT discovery and lifecycle-safe LUW propagation: source `GENERATED ALWAYS` identities are staged as `BY DEFAULT`, generator state is synchronized after Full Load / committed target CDC, and source `ALWAYS` semantics are restored in the full-only finish or cutover critical section.
-- Added `qmigration-db2-qualify`; DB2 source CDC and very-large target LOB parameter streaming remain intentionally unclaimed.
+- Added `dts-db2-qualify`; DB2 source CDC and very-large target LOB parameter streaming remain intentionally unclaimed.
 - Corrected the stale backend `internal/version.Version` marker to the current RC5 release.
 - Added metadata migration `036_v015_rc5_db2_native_drda.sql`.
 
 ## 0.15.0-rc4
 
 - Added OceanBase tenant ODP/Binlog Service native CDC with GTID/file-position resume and multi-ODP failover.
-- Added `qmigration-oceanbase-qualify` and metadata migration `035_v015_rc4_oceanbase_binlog.sql`.
+- Added `dts-oceanbase-qualify` and metadata migration `035_v015_rc4_oceanbase_binlog.sql`.
 
 ## 0.15.0-rc3
 
-- Added TiDB TiCDC OpenAPI + QMigration native Kafka Canal-JSON CDC with TSO/offset durability and transaction assembly.
-- Added `qmigration-tidb-qualify` and metadata migration `034_v015_rc3_tidb_ticdc.sql`.
+- Added TiDB TiCDC OpenAPI + DTS native Kafka Canal-JSON CDC with TSO/offset durability and transaction assembly.
+- Added `dts-tidb-qualify` and metadata migration `034_v015_rc3_tidb_ticdc.sql`.
 
 ## 0.15.0-rc2
 
@@ -351,7 +353,7 @@
 
 ## 0.15.0-rc1
 
-- Added `qmigration-oracle-qualify` and one-command Oracle qualification wrapper.
+- Added `dts-oracle-qualify` and one-command Oracle qualification wrapper.
 - Added read-only source, optional LogMiner and explicit destructive target qualification modes with structured JSON evidence.
 - Added qualifier to backend release builds.
 - Corrected archive manifest Go verification semantics and added `--preverified-go`.
@@ -395,7 +397,7 @@
 
 ## 0.15.0-unified-dev8
 
-- Added QMigration-native S3-compatible encrypted CDC spool using standard-library AWS SigV4.
+- Added DTS-native S3-compatible encrypted CDC spool using standard-library AWS SigV4.
 - Added session-token/path-style/custom-CA/mTLS object-store support.
 - Added S3 applied-object GC, startup orphan reconciliation, readiness checks and logical capacity observability.
 - Added metadata migration 024 and spool storage operations documentation.
@@ -418,7 +420,7 @@
 - Added ordered spool drain, applied-record retention, manual drain API, Vue backlog visibility and Prometheus spool metrics.
 - Added cutover/rollback gates that require zero pending spool transactions.
 - Corrected Full+CDC lifecycle to catch up durable CDC backlog before automatic validation.
-- Added `QMIGRATION_VALIDATION_MAX_CDC_LAG_MS` validation gate and updated SQL Server CDC retention semantics for durable staging.
+- Added `DTS_VALIDATION_MAX_CDC_LAG_MS` validation gate and updated SQL Server CDC retention semantics for durable staging.
 - Added metadata migration `022_v015_durable_cdc_spool.sql`.
 
 ## 0.15.0-unified-dev5
@@ -427,7 +429,7 @@
 - Added SQL Server ordered NTILE keyset-boundary planning for string/composite/UNIQUE migration keys.
 - Added SQL Server native partition discovery/split predicates and runtime-load sampling for unified planner/backpressure control.
 - Added durable checkpoint-only SQL Server LSN transactions for CDC windows with no selected-table changes; source ACK now follows persisted checkpoint.
-- Added SQL Server CDC cleanup-retention precheck via `msdb.dbo.cdc_jobs` and configurable `QMIGRATION_SQLSERVER_CDC_MIN_RETENTION_MINUTES` (default QMigration safety floor: 4320 minutes).
+- Added SQL Server CDC cleanup-retention precheck via `msdb.dbo.cdc_jobs` and configurable `DTS_SQLSERVER_CDC_MIN_RETENTION_MINUTES` (default DTS safety floor: 4320 minutes).
 - Added Oracle TCPS transport with CA/ServerName/mTLS support and strict TLS redirect/downgrade rules.
 - Added post-ACCEPT Oracle TNS DATA session framing as a TTC-session transport foundation; Oracle authentication/SQL/Redo remain gated.
 - Added metadata migration `021_v015_native_planner_tcps_hardening.sql`.
@@ -438,18 +440,18 @@
 - Added SQL Server custom CA/server-name/mTLS support and datasource `PREFERRED` TLS default.
 - Added experimental native SQL Server CDC/LSN reader over SQL Server CDC change tables.
 - Added selected-table capture-instance validation and CDC retention-gap detection before/while consuming changes.
-- Added `qmigration-sqlserver-cdc` built-in binary and unified CDC runtime integration.
-- Fixed Worker managed CDC environment to always inject `QMIGRATION_TASK_ID`.
+- Added `dts-sqlserver-cdc` built-in binary and unified CDC runtime integration.
+- Fixed Worker managed CDC environment to always inject `DTS_TASK_ID`.
 - Changed CDC source validation/rollback engine choice to Connector Capability SPI rather than vendor-name switches.
 - Added Oracle TNS listener redirect following for RAC/SCAN-style endpoints.
 - Added metadata migration `020_v015_sqlserver_native_cdc.sql`.
 
 ## 0.15.0-unified-dev3
 
-- Added persisted Transform Policy DSL inside the QMigration Full Load pipeline.
+- Added persisted Transform Policy DSL inside the DTS Full Load pipeline.
 - Added explicit zero-date conversion policy instead of silent data mutation.
-- Added QMigration-native Oracle TNS CONNECT protocol probe.
-- Added QMigration-native SQL Server TDS PRELOGIN, LOGIN7, SQL Batch and result-token foundation.
+- Added DTS-native Oracle TNS CONNECT protocol probe.
+- Added DTS-native SQL Server TDS PRELOGIN, LOGIN7, SQL Batch and result-token foundation.
 - Added an explicit experimental gate for SQL Server native Full data plane; default capability remains protocol-probe only.
 - Added Oracle/SQL Server target type mappings to the Universal Schema Engine.
 - Added metadata migration `019_v015_transform_policy.sql`.
@@ -534,7 +536,7 @@
 - Expanded decompressed payloads back into complete nested binlog events and reused the existing TableMap/Rows/XID transaction pipeline.
 - Durable file-position recovery uses the outer transaction-payload LogPos; GTID mode continues to use the durable GTID set.
 - Added Worker `native-mysql-cdc-zstd` capability and runtime zstd availability checks.
-- Added zstd to the backend Docker runtime while keeping QMigration Go binaries CGO-free.
+- Added zstd to the backend Docker runtime while keeping DTS Go binaries CGO-free.
 
 ## V0.11 Native MySQL OPAQUE JSON CDC
 
@@ -553,7 +555,7 @@
 - Added transaction-level Partial JSON CDC tests with durable Binlog checkpoint verification.
 - Added `binlog_row_value_options` precheck visibility.
 - Added native safety guard for `binlog_transaction_compression=ON` / `TRANSACTION_PAYLOAD_EVENT`.
-- Extended `qmigration-binlog-inspect` event naming for Partial Update and Transaction Payload events.
+- Extended `dts-binlog-inspect` event naming for Partial Update and Transaction Payload events.
 
 
 ## V0.9 Schema Dependency & Sequence Semantics
@@ -619,10 +621,10 @@
 
 ## 0.15.0-unified-dev1
 
-- Reframed QMigration as one self-developed Unified Engine instead of a platform orchestrating third-party migration runtimes.
+- Reframed DTS as one self-developed Unified Engine instead of a platform orchestrating third-party migration runtimes.
 - Removed active SeaTunnel, DataX and Flink CDC adapters and third-party Full Load process execution.
 - Added built-in staged Full Load runtime: Reader -> bounded channel -> optional Transform -> Writer -> durable Checkpoint.
-- Normalized all new task/table/runtime engine metadata to `qmigration`.
-- Worker capability discovery now reports only QMigration-owned capabilities.
+- Normalized all new task/table/runtime engine metadata to `dts`.
+- Worker capability discovery now reports only DTS-owned capabilities.
 - Renamed Debezium/Canal handling as compatibility envelope normalization; they are no longer advertised as migration engines.
 - Added metadata migration `017_v015_unified_engine.sql`.

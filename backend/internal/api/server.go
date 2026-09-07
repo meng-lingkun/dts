@@ -22,19 +22,19 @@ import (
 	"sync/atomic"
 	"time"
 
-	"qmigration/backend/internal/auth"
-	compatcdc "qmigration/backend/internal/cdc/compat"
-	"qmigration/backend/internal/connector"
-	"qmigration/backend/internal/domain"
-	"qmigration/backend/internal/engine"
-	"qmigration/backend/internal/maintenance"
-	"qmigration/backend/internal/migration"
-	"qmigration/backend/internal/perfmodel"
-	"qmigration/backend/internal/repository"
-	schemapkg "qmigration/backend/internal/schema"
-	"qmigration/backend/internal/validationreport"
-	"qmigration/backend/internal/version"
-	workersvc "qmigration/backend/internal/worker"
+	"dts/backend/internal/auth"
+	compatcdc "dts/backend/internal/cdc/compat"
+	"dts/backend/internal/connector"
+	"dts/backend/internal/domain"
+	"dts/backend/internal/engine"
+	"dts/backend/internal/maintenance"
+	"dts/backend/internal/migration"
+	"dts/backend/internal/perfmodel"
+	"dts/backend/internal/repository"
+	schemapkg "dts/backend/internal/schema"
+	"dts/backend/internal/validationreport"
+	"dts/backend/internal/version"
+	workersvc "dts/backend/internal/worker"
 )
 
 type Server struct {
@@ -52,25 +52,25 @@ type Server struct {
 }
 
 func New(repo repository.Repository, c *connector.Registry, e *engine.Registry) *Server {
-	spec := os.Getenv("QMIGRATION_RBAC_TOKENS")
+	spec := os.Getenv("DTS_RBAC_TOKENS")
 	if spec == "" {
-		if legacy := os.Getenv("QMIGRATION_API_TOKEN"); legacy != "" {
+		if legacy := os.Getenv("DTS_API_TOKEN"); legacy != "" {
 			spec = "admin:" + legacy
 		}
 	}
 	tokens := auth.ParseTokens(spec)
 	ttl := 12 * time.Hour
-	if raw := os.Getenv("QMIGRATION_SESSION_TTL_HOURS"); raw != "" {
+	if raw := os.Getenv("DTS_SESSION_TTL_HOURS"); raw != "" {
 		if hours, err := strconv.Atoi(raw); err == nil && hours > 0 && hours <= 168 {
 			ttl = time.Duration(hours) * time.Hour
 		}
 	}
-	secret := os.Getenv("QMIGRATION_AUTH_SECRET")
+	secret := os.Getenv("DTS_AUTH_SECRET")
 	if secret == "" {
-		secret = "qmigration-development-auth-secret-change-me"
+		secret = "dts-development-auth-secret-change-me"
 	}
 	users, _ := repo.ListUsers(context.Background())
-	required := !tokens.Empty() || len(users) > 0 || strings.EqualFold(os.Getenv("QMIGRATION_AUTH_REQUIRED"), "true")
+	required := !tokens.Empty() || len(users) > 0 || strings.EqualFold(os.Getenv("DTS_AUTH_REQUIRED"), "true")
 	s := &Server{
 		repo: repo, connectors: c, migrations: migration.NewService(repo, c, e), workers: workersvc.NewService(repo), engines: e,
 		staticTokens: tokens, sessions: auth.NewSessionManager(secret, ttl),
@@ -331,7 +331,7 @@ func (s *Server) websocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer conn.Close()
-	_, _ = fmt.Fprintf(rw, "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: %s\r\nSec-WebSocket-Protocol: qmigration.v1\r\n\r\n", websocketAccept(key))
+	_, _ = fmt.Fprintf(rw, "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: %s\r\nSec-WebSocket-Protocol: dts.v1\r\n\r\n", websocketAccept(key))
 	if err := rw.Flush(); err != nil {
 		return
 	}
@@ -410,13 +410,13 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
-	fmt.Fprintf(w, "# TYPE qmigration_datasources gauge\nqmigration_datasources %d\n", len(ds))
-	fmt.Fprintf(w, "# TYPE qmigration_migrations gauge\nqmigration_migrations %d\n", len(ms))
-	fmt.Fprintf(w, "# TYPE qmigration_migrations_running gauge\nqmigration_migrations_running %d\n", running)
-	fmt.Fprintf(w, "# TYPE qmigration_migrations_failed gauge\nqmigration_migrations_failed %d\n", failed)
-	fmt.Fprintf(w, "# TYPE qmigration_workers_online gauge\nqmigration_workers_online %d\n", online)
-	fmt.Fprintf(w, "# TYPE qmigration_rows_migrated_total counter\nqmigration_rows_migrated_total %d\n", rows)
-	fmt.Fprintf(w, "# TYPE qmigration_bytes_migrated_total counter\nqmigration_bytes_migrated_total %d\n", bytes)
+	fmt.Fprintf(w, "# TYPE dts_datasources gauge\ndts_datasources %d\n", len(ds))
+	fmt.Fprintf(w, "# TYPE dts_migrations gauge\ndts_migrations %d\n", len(ms))
+	fmt.Fprintf(w, "# TYPE dts_migrations_running gauge\ndts_migrations_running %d\n", running)
+	fmt.Fprintf(w, "# TYPE dts_migrations_failed gauge\ndts_migrations_failed %d\n", failed)
+	fmt.Fprintf(w, "# TYPE dts_workers_online gauge\ndts_workers_online %d\n", online)
+	fmt.Fprintf(w, "# TYPE dts_rows_migrated_total counter\ndts_rows_migrated_total %d\n", rows)
+	fmt.Fprintf(w, "# TYPE dts_bytes_migrated_total counter\ndts_bytes_migrated_total %d\n", bytes)
 	openDLQ, uncertainDLQ, replayRequiredDLQ := 0, 0, 0
 	for _, item := range dlq {
 		if item.Status == domain.CDCDeadLetterOpen {
@@ -429,43 +429,43 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 			replayRequiredDLQ++
 		}
 	}
-	fmt.Fprintf(w, "# TYPE qmigration_cdc_dlq_open gauge\nqmigration_cdc_dlq_open %d\n", openDLQ)
-	fmt.Fprintf(w, "# TYPE qmigration_cdc_commit_uncertain gauge\nqmigration_cdc_commit_uncertain %d\n", uncertainDLQ)
-	fmt.Fprintf(w, "# TYPE qmigration_cdc_replay_required gauge\nqmigration_cdc_replay_required %d\n", replayRequiredDLQ)
-	fmt.Fprintf(w, "# TYPE qmigration_cdc_conflicts_total counter\nqmigration_cdc_conflicts_total %d\n", len(conflicts))
+	fmt.Fprintf(w, "# TYPE dts_cdc_dlq_open gauge\ndts_cdc_dlq_open %d\n", openDLQ)
+	fmt.Fprintf(w, "# TYPE dts_cdc_commit_uncertain gauge\ndts_cdc_commit_uncertain %d\n", uncertainDLQ)
+	fmt.Fprintf(w, "# TYPE dts_cdc_replay_required gauge\ndts_cdc_replay_required %d\n", replayRequiredDLQ)
+	fmt.Fprintf(w, "# TYPE dts_cdc_conflicts_total counter\ndts_cdc_conflicts_total %d\n", len(conflicts))
 	maintenanceStats := maintenance.Current()
-	fmt.Fprintf(w, "# TYPE qmigration_metadata_maintenance_runs_total counter\nqmigration_metadata_maintenance_runs_total %d\n", maintenanceStats.Runs)
-	fmt.Fprintf(w, "# TYPE qmigration_metadata_maintenance_failures_total counter\nqmigration_metadata_maintenance_failures_total %d\n", maintenanceStats.Failures)
-	fmt.Fprintf(w, "# TYPE qmigration_metadata_maintenance_last_success_timestamp_seconds gauge\nqmigration_metadata_maintenance_last_success_timestamp_seconds %d\n", maintenanceStats.LastSuccessUnix)
-	fmt.Fprintf(w, "# TYPE qmigration_metadata_task_logs_pruned_total counter\nqmigration_metadata_task_logs_pruned_total %d\n", maintenanceStats.TaskLogsDeleted)
-	fmt.Fprintf(w, "# TYPE qmigration_metadata_audit_events_pruned_total counter\nqmigration_metadata_audit_events_pruned_total %d\n", maintenanceStats.AuditEventsDeleted)
-	fmt.Fprintf(w, "# TYPE qmigration_metadata_cdc_positions_pruned_total counter\nqmigration_metadata_cdc_positions_pruned_total %d\n", maintenanceStats.CDCPositionsDeleted)
-	fmt.Fprintf(w, "# TYPE qmigration_metadata_validation_results_pruned_total counter\nqmigration_metadata_validation_results_pruned_total %d\n", maintenanceStats.ValidationDeleted)
-	fmt.Fprintf(w, "# TYPE qmigration_metadata_maintenance_validation_archives_created_total counter\nqmigration_metadata_maintenance_validation_archives_created_total %d\n", maintenanceStats.ValidationArchivesCreated)
-	fmt.Fprintf(w, "# TYPE qmigration_validation_report_exports_total counter\nqmigration_validation_report_exports_total %d\n", s.validationReportExports.Load())
-	fmt.Fprintf(w, "# TYPE qmigration_validation_report_archive_success_total counter\nqmigration_validation_report_archive_success_total %d\n", s.validationReportArchiveSuccess.Load())
-	fmt.Fprintf(w, "# TYPE qmigration_validation_report_archive_failures_total counter\nqmigration_validation_report_archive_failures_total %d\n", s.validationReportArchiveFailures.Load())
+	fmt.Fprintf(w, "# TYPE dts_metadata_maintenance_runs_total counter\ndts_metadata_maintenance_runs_total %d\n", maintenanceStats.Runs)
+	fmt.Fprintf(w, "# TYPE dts_metadata_maintenance_failures_total counter\ndts_metadata_maintenance_failures_total %d\n", maintenanceStats.Failures)
+	fmt.Fprintf(w, "# TYPE dts_metadata_maintenance_last_success_timestamp_seconds gauge\ndts_metadata_maintenance_last_success_timestamp_seconds %d\n", maintenanceStats.LastSuccessUnix)
+	fmt.Fprintf(w, "# TYPE dts_metadata_task_logs_pruned_total counter\ndts_metadata_task_logs_pruned_total %d\n", maintenanceStats.TaskLogsDeleted)
+	fmt.Fprintf(w, "# TYPE dts_metadata_audit_events_pruned_total counter\ndts_metadata_audit_events_pruned_total %d\n", maintenanceStats.AuditEventsDeleted)
+	fmt.Fprintf(w, "# TYPE dts_metadata_cdc_positions_pruned_total counter\ndts_metadata_cdc_positions_pruned_total %d\n", maintenanceStats.CDCPositionsDeleted)
+	fmt.Fprintf(w, "# TYPE dts_metadata_validation_results_pruned_total counter\ndts_metadata_validation_results_pruned_total %d\n", maintenanceStats.ValidationDeleted)
+	fmt.Fprintf(w, "# TYPE dts_metadata_maintenance_validation_archives_created_total counter\ndts_metadata_maintenance_validation_archives_created_total %d\n", maintenanceStats.ValidationArchivesCreated)
+	fmt.Fprintf(w, "# TYPE dts_validation_report_exports_total counter\ndts_validation_report_exports_total %d\n", s.validationReportExports.Load())
+	fmt.Fprintf(w, "# TYPE dts_validation_report_archive_success_total counter\ndts_validation_report_archive_success_total %d\n", s.validationReportArchiveSuccess.Load())
+	fmt.Fprintf(w, "# TYPE dts_validation_report_archive_failures_total counter\ndts_validation_report_archive_failures_total %d\n", s.validationReportArchiveFailures.Load())
 	metadataStorage, _ := repository.ReadMetadataStorageStats(r.Context(), s.repo)
-	fmt.Fprintf(w, "# TYPE qmigration_metadata_storage_bytes gauge\nqmigration_metadata_storage_bytes %d\n", metadataStorage.TotalBytes)
-	fmt.Fprintf(w, "# TYPE qmigration_metadata_relation_total_bytes gauge\n")
-	fmt.Fprintf(w, "# TYPE qmigration_metadata_relation_table_bytes gauge\n")
-	fmt.Fprintf(w, "# TYPE qmigration_metadata_relation_index_bytes gauge\n")
-	fmt.Fprintf(w, "# TYPE qmigration_metadata_relation_live_rows gauge\n")
-	fmt.Fprintf(w, "# TYPE qmigration_metadata_relation_dead_rows gauge\n")
-	fmt.Fprintf(w, "# TYPE qmigration_metadata_relation_dead_ratio gauge\n")
+	fmt.Fprintf(w, "# TYPE dts_metadata_storage_bytes gauge\ndts_metadata_storage_bytes %d\n", metadataStorage.TotalBytes)
+	fmt.Fprintf(w, "# TYPE dts_metadata_relation_total_bytes gauge\n")
+	fmt.Fprintf(w, "# TYPE dts_metadata_relation_table_bytes gauge\n")
+	fmt.Fprintf(w, "# TYPE dts_metadata_relation_index_bytes gauge\n")
+	fmt.Fprintf(w, "# TYPE dts_metadata_relation_live_rows gauge\n")
+	fmt.Fprintf(w, "# TYPE dts_metadata_relation_dead_rows gauge\n")
+	fmt.Fprintf(w, "# TYPE dts_metadata_relation_dead_ratio gauge\n")
 	for _, stat := range metadataStorage.Relations {
-		fmt.Fprintf(w, "qmigration_metadata_relation_total_bytes{relation=%q} %d\n", stat.Relation, stat.TotalBytes)
-		fmt.Fprintf(w, "qmigration_metadata_relation_table_bytes{relation=%q} %d\n", stat.Relation, stat.TableBytes)
-		fmt.Fprintf(w, "qmigration_metadata_relation_index_bytes{relation=%q} %d\n", stat.Relation, stat.IndexBytes)
-		fmt.Fprintf(w, "qmigration_metadata_relation_live_rows{relation=%q} %d\n", stat.Relation, stat.LiveRows)
-		fmt.Fprintf(w, "qmigration_metadata_relation_dead_rows{relation=%q} %d\n", stat.Relation, stat.DeadRows)
-		fmt.Fprintf(w, "qmigration_metadata_relation_dead_ratio{relation=%q} %.6f\n", stat.Relation, stat.DeadRatio())
+		fmt.Fprintf(w, "dts_metadata_relation_total_bytes{relation=%q} %d\n", stat.Relation, stat.TotalBytes)
+		fmt.Fprintf(w, "dts_metadata_relation_table_bytes{relation=%q} %d\n", stat.Relation, stat.TableBytes)
+		fmt.Fprintf(w, "dts_metadata_relation_index_bytes{relation=%q} %d\n", stat.Relation, stat.IndexBytes)
+		fmt.Fprintf(w, "dts_metadata_relation_live_rows{relation=%q} %d\n", stat.Relation, stat.LiveRows)
+		fmt.Fprintf(w, "dts_metadata_relation_dead_rows{relation=%q} %d\n", stat.Relation, stat.DeadRows)
+		fmt.Fprintf(w, "dts_metadata_relation_dead_ratio{relation=%q} %.6f\n", stat.Relation, stat.DeadRatio())
 	}
 	for _, worker := range ws {
-		fmt.Fprintf(w, "qmigration_worker_cpu_usage_percent{worker_id=%q} %.3f\n", worker.ID, worker.CPUUsagePct)
-		fmt.Fprintf(w, "qmigration_worker_memory_usage_percent{worker_id=%q} %.3f\n", worker.ID, worker.MemoryUsagePct)
-		fmt.Fprintf(w, "qmigration_worker_running_jobs{worker_id=%q} %d\n", worker.ID, worker.RunningJobs)
-		fmt.Fprintf(w, "qmigration_worker_scheduler_load_score{worker_id=%q} %.3f\n", worker.ID, worker.SchedulerLoadScore)
+		fmt.Fprintf(w, "dts_worker_cpu_usage_percent{worker_id=%q} %.3f\n", worker.ID, worker.CPUUsagePct)
+		fmt.Fprintf(w, "dts_worker_memory_usage_percent{worker_id=%q} %.3f\n", worker.ID, worker.MemoryUsagePct)
+		fmt.Fprintf(w, "dts_worker_running_jobs{worker_id=%q} %d\n", worker.ID, worker.RunningJobs)
+		fmt.Fprintf(w, "dts_worker_scheduler_load_score{worker_id=%q} %.3f\n", worker.ID, worker.SchedulerLoadScore)
 	}
 	for _, m := range ms {
 		chunkSummary, _ := repository.SummarizeChunks(r.Context(), s.repo, m.ID)
@@ -476,22 +476,22 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 			avgWrite = float64(chunkSummary.WriteMS) / float64(chunkSummary.LatencySamples)
 		}
 		mismatches, _ := repository.LatestValidationMismatchCount(r.Context(), s.repo, m.ID)
-		fmt.Fprintf(w, "qmigration_task_progress{task_id=%q} %.3f\n", m.ID, m.Progress)
-		fmt.Fprintf(w, "qmigration_task_rows_migrated_total{task_id=%q} %d\n", m.ID, m.RowsMigrated)
-		fmt.Fprintf(w, "qmigration_task_bytes_migrated_total{task_id=%q} %d\n", m.ID, m.BytesMigrated)
-		fmt.Fprintf(w, "qmigration_task_speed_bytes_per_second{task_id=%q} %d\n", m.ID, m.SpeedBytesSec)
+		fmt.Fprintf(w, "dts_task_progress{task_id=%q} %.3f\n", m.ID, m.Progress)
+		fmt.Fprintf(w, "dts_task_rows_migrated_total{task_id=%q} %d\n", m.ID, m.RowsMigrated)
+		fmt.Fprintf(w, "dts_task_bytes_migrated_total{task_id=%q} %d\n", m.ID, m.BytesMigrated)
+		fmt.Fprintf(w, "dts_task_speed_bytes_per_second{task_id=%q} %d\n", m.ID, m.SpeedBytesSec)
 		targetBPS := m.TargetThroughputMBps * (1 << 20)
 		if targetBPS <= 0 {
 			targetBPS = m.ControllerTargetBytesSec
 		}
-		fmt.Fprintf(w, "qmigration_task_target_throughput_bytes_per_second{task_id=%q} %d\n", m.ID, targetBPS)
-		fmt.Fprintf(w, "qmigration_task_controller_target_bytes_per_second{task_id=%q} %d\n", m.ID, m.ControllerTargetBytesSec)
+		fmt.Fprintf(w, "dts_task_target_throughput_bytes_per_second{task_id=%q} %d\n", m.ID, targetBPS)
+		fmt.Fprintf(w, "dts_task_controller_target_bytes_per_second{task_id=%q} %d\n", m.ID, m.ControllerTargetBytesSec)
 		autoEnabled := 0
 		if m.AutoThroughputEnabled {
 			autoEnabled = 1
 		}
-		fmt.Fprintf(w, "qmigration_task_auto_throughput_enabled{task_id=%q} %d\n", m.ID, autoEnabled)
-		fmt.Fprintf(w, "qmigration_task_completion_sla_seconds{task_id=%q} %d\n", m.ID, m.CompletionSLASeconds)
+		fmt.Fprintf(w, "dts_task_auto_throughput_enabled{task_id=%q} %d\n", m.ID, autoEnabled)
+		fmt.Fprintf(w, "dts_task_completion_sla_seconds{task_id=%q} %d\n", m.ID, m.CompletionSLASeconds)
 		slaRemaining := m.CompletionSLASeconds
 		if m.CompletionSLASeconds > 0 && !m.SLAStartedAt.IsZero() {
 			slaRemaining -= int64(time.Since(m.SLAStartedAt).Seconds())
@@ -499,23 +499,23 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 				slaRemaining = 0
 			}
 		}
-		fmt.Fprintf(w, "qmigration_task_completion_sla_remaining_seconds{task_id=%q} %d\n", m.ID, slaRemaining)
-		fmt.Fprintf(w, "qmigration_task_adaptive_hotspot_splits_total{task_id=%q} %d\n", m.ID, m.AdaptiveHotspotSplits)
-		fmt.Fprintf(w, "qmigration_task_adaptive_running_yields_total{task_id=%q} %d\n", m.ID, m.AdaptiveRunningYields)
-		fmt.Fprintf(w, "qmigration_task_adaptive_topology_drains_total{task_id=%q} %d\n", m.ID, m.AdaptiveTopologyDrains)
-		fmt.Fprintf(w, "qmigration_task_adaptive_topology_degraded_yields_total{task_id=%q} %d\n", m.ID, m.AdaptiveTopologyDegradedYields)
-		fmt.Fprintf(w, "qmigration_task_adaptive_fault_domain_yields_total{task_id=%q} %d\n", m.ID, m.AdaptiveFaultDomainYields)
+		fmt.Fprintf(w, "dts_task_completion_sla_remaining_seconds{task_id=%q} %d\n", m.ID, slaRemaining)
+		fmt.Fprintf(w, "dts_task_adaptive_hotspot_splits_total{task_id=%q} %d\n", m.ID, m.AdaptiveHotspotSplits)
+		fmt.Fprintf(w, "dts_task_adaptive_running_yields_total{task_id=%q} %d\n", m.ID, m.AdaptiveRunningYields)
+		fmt.Fprintf(w, "dts_task_adaptive_topology_drains_total{task_id=%q} %d\n", m.ID, m.AdaptiveTopologyDrains)
+		fmt.Fprintf(w, "dts_task_adaptive_topology_degraded_yields_total{task_id=%q} %d\n", m.ID, m.AdaptiveTopologyDegradedYields)
+		fmt.Fprintf(w, "dts_task_adaptive_fault_domain_yields_total{task_id=%q} %d\n", m.ID, m.AdaptiveFaultDomainYields)
 		if tables, e := s.repo.ListMigrationTables(r.Context(), m.ID); e == nil {
 			for _, table := range tables {
-				fmt.Fprintf(w, "qmigration_table_profile_bytes_per_second{task_id=%q,table_id=%q} %d\n", m.ID, table.ID, table.ProfileBytesPerSec)
-				fmt.Fprintf(w, "qmigration_table_profile_rows_per_second{task_id=%q,table_id=%q} %d\n", m.ID, table.ID, table.ProfileRowsPerSec)
-				fmt.Fprintf(w, "qmigration_table_recommended_chunk_rows{task_id=%q,table_id=%q} %d\n", m.ID, table.ID, table.RecommendedChunkRows)
-				fmt.Fprintf(w, "qmigration_table_performance_samples_total{task_id=%q,table_id=%q} %d\n", m.ID, table.ID, table.PerformanceSamples)
+				fmt.Fprintf(w, "dts_table_profile_bytes_per_second{task_id=%q,table_id=%q} %d\n", m.ID, table.ID, table.ProfileBytesPerSec)
+				fmt.Fprintf(w, "dts_table_profile_rows_per_second{task_id=%q,table_id=%q} %d\n", m.ID, table.ID, table.ProfileRowsPerSec)
+				fmt.Fprintf(w, "dts_table_recommended_chunk_rows{task_id=%q,table_id=%q} %d\n", m.ID, table.ID, table.RecommendedChunkRows)
+				fmt.Fprintf(w, "dts_table_performance_samples_total{task_id=%q,table_id=%q} %d\n", m.ID, table.ID, table.PerformanceSamples)
 				for topologyID, profile := range table.TopologyPerformance {
-					fmt.Fprintf(w, "qmigration_table_topology_profile_bytes_per_second{task_id=%q,table_id=%q,topology_id=%q} %d\n", m.ID, table.ID, topologyID, profile.BytesPerSec)
-					fmt.Fprintf(w, "qmigration_table_topology_recommended_chunk_rows{task_id=%q,table_id=%q,topology_id=%q} %d\n", m.ID, table.ID, topologyID, profile.RecommendedChunkRows)
-					fmt.Fprintf(w, "qmigration_table_topology_chunk_p95_duration_milliseconds{task_id=%q,table_id=%q,topology_id=%q} %d\n", m.ID, table.ID, topologyID, profile.P95DurationMS)
-					fmt.Fprintf(w, "qmigration_table_topology_chunk_p99_duration_milliseconds{task_id=%q,table_id=%q,topology_id=%q} %d\n", m.ID, table.ID, topologyID, profile.P99DurationMS)
+					fmt.Fprintf(w, "dts_table_topology_profile_bytes_per_second{task_id=%q,table_id=%q,topology_id=%q} %d\n", m.ID, table.ID, topologyID, profile.BytesPerSec)
+					fmt.Fprintf(w, "dts_table_topology_recommended_chunk_rows{task_id=%q,table_id=%q,topology_id=%q} %d\n", m.ID, table.ID, topologyID, profile.RecommendedChunkRows)
+					fmt.Fprintf(w, "dts_table_topology_chunk_p95_duration_milliseconds{task_id=%q,table_id=%q,topology_id=%q} %d\n", m.ID, table.ID, topologyID, profile.P95DurationMS)
+					fmt.Fprintf(w, "dts_table_topology_chunk_p99_duration_milliseconds{task_id=%q,table_id=%q,topology_id=%q} %d\n", m.ID, table.ID, topologyID, profile.P99DurationMS)
 					health := 0
 					switch strings.ToUpper(profile.Health) {
 					case "DEGRADED":
@@ -525,40 +525,40 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 					case "HALF_OPEN":
 						health = 3
 					}
-					fmt.Fprintf(w, "qmigration_table_topology_health_state{task_id=%q,table_id=%q,topology_id=%q} %d\n", m.ID, table.ID, topologyID, health)
-					fmt.Fprintf(w, "qmigration_table_topology_scheduling_weight{task_id=%q,table_id=%q,topology_id=%q} %d\n", m.ID, table.ID, topologyID, perfmodel.TopologySchedulingWeight(profile.Health))
+					fmt.Fprintf(w, "dts_table_topology_health_state{task_id=%q,table_id=%q,topology_id=%q} %d\n", m.ID, table.ID, topologyID, health)
+					fmt.Fprintf(w, "dts_table_topology_scheduling_weight{task_id=%q,table_id=%q,topology_id=%q} %d\n", m.ID, table.ID, topologyID, perfmodel.TopologySchedulingWeight(profile.Health))
 					cap := perfmodel.TopologyConcurrencyCap(profile.Health, repository.TopologyHealthyMaxConcurrency(), repository.TopologyDegradedMaxConcurrency())
-					fmt.Fprintf(w, "qmigration_table_topology_concurrency_cap{task_id=%q,table_id=%q,topology_id=%q} %d\n", m.ID, table.ID, topologyID, cap)
+					fmt.Fprintf(w, "dts_table_topology_concurrency_cap{task_id=%q,table_id=%q,topology_id=%q} %d\n", m.ID, table.ID, topologyID, cap)
 					probeEpoch := int64(0)
 					if !profile.LastProbeAt.IsZero() {
 						probeEpoch = profile.LastProbeAt.Unix()
 					}
-					fmt.Fprintf(w, "qmigration_table_topology_last_probe_timestamp_seconds{task_id=%q,table_id=%q,topology_id=%q} %d\n", m.ID, table.ID, topologyID, probeEpoch)
-					fmt.Fprintf(w, "qmigration_table_topology_good_streak{task_id=%q,table_id=%q,topology_id=%q} %d\n", m.ID, table.ID, topologyID, profile.GoodStreak)
-					fmt.Fprintf(w, "qmigration_table_topology_recovery_concurrency_cap{task_id=%q,table_id=%q,topology_id=%q} %d\n", m.ID, table.ID, topologyID, repository.TopologyEffectiveConcurrencyCap(&table, topologyID))
+					fmt.Fprintf(w, "dts_table_topology_last_probe_timestamp_seconds{task_id=%q,table_id=%q,topology_id=%q} %d\n", m.ID, table.ID, topologyID, probeEpoch)
+					fmt.Fprintf(w, "dts_table_topology_good_streak{task_id=%q,table_id=%q,topology_id=%q} %d\n", m.ID, table.ID, topologyID, profile.GoodStreak)
+					fmt.Fprintf(w, "dts_table_topology_recovery_concurrency_cap{task_id=%q,table_id=%q,topology_id=%q} %d\n", m.ID, table.ID, topologyID, repository.TopologyEffectiveConcurrencyCap(&table, topologyID))
 					healthChangedEpoch := int64(0)
 					if !profile.HealthChangedAt.IsZero() {
 						healthChangedEpoch = profile.HealthChangedAt.Unix()
 					}
-					fmt.Fprintf(w, "qmigration_table_topology_health_changed_timestamp_seconds{task_id=%q,table_id=%q,topology_id=%q} %d\n", m.ID, table.ID, topologyID, healthChangedEpoch)
+					fmt.Fprintf(w, "dts_table_topology_health_changed_timestamp_seconds{task_id=%q,table_id=%q,topology_id=%q} %d\n", m.ID, table.ID, topologyID, healthChangedEpoch)
 					fd := repository.TopologyFaultDomain(&table, topologyID)
-					fmt.Fprintf(w, "qmigration_table_topology_fault_domain_info{task_id=%q,table_id=%q,topology_id=%q,region=%q,zone=%q,rack=%q} 1\n", m.ID, table.ID, topologyID, fd["region"], fd["zone"], fd["rack"])
-					fmt.Fprintf(w, "qmigration_table_topology_fault_domain_peer_risk{task_id=%q,table_id=%q,topology_id=%q} %d\n", m.ID, table.ID, topologyID, repository.TopologyFaultDomainPeerRisk(&table, topologyID))
+					fmt.Fprintf(w, "dts_table_topology_fault_domain_info{task_id=%q,table_id=%q,topology_id=%q,region=%q,zone=%q,rack=%q} 1\n", m.ID, table.ID, topologyID, fd["region"], fd["zone"], fd["rack"])
+					fmt.Fprintf(w, "dts_table_topology_fault_domain_peer_risk{task_id=%q,table_id=%q,topology_id=%q} %d\n", m.ID, table.ID, topologyID, repository.TopologyFaultDomainPeerRisk(&table, topologyID))
 				}
 			}
 		}
-		fmt.Fprintf(w, "qmigration_task_controller_auto_probe_percent{task_id=%q} %d\n", m.ID, m.ControllerAutoProbePct)
-		fmt.Fprintf(w, "qmigration_task_controller_sla_headroom_percent{task_id=%q} %d\n", m.ID, m.ControllerSLAHeadroomPct)
-		fmt.Fprintf(w, "qmigration_task_controller_learning_samples_total{task_id=%q} %d\n", m.ID, m.ControllerLearningSamples)
+		fmt.Fprintf(w, "dts_task_controller_auto_probe_percent{task_id=%q} %d\n", m.ID, m.ControllerAutoProbePct)
+		fmt.Fprintf(w, "dts_task_controller_sla_headroom_percent{task_id=%q} %d\n", m.ID, m.ControllerSLAHeadroomPct)
+		fmt.Fprintf(w, "dts_task_controller_learning_samples_total{task_id=%q} %d\n", m.ID, m.ControllerLearningSamples)
 		utilization := 0.0
 		if targetBPS > 0 {
 			utilization = float64(m.SpeedBytesSec) / float64(targetBPS)
 		}
-		fmt.Fprintf(w, "qmigration_task_throughput_target_utilization_ratio{task_id=%q} %.6f\n", m.ID, utilization)
-		fmt.Fprintf(w, "qmigration_task_speed_rows_per_second{task_id=%q} %d\n", m.ID, m.SpeedRowsSec)
-		fmt.Fprintf(w, "qmigration_task_eta_seconds{task_id=%q} %d\n", m.ID, m.ETASeconds)
-		fmt.Fprintf(w, "qmigration_task_sla_p95_eta_seconds{task_id=%q} %d\n", m.ID, m.SLAP95ETASeconds)
-		fmt.Fprintf(w, "qmigration_task_sla_p99_eta_seconds{task_id=%q} %d\n", m.ID, m.SLAP99ETASeconds)
+		fmt.Fprintf(w, "dts_task_throughput_target_utilization_ratio{task_id=%q} %.6f\n", m.ID, utilization)
+		fmt.Fprintf(w, "dts_task_speed_rows_per_second{task_id=%q} %d\n", m.ID, m.SpeedRowsSec)
+		fmt.Fprintf(w, "dts_task_eta_seconds{task_id=%q} %d\n", m.ID, m.ETASeconds)
+		fmt.Fprintf(w, "dts_task_sla_p95_eta_seconds{task_id=%q} %d\n", m.ID, m.SLAP95ETASeconds)
+		fmt.Fprintf(w, "dts_task_sla_p99_eta_seconds{task_id=%q} %d\n", m.ID, m.SLAP99ETASeconds)
 		riskState := 0
 		switch strings.ToUpper(strings.TrimSpace(m.SLARiskLevel)) {
 		case "WARN":
@@ -566,33 +566,33 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 		case "CRITICAL":
 			riskState = 2
 		}
-		fmt.Fprintf(w, "qmigration_task_sla_tail_risk_state{task_id=%q} %d\n", m.ID, riskState)
-		fmt.Fprintf(w, "qmigration_task_effective_parallelism{task_id=%q} %d\n", m.ID, m.EffectiveParallelism)
-		fmt.Fprintf(w, "qmigration_cdc_spool_growth_bytes_per_second{task_id=%q} %d\n", m.ID, m.CDCSpoolGrowthBytesSec)
-		fmt.Fprintf(w, "qmigration_cdc_spool_critical_eta_seconds{task_id=%q} %d\n", m.ID, m.CDCSpoolCriticalETASeconds)
-		fmt.Fprintf(w, "qmigration_task_chunks_pending{task_id=%q} %d\n", m.ID, pendingChunks)
-		fmt.Fprintf(w, "qmigration_task_chunks_running{task_id=%q} %d\n", m.ID, runningChunks)
-		fmt.Fprintf(w, "qmigration_task_chunks_failed{task_id=%q} %d\n", m.ID, failedChunks)
-		fmt.Fprintf(w, "qmigration_task_read_latency_ms{task_id=%q} %.3f\n", m.ID, avgRead)
-		fmt.Fprintf(w, "qmigration_task_write_latency_ms{task_id=%q} %.3f\n", m.ID, avgWrite)
-		fmt.Fprintf(w, "qmigration_validation_mismatch_total{task_id=%q} %d\n", m.ID, mismatches)
-		fmt.Fprintf(w, "qmigration_cdc_lag_seconds{task_id=%q} %.3f\n", m.ID, float64(m.CDCLagMS)/1000.0)
+		fmt.Fprintf(w, "dts_task_sla_tail_risk_state{task_id=%q} %d\n", m.ID, riskState)
+		fmt.Fprintf(w, "dts_task_effective_parallelism{task_id=%q} %d\n", m.ID, m.EffectiveParallelism)
+		fmt.Fprintf(w, "dts_cdc_spool_growth_bytes_per_second{task_id=%q} %d\n", m.ID, m.CDCSpoolGrowthBytesSec)
+		fmt.Fprintf(w, "dts_cdc_spool_critical_eta_seconds{task_id=%q} %d\n", m.ID, m.CDCSpoolCriticalETASeconds)
+		fmt.Fprintf(w, "dts_task_chunks_pending{task_id=%q} %d\n", m.ID, pendingChunks)
+		fmt.Fprintf(w, "dts_task_chunks_running{task_id=%q} %d\n", m.ID, runningChunks)
+		fmt.Fprintf(w, "dts_task_chunks_failed{task_id=%q} %d\n", m.ID, failedChunks)
+		fmt.Fprintf(w, "dts_task_read_latency_ms{task_id=%q} %.3f\n", m.ID, avgRead)
+		fmt.Fprintf(w, "dts_task_write_latency_ms{task_id=%q} %.3f\n", m.ID, avgWrite)
+		fmt.Fprintf(w, "dts_validation_mismatch_total{task_id=%q} %d\n", m.ID, mismatches)
+		fmt.Fprintf(w, "dts_cdc_lag_seconds{task_id=%q} %.3f\n", m.ID, float64(m.CDCLagMS)/1000.0)
 		forwardSpool, _ := s.repo.CDCSpoolStats(r.Context(), m.ID, "forward")
 		reverseSpool, _ := s.repo.CDCSpoolStats(r.Context(), m.ID, "reverse")
-		fmt.Fprintf(w, "qmigration_cdc_spool_pending_transactions{task_id=%q,direction=%q} %d\n", m.ID, "forward", forwardSpool.PendingTransactions)
-		fmt.Fprintf(w, "qmigration_cdc_spool_pending_events{task_id=%q,direction=%q} %d\n", m.ID, "forward", forwardSpool.PendingEvents)
-		fmt.Fprintf(w, "qmigration_cdc_spool_pending_bytes{task_id=%q,direction=%q} %d\n", m.ID, "forward", forwardSpool.PendingBytes)
-		fmt.Fprintf(w, "qmigration_cdc_spool_storage_used_pct{task_id=%q,direction=%q,backend=%q,level=%q} %.3f\n", m.ID, "forward", forwardSpool.StorageBackend, forwardSpool.StorageLevel, forwardSpool.StorageUsedPct)
-		fmt.Fprintf(w, "qmigration_cdc_spool_storage_free_bytes{task_id=%q,direction=%q,backend=%q} %d\n", m.ID, "forward", forwardSpool.StorageBackend, forwardSpool.StorageFreeBytes)
-		fmt.Fprintf(w, "qmigration_cdc_spool_pending_transactions{task_id=%q,direction=%q} %d\n", m.ID, "reverse", reverseSpool.PendingTransactions)
-		fmt.Fprintf(w, "qmigration_cdc_spool_pending_events{task_id=%q,direction=%q} %d\n", m.ID, "reverse", reverseSpool.PendingEvents)
-		fmt.Fprintf(w, "qmigration_cdc_spool_pending_bytes{task_id=%q,direction=%q} %d\n", m.ID, "reverse", reverseSpool.PendingBytes)
-		fmt.Fprintf(w, "qmigration_cdc_spool_storage_used_pct{task_id=%q,direction=%q,backend=%q,level=%q} %.3f\n", m.ID, "reverse", reverseSpool.StorageBackend, reverseSpool.StorageLevel, reverseSpool.StorageUsedPct)
+		fmt.Fprintf(w, "dts_cdc_spool_pending_transactions{task_id=%q,direction=%q} %d\n", m.ID, "forward", forwardSpool.PendingTransactions)
+		fmt.Fprintf(w, "dts_cdc_spool_pending_events{task_id=%q,direction=%q} %d\n", m.ID, "forward", forwardSpool.PendingEvents)
+		fmt.Fprintf(w, "dts_cdc_spool_pending_bytes{task_id=%q,direction=%q} %d\n", m.ID, "forward", forwardSpool.PendingBytes)
+		fmt.Fprintf(w, "dts_cdc_spool_storage_used_pct{task_id=%q,direction=%q,backend=%q,level=%q} %.3f\n", m.ID, "forward", forwardSpool.StorageBackend, forwardSpool.StorageLevel, forwardSpool.StorageUsedPct)
+		fmt.Fprintf(w, "dts_cdc_spool_storage_free_bytes{task_id=%q,direction=%q,backend=%q} %d\n", m.ID, "forward", forwardSpool.StorageBackend, forwardSpool.StorageFreeBytes)
+		fmt.Fprintf(w, "dts_cdc_spool_pending_transactions{task_id=%q,direction=%q} %d\n", m.ID, "reverse", reverseSpool.PendingTransactions)
+		fmt.Fprintf(w, "dts_cdc_spool_pending_events{task_id=%q,direction=%q} %d\n", m.ID, "reverse", reverseSpool.PendingEvents)
+		fmt.Fprintf(w, "dts_cdc_spool_pending_bytes{task_id=%q,direction=%q} %d\n", m.ID, "reverse", reverseSpool.PendingBytes)
+		fmt.Fprintf(w, "dts_cdc_spool_storage_used_pct{task_id=%q,direction=%q,backend=%q,level=%q} %.3f\n", m.ID, "reverse", reverseSpool.StorageBackend, reverseSpool.StorageLevel, reverseSpool.StorageUsedPct)
 	}
 }
 
 func (s *Server) audit(r *http.Request, action, resourceType, resourceID, detail string) {
-	actor := r.Header.Get("X-QMigration-User")
+	actor := r.Header.Get("X-DTS-User")
 	if actor == "" {
 		actor = "anonymous"
 	}
@@ -617,7 +617,7 @@ func (s *Server) listEngines(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) renderEngineConfig(w http.ResponseWriter, r *http.Request) {
 	if s.engines == nil {
-		apiError(w, 503, errors.New("QMigration unified engine registry is unavailable"))
+		apiError(w, 503, errors.New("DTS unified engine registry is unavailable"))
 		return
 	}
 	a, ok := s.engines.Get(r.PathValue("engine"))
@@ -676,7 +676,7 @@ func (s *Server) renderEngineConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	includeSecrets := r.URL.Query().Get("secrets") == "1"
 	if includeSecrets {
-		role := r.Header.Get("X-QMigration-Role")
+		role := r.Header.Get("X-DTS-Role")
 		if role != "" && role != "admin" && role != "dba" {
 			apiError(w, http.StatusForbidden, errors.New("only admin/dba may render engine configs with credentials"))
 			return
@@ -769,7 +769,7 @@ func (s *Server) createDataSource(w http.ResponseWriter, r *http.Request) {
 		in.Type = domain.DataSourceMySQL
 	}
 	if in.Type.IsExternalJDBC() && (in.JDBCURL == "" || in.DriverClass == "") {
-		apiError(w, 400, errors.New("jdbc_url and driver_class are required for datasource types whose QMigration Native Connector is not implemented yet"))
+		apiError(w, 400, errors.New("jdbc_url and driver_class are required for datasource types whose DTS Native Connector is not implemented yet"))
 		return
 	}
 	if in.Port == 0 {
@@ -975,7 +975,7 @@ func (s *Server) schemaObjects(w http.ResponseWriter, r *http.Request) {
 	defer c.Close()
 	discoverer, ok := c.(connector.SchemaObjectConnector)
 	if !ok {
-		apiError(w, http.StatusNotImplemented, errors.New("schema object discovery is not available for this datasource; implement the QMigration native connector catalog"))
+		apiError(w, http.StatusNotImplemented, errors.New("schema object discovery is not available for this datasource; implement the DTS native connector catalog"))
 		return
 	}
 	items, err := discoverer.ListSchemaObjects(r.Context(), schema)
@@ -1028,7 +1028,7 @@ func (s *Server) exportPerformanceProfiles(w http.ResponseWriter, r *http.Reques
 		apiError(w, 500, err)
 		return
 	}
-	b := performanceProfileBundle{Format: "qmigration-performance-profile-v1", Version: version.Version, Exported: time.Now().UTC()}
+	b := performanceProfileBundle{Format: "dts-performance-profile-v1", Version: version.Version, Exported: time.Now().UTC()}
 	for _, m := range migrations {
 		tables, e := s.repo.ListMigrationTables(r.Context(), m.ID)
 		if e != nil {
@@ -1051,7 +1051,7 @@ func (s *Server) importPerformanceProfiles(w http.ResponseWriter, r *http.Reques
 		apiError(w, 400, err)
 		return
 	}
-	if b.Format != "qmigration-performance-profile-v1" {
+	if b.Format != "dts-performance-profile-v1" {
 		apiError(w, 400, fmt.Errorf("unsupported performance profile format %q", b.Format))
 		return
 	}
@@ -1308,8 +1308,8 @@ func (s *Server) validationReportPublicKey(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.Header().Set("Content-Disposition", `attachment; filename="qmigration-validation-report-public-key.json"`)
-	w.Header().Set("X-QMigration-Public-Key-Fingerprint-SHA256", doc.FingerprintSHA256)
+	w.Header().Set("Content-Disposition", `attachment; filename="dts-validation-report-public-key.json"`)
+	w.Header().Set("X-DTS-Public-Key-Fingerprint-SHA256", doc.FingerprintSHA256)
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(b)
 }
@@ -1348,9 +1348,9 @@ func (s *Server) validationReportKeyTransition(w http.ResponseWriter, r *http.Re
 		return
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.Header().Set("Content-Disposition", `attachment; filename="qmigration-validation-report-key-transition.json"`)
-	w.Header().Set("X-QMigration-Transition-From-Key-ID", cert.From.KeyID)
-	w.Header().Set("X-QMigration-Transition-To-Key-ID", cert.To.KeyID)
+	w.Header().Set("Content-Disposition", `attachment; filename="dts-validation-report-key-transition.json"`)
+	w.Header().Set("X-DTS-Transition-From-Key-ID", cert.From.KeyID)
+	w.Header().Set("X-DTS-Transition-To-Key-ID", cert.To.KeyID)
 	w.WriteHeader(http.StatusCreated)
 	_, _ = w.Write(b)
 }
@@ -1377,9 +1377,9 @@ func (s *Server) validationReportKeyRevocation(w http.ResponseWriter, r *http.Re
 		return
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.Header().Set("Content-Disposition", `attachment; filename="qmigration-validation-report-key-revocation.json"`)
-	w.Header().Set("X-QMigration-Revocation-Issuer-Key-ID", cert.Issuer.KeyID)
-	w.Header().Set("X-QMigration-Revocation-Target-Key-ID", cert.Target.KeyID)
+	w.Header().Set("Content-Disposition", `attachment; filename="dts-validation-report-key-revocation.json"`)
+	w.Header().Set("X-DTS-Revocation-Issuer-Key-ID", cert.Issuer.KeyID)
+	w.Header().Set("X-DTS-Revocation-Target-Key-ID", cert.Target.KeyID)
 	w.WriteHeader(http.StatusCreated)
 	_, _ = w.Write(b)
 }
@@ -1401,18 +1401,18 @@ func (s *Server) validationReport(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", item.ContentType)
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", item.Name))
-	w.Header().Set("X-QMigration-Archive-Evidence-Digest", bundle.Report.Validation.EvidenceDigest)
-	w.Header().Set("X-QMigration-Content-SHA256", item.SHA256)
+	w.Header().Set("X-DTS-Archive-Evidence-Digest", bundle.Report.Validation.EvidenceDigest)
+	w.Header().Set("X-DTS-Content-SHA256", item.SHA256)
 	if item.HMACSHA256 != "" {
-		w.Header().Set("X-QMigration-HMAC-SHA256", item.HMACSHA256)
+		w.Header().Set("X-DTS-HMAC-SHA256", item.HMACSHA256)
 		if bundle.Manifest.SignatureKeyID != "" {
-			w.Header().Set("X-QMigration-Signature-Key-ID", bundle.Manifest.SignatureKeyID)
+			w.Header().Set("X-DTS-Signature-Key-ID", bundle.Manifest.SignatureKeyID)
 		}
 	}
 	if item.Ed25519Signature != "" {
-		w.Header().Set("X-QMigration-Ed25519-Signature", item.Ed25519Signature)
-		w.Header().Set("X-QMigration-Ed25519-Key-ID", bundle.Manifest.PublicSignatureKeyID)
-		w.Header().Set("X-QMigration-Public-Key-Fingerprint-SHA256", bundle.Manifest.PublicKeyFingerprintSHA256)
+		w.Header().Set("X-DTS-Ed25519-Signature", item.Ed25519Signature)
+		w.Header().Set("X-DTS-Ed25519-Key-ID", bundle.Manifest.PublicSignatureKeyID)
+		w.Header().Set("X-DTS-Public-Key-Fingerprint-SHA256", bundle.Manifest.PublicKeyFingerprintSHA256)
 	}
 	s.validationReportExports.Add(1)
 	w.WriteHeader(http.StatusOK)
@@ -1427,12 +1427,12 @@ func (s *Server) validationReportManifest(w http.ResponseWriter, r *http.Request
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Content-Disposition", `attachment; filename="manifest.json"`)
-	w.Header().Set("X-QMigration-Content-SHA256", fmt.Sprintf("%x", sha256.Sum256(bundle.ManifestJSON)))
+	w.Header().Set("X-DTS-Content-SHA256", fmt.Sprintf("%x", sha256.Sum256(bundle.ManifestJSON)))
 	if bundle.Manifest.ManifestEd25519Signature != "" {
-		w.Header().Set("X-QMigration-Ed25519-Signature", bundle.Manifest.ManifestEd25519Signature)
-		w.Header().Set("X-QMigration-Signature-Scope", "canonical-manifest-signature-fields-cleared")
-		w.Header().Set("X-QMigration-Ed25519-Key-ID", bundle.Manifest.PublicSignatureKeyID)
-		w.Header().Set("X-QMigration-Public-Key-Fingerprint-SHA256", bundle.Manifest.PublicKeyFingerprintSHA256)
+		w.Header().Set("X-DTS-Ed25519-Signature", bundle.Manifest.ManifestEd25519Signature)
+		w.Header().Set("X-DTS-Signature-Scope", "canonical-manifest-signature-fields-cleared")
+		w.Header().Set("X-DTS-Ed25519-Key-ID", bundle.Manifest.PublicSignatureKeyID)
+		w.Header().Set("X-DTS-Public-Key-Fingerprint-SHA256", bundle.Manifest.PublicKeyFingerprintSHA256)
 	}
 	s.validationReportExports.Add(1)
 	w.WriteHeader(http.StatusOK)
@@ -1645,7 +1645,7 @@ func (s *Server) applyCDCEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if strings.EqualFold(req.Direction, "reverse") {
-		role := r.Header.Get("X-QMigration-Role")
+		role := r.Header.Get("X-DTS-Role")
 		if role != "" && role != string(auth.RoleAdmin) && role != string(auth.RoleDBA) {
 			apiError(w, http.StatusForbidden, errors.New("reverse CDC apply requires admin or dba role"))
 			return
@@ -1702,7 +1702,7 @@ func (s *Server) applyCompatibilityCDC(w http.ResponseWriter, r *http.Request, f
 		return
 	}
 	if direction == "reverse" {
-		role := r.Header.Get("X-QMigration-Role")
+		role := r.Header.Get("X-DTS-Role")
 		if role != "" && role != string(auth.RoleAdmin) && role != string(auth.RoleDBA) {
 			apiError(w, http.StatusForbidden, errors.New("reverse CDC apply requires admin or dba role"))
 			return
@@ -1712,7 +1712,7 @@ func (s *Server) applyCompatibilityCDC(w http.ResponseWriter, r *http.Request, f
 	// Push-based engines may be the first component to announce that capture is
 	// alive. For incremental-only tasks this immediately opens the apply gate.
 	// For full+incremental tasks it starts full load, but the source must keep
-	// the record unacknowledged until QMigration reaches CDC_CATCHING_UP.
+	// the record unacknowledged until DTS reaches CDC_CATCHING_UP.
 	task, getErr := s.migrations.Get(r.Context(), r.PathValue("id"))
 	if getErr != nil {
 		apiError(w, http.StatusNotFound, getErr)
@@ -2104,7 +2104,7 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"authenticated": false, "open_mode": true, "username": "open-mode", "role": auth.RoleAdmin})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"authenticated": true, "open_mode": false, "username": r.Header.Get("X-QMigration-User"), "role": r.Header.Get("X-QMigration-Role")})
+	writeJSON(w, http.StatusOK, map[string]any{"authenticated": true, "open_mode": false, "username": r.Header.Get("X-DTS-User"), "role": r.Header.Get("X-DTS-Role")})
 }
 
 func (s *Server) listUsers(w http.ResponseWriter, r *http.Request) {
@@ -2246,13 +2246,13 @@ func logging(next http.Handler) http.Handler {
 	})
 }
 func cors(next http.Handler) http.Handler {
-	origin := os.Getenv("QMIGRATION_CORS_ORIGIN")
+	origin := os.Getenv("DTS_CORS_ORIGIN")
 	if origin == "" {
 		origin = "*"
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", origin)
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-QMigration-User, X-QMigration-API-Token, X-QMigration-Worker-Token")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-DTS-User, X-DTS-API-Token, X-DTS-Worker-Token")
 		w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
@@ -2271,14 +2271,14 @@ func (s *Server) apiAuth(next http.Handler) http.Handler {
 		if !s.authRequired.Load() {
 			// Development bootstrap mode. Once the first user is created, the
 			// server atomically switches to authenticated mode.
-			r.Header.Set("X-QMigration-Role", string(auth.RoleAdmin))
-			if r.Header.Get("X-QMigration-User") == "" {
-				r.Header.Set("X-QMigration-User", "open-mode")
+			r.Header.Set("X-DTS-Role", string(auth.RoleAdmin))
+			if r.Header.Get("X-DTS-User") == "" {
+				r.Header.Set("X-DTS-User", "open-mode")
 			}
 			next.ServeHTTP(w, r)
 			return
 		}
-		got := r.Header.Get("X-QMigration-API-Token")
+		got := r.Header.Get("X-DTS-API-Token")
 		if got == "" {
 			authorization := r.Header.Get("Authorization")
 			if strings.HasPrefix(authorization, "Bearer ") {
@@ -2323,8 +2323,8 @@ func (s *Server) apiAuth(next http.Handler) http.Handler {
 			apiError(w, http.StatusForbidden, fmt.Errorf("role %s is not allowed to perform this operation", role))
 			return
 		}
-		r.Header.Set("X-QMigration-Role", string(role))
-		r.Header.Set("X-QMigration-User", actor)
+		r.Header.Set("X-DTS-Role", string(role))
+		r.Header.Set("X-DTS-User", actor)
 		next.ServeHTTP(w, r)
 	})
 }
@@ -2334,13 +2334,13 @@ func isWorkerInternalRequest(r *http.Request) bool {
 }
 
 func workerAuth(next http.Handler) http.Handler {
-	token := os.Getenv("QMIGRATION_WORKER_TOKEN")
+	token := os.Getenv("DTS_WORKER_TOKEN")
 	if token == "" {
 		return next
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		internal := isWorkerInternalRequest(r)
-		if internal && r.Header.Get("X-QMigration-Worker-Token") != token {
+		if internal && r.Header.Get("X-DTS-Worker-Token") != token {
 			apiError(w, http.StatusUnauthorized, errors.New("invalid worker token"))
 			return
 		}

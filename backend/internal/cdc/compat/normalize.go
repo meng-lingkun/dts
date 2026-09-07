@@ -9,11 +9,11 @@ import (
 	"strconv"
 	"strings"
 
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/domain"
 )
 
 // NormalizeDebezium converts a Debezium JSON envelope (with or without the
-// Kafka Connect schema wrapper) into QMigration's stable CDC event contract.
+// Kafka Connect schema wrapper) into DTS's stable CDC event contract.
 // The final event always carries a durable source position; callers must not
 // acknowledge the upstream record when normalization fails.
 func NormalizeDebezium(raw []byte) ([]domain.CDCEvent, error) {
@@ -92,7 +92,7 @@ func NormalizeDebezium(raw []byte) ([]domain.CDCEvent, error) {
 }
 
 // NormalizeCanal converts the common Canal JSON adapter envelope into one or
-// more QMigration CDC events. Canal UPDATE "old" values are merged into the
+// more DTS CDC events. Canal UPDATE "old" values are merged into the
 // current row to reconstruct a complete before image.
 func NormalizeCanal(raw []byte) ([]domain.CDCEvent, error) {
 	var msg struct {
@@ -178,7 +178,7 @@ func NormalizeCanal(raw []byte) ([]domain.CDCEvent, error) {
 		out = append(out, e)
 	}
 	// One Canal message may contain many rows. Only the final row advances the
-	// durable message position so QMigration applies the group atomically.
+	// durable message position so DTS applies the group atomically.
 	last := &out[len(out)-1]
 	last.PositionType = "CANAL_ID"
 	last.PositionValue = position

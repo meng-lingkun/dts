@@ -1,11 +1,11 @@
 // Build this file together with your locally supplied GBase 8s CSDK wrapper.
-// The plugin must be built with the same Go toolchain as QMigration.
+// The plugin must be built with the same Go toolchain as DTS.
 package main
 
 import (
 	"context"
 	"errors"
-	"qmigration/backend/internal/cdc/gbase8scdc"
+	"dts/backend/internal/cdc/gbase8scdc"
 )
 
 type provider struct{}

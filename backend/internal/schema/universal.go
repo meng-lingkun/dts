@@ -1,7 +1,7 @@
 package schema
 
 import (
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/domain"
 	"regexp"
 	"strconv"
 	"strings"

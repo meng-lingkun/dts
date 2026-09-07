@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/domain"
 )
 
 type canalExtension struct {
@@ -100,7 +100,7 @@ func DecodeCanalJSON(raw []byte, selected map[string]bool) ([]domain.CDCEvent, u
 		case domain.CDCUpdate:
 			e.After = after
 			// Canal/TiCDC old contains only changed columns. Start from the new
-			// image and overlay the old values so QMigration receives a complete
+			// image and overlay the old values so DTS receives a complete
 			// before image whenever the sink includes all columns in data.
 			beforeMap := cloneRawMap(row)
 			if i < len(msg.Old) {

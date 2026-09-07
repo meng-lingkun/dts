@@ -31,26 +31,26 @@ func ApplyTimestamp(ctx context.Context, b *Bundle) error {
 	if b == nil {
 		return errors.New("nil validation report bundle")
 	}
-	tsa := strings.TrimSpace(os.Getenv("QMIGRATION_VALIDATION_REPORT_TSA_URL"))
+	tsa := strings.TrimSpace(os.Getenv("DTS_VALIDATION_REPORT_TSA_URL"))
 	if tsa == "" {
 		return nil
 	}
-	openssl := strings.TrimSpace(os.Getenv("QMIGRATION_OPENSSL_BIN"))
+	openssl := strings.TrimSpace(os.Getenv("DTS_OPENSSL_BIN"))
 	if openssl == "" {
 		openssl = "openssl"
 	}
-	caFile := strings.TrimSpace(os.Getenv("QMIGRATION_VALIDATION_REPORT_TSA_CA_FILE"))
+	caFile := strings.TrimSpace(os.Getenv("DTS_VALIDATION_REPORT_TSA_CA_FILE"))
 	if caFile == "" {
-		return errors.New("RFC3161 TSA requires QMIGRATION_VALIDATION_REPORT_TSA_CA_FILE")
+		return errors.New("RFC3161 TSA requires DTS_VALIDATION_REPORT_TSA_CA_FILE")
 	}
-	retries, _ := strconv.Atoi(strings.TrimSpace(os.Getenv("QMIGRATION_VALIDATION_REPORT_TSA_RETRIES")))
+	retries, _ := strconv.Atoi(strings.TrimSpace(os.Getenv("DTS_VALIDATION_REPORT_TSA_RETRIES")))
 	if retries < 1 {
 		retries = 3
 	}
 	if retries > 10 {
 		retries = 10
 	}
-	dir, err := os.MkdirTemp("", "qmigration-tsa-")
+	dir, err := os.MkdirTemp("", "dts-tsa-")
 	if err != nil {
 		return err
 	}
@@ -160,7 +160,7 @@ func VerifyTimestampDirectory(ctx context.Context, dir, caFile string) (Timestam
 	if strings.TrimSpace(caFile) == "" {
 		return proof, errors.New("trusted TSA CA file is required")
 	}
-	openssl := strings.TrimSpace(os.Getenv("QMIGRATION_OPENSSL_BIN"))
+	openssl := strings.TrimSpace(os.Getenv("DTS_OPENSSL_BIN"))
 	if openssl == "" {
 		openssl = "openssl"
 	}

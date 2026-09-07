@@ -94,7 +94,7 @@ func (p *TransactionPayload) Decompress(zstdBin string) ([]byte, error) {
 		}
 		path, err := exec.LookPath(zstdBin)
 		if err != nil {
-			return nil, fmt.Errorf("ZSTD transaction payload requires %q in PATH or QMIGRATION_ZSTD_BIN: %w", zstdBin, err)
+			return nil, fmt.Errorf("ZSTD transaction payload requires %q in PATH or DTS_ZSTD_BIN: %w", zstdBin, err)
 		}
 		cmd := exec.Command(path, "-q", "-d", "-c")
 		cmd.Stdin = bytes.NewReader(p.Payload)

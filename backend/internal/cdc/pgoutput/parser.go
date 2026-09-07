@@ -5,7 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/domain"
 	"strconv"
 	"time"
 )

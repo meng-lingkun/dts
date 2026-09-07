@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"qmigration/backend/internal/connector"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/connector"
+	"dts/backend/internal/domain"
 )
 
 func TestEncodeCP500AndDDM(t *testing.T) {

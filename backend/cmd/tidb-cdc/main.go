@@ -13,9 +13,9 @@ import (
 	"strings"
 	"time"
 
-	cdcruntime "qmigration/backend/internal/cdc/runtime"
-	"qmigration/backend/internal/cdc/ticdc"
-	"qmigration/backend/internal/domain"
+	cdcruntime "dts/backend/internal/cdc/runtime"
+	"dts/backend/internal/cdc/ticdc"
+	"dts/backend/internal/domain"
 )
 
 func env(k, d string) string {
@@ -34,8 +34,8 @@ func addAuth(req *http.Request, token string) {
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	if v := strings.TrimSpace(os.Getenv("QMIGRATION_WORKER_TOKEN")); v != "" {
-		req.Header.Set("X-QMigration-Worker-Token", v)
+	if v := strings.TrimSpace(os.Getenv("DTS_WORKER_TOKEN")); v != "" {
+		req.Header.Set("X-DTS-Worker-Token", v)
 	}
 }
 func waitReady(ctx context.Context, client *http.Client, endpoint, token string) error {
@@ -93,7 +93,7 @@ func postEvents(ctx context.Context, client *http.Client, endpoint, token, direc
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("QMigration returned %s: %s", resp.Status, strings.TrimSpace(string(data)))
+		return nil, fmt.Errorf("DTS returned %s: %s", resp.Status, strings.TrimSpace(string(data)))
 	}
 	var out domain.CDCApplyResult
 	if len(data) > 0 {
@@ -126,33 +126,33 @@ func tableList(raw string) []string {
 }
 
 func run(ctx context.Context) error {
-	server := strings.TrimRight(env("QMIGRATION_SERVER", "http://127.0.0.1:8080"), "/")
-	taskID := env("QMIGRATION_TASK_ID", "")
+	server := strings.TrimRight(env("DTS_SERVER", "http://127.0.0.1:8080"), "/")
+	taskID := env("DTS_TASK_ID", "")
 	if taskID == "" {
-		return errors.New("QMIGRATION_TASK_ID is required")
+		return errors.New("DTS_TASK_ID is required")
 	}
-	direction := strings.ToLower(env("QMIGRATION_CDC_DIRECTION", "forward"))
+	direction := strings.ToLower(env("DTS_CDC_DIRECTION", "forward"))
 	if direction != "forward" && direction != "reverse" {
 		return errors.New("invalid CDC direction")
 	}
-	ep, err := ticdc.ParseEndpoint(env("QMIGRATION_TICDC_URL", ""))
+	ep, err := ticdc.ParseEndpoint(env("DTS_TICDC_URL", ""))
 	if err != nil {
 		return err
 	}
-	start, err := ticdc.ParsePosition(env("QMIGRATION_TICDC_START_POSITION", ""))
+	start, err := ticdc.ParsePosition(env("DTS_TICDC_START_POSITION", ""))
 	if err != nil {
 		return err
 	}
 	cfID, topic := ticdc.DeterministicNames(taskID, direction)
-	if v := env("QMIGRATION_TICDC_CHANGEFEED_ID", ""); v != "" {
+	if v := env("DTS_TICDC_CHANGEFEED_ID", ""); v != "" {
 		cfID = v
 	}
-	if v := env("QMIGRATION_TICDC_TOPIC", ""); v != "" {
+	if v := env("DTS_TICDC_TOPIC", ""); v != "" {
 		topic = v
 	}
-	tables := tableList(env("QMIGRATION_TICDC_TABLES", ""))
+	tables := tableList(env("DTS_TICDC_TABLES", ""))
 	if len(tables) == 0 {
-		return errors.New("QMIGRATION_TICDC_TABLES is required")
+		return errors.New("DTS_TICDC_TABLES is required")
 	}
 	control := ticdc.NewControlClient(ep, nil)
 	if start.HasDurableKafkaOffset() {
@@ -169,7 +169,7 @@ func run(ctx context.Context) error {
 	if err := control.EnsureChangefeed(ctx, ticdc.ChangefeedPlan{ID: cfID, Topic: topic, StartTS: start.TSO, Tables: tables}); err != nil {
 		return err
 	}
-	kafka, err := ticdc.NewKafkaClientForEndpoint(ep, "qmigration-"+taskID)
+	kafka, err := ticdc.NewKafkaClientForEndpoint(ep, "dts-"+taskID)
 	if err != nil {
 		return err
 	}
@@ -181,9 +181,9 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("TiCDC topic partition count %d does not match configured kafka_partitions=%d; exact partition topology is required for durable per-partition checkpoints", meta.Count, ep.KafkaPartitions)
 	}
 
-	endpoint := env("QMIGRATION_CDC_ENDPOINT", server+"/api/v1/migrations/"+taskID+"/cdc/events")
-	readyEndpoint := env("QMIGRATION_CDC_READY_ENDPOINT", "")
-	token := env("QMIGRATION_API_TOKEN", "")
+	endpoint := env("DTS_CDC_ENDPOINT", server+"/api/v1/migrations/"+taskID+"/cdc/events")
+	readyEndpoint := env("DTS_CDC_READY_ENDPOINT", "")
+	token := env("DTS_API_TOKEN", "")
 	client := &http.Client{Timeout: 90 * time.Second}
 	if err := waitReady(ctx, client, readyEndpoint, token); err != nil {
 		return err

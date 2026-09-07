@@ -1,4 +1,4 @@
--- QMigration V0.15.0-rc48: validation-report public-signing key lifecycle.
+-- DTS V0.15.0-rc48: validation-report public-signing key lifecycle.
 -- Trust stores and transition/revocation certificates are deliberately client-side/public artifacts;
 -- no server secret key material is persisted in metadata.
 INSERT INTO metadata_schema_state(id, schema_version, updated_at)

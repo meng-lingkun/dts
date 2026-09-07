@@ -6,8 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"qmigration/backend/internal/connector"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/connector"
+	"dts/backend/internal/domain"
 	"regexp"
 	"strings"
 	"time"
@@ -180,7 +180,7 @@ func (c *Connector) EnsurePublication(ctx context.Context, name string, tables [
 	return p.exec(ctx, "ALTER PUBLICATION "+pgIdent(name)+" SET TABLE "+strings.Join(qualified, ","))
 }
 
-// DropPublication removes a QMigration-owned logical publication. It is used
+// DropPublication removes a DTS-owned logical publication. It is used
 // by qualification cleanup; production managed CDC publications are retained
 // until task cleanup so reconnects keep a stable object identity.
 func (c *Connector) DropPublication(ctx context.Context, name string) error {

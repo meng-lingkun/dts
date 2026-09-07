@@ -4,28 +4,28 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/domain"
 )
 
-// UnifiedAdapter is the only execution engine exposed by QMigration.
+// UnifiedAdapter is the only execution engine exposed by DTS.
 //
 // It deliberately does not invoke DataX, SeaTunnel, Flink CDC, Debezium or
-// Canal.  Their useful design ideas are implemented inside QMigration's own
+// Canal.  Their useful design ideas are implemented inside DTS's own
 // data plane: connector SPI, bounded channels/backpressure, chunk splitting,
 // transactional CDC apply, durable offsets/checkpoints and schema history.
-// Vendor log readers remain QMigration-owned binaries/processes so they can be
+// Vendor log readers remain DTS-owned binaries/processes so they can be
 // supervised independently by Workers without introducing a third-party
 // runtime dependency.
 type UnifiedAdapter struct{}
 
 func NewUnified() *UnifiedAdapter    { return &UnifiedAdapter{} }
-func (*UnifiedAdapter) Name() string { return "qmigration" }
+func (*UnifiedAdapter) Name() string { return "dts" }
 func (*UnifiedAdapter) Info(_ context.Context) domain.EngineInfo {
 	return domain.EngineInfo{
-		Name:      "qmigration",
+		Name:      "dts",
 		Available: true,
 		Modes:     []string{"FULL", "FULL_AND_INCREMENTAL", "INCREMENTAL"},
-		Note:      "QMigration Unified Engine: built-in full-load pipeline, checkpoint/backpressure, validation and native CDC; no DataX/SeaTunnel/Flink/Debezium/Canal runtime required",
+		Note:      "DTS Unified Engine: built-in full-load pipeline, checkpoint/backpressure, validation and native CDC; no DataX/SeaTunnel/Flink/Debezium/Canal runtime required",
 	}
 }
 
@@ -33,11 +33,11 @@ func (*UnifiedAdapter) Render(ctx context.Context, task *domain.MigrationTask, s
 	if task == nil {
 		return nil, fmt.Errorf("nil migration task")
 	}
-	// FULL execution is claimed as native QMigration chunks and does not spawn
+	// FULL execution is claimed as native DTS chunks and does not spawn
 	// an external process.  Render a diagnostic plan for the API only.
 	if task.Mode == domain.ModeFull {
 		plan := map[string]any{
-			"engine":      "qmigration",
+			"engine":      "dts",
 			"data_plane":  "chunk-pipeline",
 			"source_type": src.Type,
 			"target_type": dst.Type,
@@ -54,11 +54,11 @@ func (*UnifiedAdapter) Render(ctx context.Context, task *domain.MigrationTask, s
 		if err != nil {
 			return nil, err
 		}
-		return &domain.RuntimeSpec{Engine: "qmigration", Format: "json", Filename: "qmigration-plan.json", Content: string(b)}, nil
+		return &domain.RuntimeSpec{Engine: "dts", Format: "json", Filename: "dts-plan.json", Content: string(b)}, nil
 	}
 
 	// CDC is selected by source protocol, not by a user-selected third-party
-	// engine.  These readers are part of QMigration and feed the same unified
+	// engine.  These readers are part of DTS and feed the same unified
 	// CDCEvent/apply/checkpoint pipeline.
 	var cfg *domain.RuntimeSpec
 	var err error
@@ -90,12 +90,12 @@ func (*UnifiedAdapter) Render(ctx context.Context, task *domain.MigrationTask, s
 	case src.Type == domain.DataSourceOracle:
 		cfg, err = NewNativeOracleCDC().Render(ctx, task, src, dst, tables)
 	default:
-		return nil, fmt.Errorf("QMigration unified CDC reader is not implemented yet for source %s", src.Type)
+		return nil, fmt.Errorf("DTS unified CDC reader is not implemented yet for source %s", src.Type)
 	}
 	if err != nil {
 		return nil, err
 	}
-	cfg.Engine = "qmigration"
-	cfg.Filename = "qmigration-cdc.json"
+	cfg.Engine = "dts"
+	cfg.Filename = "dts-cdc.json"
 	return cfg, nil
 }

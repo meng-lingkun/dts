@@ -31,7 +31,7 @@ async function login(){
       <div class="login-features"><span>端到端进度</span><span>多引擎支持</span><span>操作审计</span></div>
     </section>
     <section class="login-card panel">
-      <div class="login-brand"><div class="logo">Q</div><div><h2>欢迎回来</h2><p>登录 QMigration 管理控制台</p></div></div>
+      <div class="login-brand"><div class="logo">Q</div><div><h2>欢迎回来</h2><p>登录 DTS 管理控制台</p></div></div>
       <el-form label-position="top" @keyup.enter="login">
         <el-form-item label="用户名"><el-input v-model="form.username" size="large" autocomplete="username" placeholder="请输入用户名"/></el-form-item>
         <el-form-item label="密码"><el-input v-model="form.password" size="large" type="password" show-password autocomplete="current-password" placeholder="请输入密码"/></el-form-item>

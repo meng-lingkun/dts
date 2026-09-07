@@ -1,4 +1,4 @@
-# QMigration 架构评估与缺失功能
+# DTS 架构评估与缺失功能
 
 评估基线：`0.15.0-rc49`  
 评估日期：2026-09-02
@@ -51,11 +51,11 @@ Chunk 和 Engine Job 都有 Lease、Owner 校验、续租和重领。Worker 上�
 
 ### P0：上线前必须处理
 
-#### 4.1 Compose 默认开放管理员模式（已修复）
+#### 4.1 部署认证与运行底座（已修复）
 
-Compose 现在启用 `QMIGRATION_PRODUCTION=true` 和强制认证，数据库、加密和 Token Secret 必须由私有 env 文件提供，API/Web 仅绑定回环地址。Bootstrap Admin 使用明确的初始默认值并要求首次登录后轮换。Server 会拒绝 Open Mode、短/示例/复用内部 Secret、通配 CORS 和非 PostgreSQL 生产仓库。镜像以非 root、只读根文件系统（Kubernetes）和最小 Capability 运行。
+Kubernetes 是唯一容器部署入口，启用 `DTS_PRODUCTION=true` 和强制认证，通过 Secret 提供独立的数据库、加密和 Token 值。Bootstrap Admin 使用指定初始密码并提示登录后修改。Server 拒绝 Open Mode、短/示例/复用内部 Secret、通配 CORS 和非 PostgreSQL 生产仓库。
 
-剩余：Compose 仍是单机模板；TLS、Secret Manager、NetworkPolicy 和外部身份应由生产平台配置。
+剩余：TLS、Secret Manager、NetworkPolicy 和外部身份应由生产平台配置。
 
 #### 4.2 控制面缺少启动恢复 Reconciler（部分修复）
 
@@ -227,7 +227,7 @@ API 使用手写 `net/http` Route，缺少 OpenAPI、统一分页/过滤、请�
 
 ### 第一阶段：可信发布基线（本轮已完成基础项）
 
-1. 已修复 Compose 安全默认值并阻止示例 Secret 用于生产；
+1. 已统一 Kubernetes 运行架构和安全默认值并阻止示例 Secret 用于生产；
 2. 已统一版本、镜像 Tag、Web 页头和 Schema Marker；
 3. 已增加 Linux CI、前端 Lockfile、类型检查和生产构建；
 4. 已将 File Spool 磁盘统计拆成 Unix/Windows 平台文件；

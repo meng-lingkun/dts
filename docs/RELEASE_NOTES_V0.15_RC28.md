@@ -1,4 +1,4 @@
-# QMigration V0.15.0-rc28 Release Notes
+# DTS V0.15.0-rc28 Release Notes
 
 ## Scope
 
@@ -7,7 +7,7 @@ RC28 closes two correctness gaps that are more important than adding another dat
 ## GBase 8s smart BLOB/CLOB CDC
 
 - Agent API and native provider ABI advance to **v4**; older experimental providers are rejected until rebuilt.
-- New gate: `QMIGRATION_EXPERIMENTAL_GBASE8S_SMART_LOB_CDC=1` in addition to the existing native + CDC gates.
+- New gate: `DTS_EXPERIMENTAL_GBASE8S_SMART_LOB_CDC=1` in addition to the existing native + CDC gates.
 - Selected BLOB/CLOB columns are tagged explicitly in the provider contract.
 - Checkpoint/read responses must declare `cdc-event-owned-lob-v1`.
 - Every non-NULL smart LOB row image carries column/kind/byte-length/SHA-256/acquisition proof and is verified before target apply.
@@ -27,18 +27,18 @@ A target COMMIT call can fail after the server has committed but before the clie
 3. block automatic replay and later CDC for the same task/direction;
 4. require an operator decision.
 
-`COMMITTED` means the operator verified the target transaction committed. QMigration advances the retained source checkpoint without replaying target DML. `NOT_COMMITTED` means the operator verified it did not commit; QMigration changes the retained item to `REPLAY_REQUIRED` and immediately performs one explicit retained-event replay in the same operator action. If that replay fails before COMMIT, the item remains `REPLAY_REQUIRED`, blocks later source flow, and can only be closed by explicit replay. If the replay itself loses a COMMIT response, it returns to `COMMIT_UNCERTAIN`.
+`COMMITTED` means the operator verified the target transaction committed. DTS advances the retained source checkpoint without replaying target DML. `NOT_COMMITTED` means the operator verified it did not commit; DTS changes the retained item to `REPLAY_REQUIRED` and immediately performs one explicit retained-event replay in the same operator action. If that replay fails before COMMIT, the item remains `REPLAY_REQUIRED`, blocks later source flow, and can only be closed by explicit replay. If the replay itself loses a COMMIT response, it returns to `COMMIT_UNCERTAIN`.
 
-New API: `POST /api/v1/migrations/{id}/cdc/dlq/{dlq_id}/resolve-commit`. Web UI exposes “已提交 / 未提交” actions, and Prometheus exports `qmigration_cdc_commit_uncertain` plus `qmigration_cdc_replay_required`.
+New API: `POST /api/v1/migrations/{id}/cdc/dlq/{dlq_id}/resolve-commit`. Web UI exposes “已提交 / 未提交” actions, and Prometheus exports `dts_cdc_commit_uncertain` plus `dts_cdc_replay_required`.
 
 ## Durable pre-COMMIT ambiguity fence
 
-For transactional targets, QMigration now persists the exact retained CDC transaction as a durable ambiguity fence **before sending target COMMIT**. The fence is cleared only after the target COMMIT and durable QMigration source checkpoint both succeed. If the process dies before COMMIT, during COMMIT, or after COMMIT but before checkpoint, restart blocks automatic replay until the operator establishes the target outcome. This closes the process-crash window that a response-error-only guard cannot cover.
+For transactional targets, DTS now persists the exact retained CDC transaction as a durable ambiguity fence **before sending target COMMIT**. The fence is cleared only after the target COMMIT and durable DTS source checkpoint both succeed. If the process dies before COMMIT, during COMMIT, or after COMMIT but before checkpoint, restart blocks automatic replay until the operator establishes the target outcome. This closes the process-crash window that a response-error-only guard cannot cover.
 
 Historical durable-spool drain uses the same fence and records the actual failed spool transaction, so a newer live request cannot accidentally own the DLQ ordering gap.
 
 ## Chaos qualification
 
-`qmigration-chaos-qualify` now runs eight scenarios, covering persisted-spool/source-ACK ordering, apply-before-spool-mark, checkpoint-before-source-ACK, both COMMIT outcome decisions, historical spool COMMIT uncertainty, COMMIT-success-before-checkpoint crash recovery, and failed NOT_COMMITTED replay retention as `REPLAY_REQUIRED`.
+`dts-chaos-qualify` now runs eight scenarios, covering persisted-spool/source-ACK ordering, apply-before-spool-mark, checkpoint-before-source-ACK, both COMMIT outcome decisions, historical spool COMMIT uncertainty, COMMIT-success-before-checkpoint crash recovery, and failed NOT_COMMITTED replay retention as `REPLAY_REQUIRED`.
 
 External proxy/network/process-kill soak at the COMMIT boundary remains a separate retained qualification task.

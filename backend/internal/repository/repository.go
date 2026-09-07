@@ -3,7 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/domain"
 	"time"
 )
 

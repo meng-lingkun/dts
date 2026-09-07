@@ -1,4 +1,4 @@
-# QMigration V0.15.0-rc24 Release Notes
+# DTS V0.15.0-rc24 Release Notes
 
 RC24 closes two GBase 8s source-CDC correctness/operability gaps discovered while validating RC23: the RC22 Agent observability surface had regressed from the RC23 source tree, and an old durable checkpoint could not prove that a restarted/recreated provider was still attached to the same logical capture generation.
 
@@ -23,7 +23,7 @@ RC24 restores the authenticated Agent endpoints that were present in the RC22 ob
 - busy/current operation and last-operation duration;
 - exact checkpoint/read sequence diagnostics in status only;
 - latest capture lineage in status only;
-- qualifier validation through `qmigration-gbase8s-qualify --cdc`.
+- qualifier validation through `dts-gbase8s-qualify --cdc`.
 
 Capture lineage and exact sequence values are deliberately not exported as Prometheus labels or numeric gauges.
 

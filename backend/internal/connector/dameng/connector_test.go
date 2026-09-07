@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"qmigration/backend/internal/connector"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/connector"
+	"dts/backend/internal/domain"
 )
 
 type fakeCall struct {
@@ -46,12 +46,12 @@ func nullv() connector.Value      { return connector.Value{Null: true} }
 
 func TestDamengCapabilitiesAreGatedAndSourceCDCIsNeverAdvertised(t *testing.T) {
 	f := NewFactory()
-	t.Setenv("QMIGRATION_EXPERIMENTAL_DAMENG_NATIVE", "")
+	t.Setenv("DTS_EXPERIMENTAL_DAMENG_NATIVE", "")
 	d := f.Capabilities(domain.DataSourceDameng)
 	if !d.Has(connector.CapabilityProtocolProbe) || d.Has(connector.CapabilityFullRead) {
 		t.Fatalf("default descriptor must remain probe only: %+v", d)
 	}
-	t.Setenv("QMIGRATION_EXPERIMENTAL_DAMENG_NATIVE", "1")
+	t.Setenv("DTS_EXPERIMENTAL_DAMENG_NATIVE", "1")
 	d = f.Capabilities(domain.DataSourceDameng)
 	for _, cap := range []connector.Capability{
 		connector.CapabilityMetadata, connector.CapabilityFullRead, connector.CapabilityFullWrite,
@@ -72,7 +72,7 @@ func TestDamengCapabilitiesAreGatedAndSourceCDCIsNeverAdvertised(t *testing.T) {
 
 func TestDamengNoLongerUsesExternalPlaceholder(t *testing.T) {
 	if domain.DataSourceDameng.IsExternalJDBC() {
-		t.Fatal("Dameng must use the RC13 QMigration connector, not external JDBC placeholder semantics")
+		t.Fatal("Dameng must use the RC13 DTS connector, not external JDBC placeholder semantics")
 	}
 	if domain.DataSourceGaussDB.IsExternalJDBC() {
 		t.Fatal("GaussDB must use the RC14 PostgreSQL-wire connector path")
@@ -234,13 +234,13 @@ func TestDamengTransportFailsClosedForUnqualifiedTLS(t *testing.T) {
 
 func TestDamengCDCAndValidationCapabilitiesRequireSeparateGate(t *testing.T) {
 	f := NewFactory()
-	t.Setenv("QMIGRATION_EXPERIMENTAL_DAMENG_NATIVE", "1")
-	t.Setenv("QMIGRATION_EXPERIMENTAL_DAMENG_LOG_CDC", "")
+	t.Setenv("DTS_EXPERIMENTAL_DAMENG_NATIVE", "1")
+	t.Setenv("DTS_EXPERIMENTAL_DAMENG_LOG_CDC", "")
 	d := f.Capabilities(domain.DataSourceDameng)
 	if d.Has(connector.CapabilityCDCRead) || d.Has(connector.CapabilityCDCPosition) || d.Has(connector.CapabilityValidationSnapshot) {
 		t.Fatalf("Dameng CDC capabilities leaked without CDC gate: %+v", d)
 	}
-	t.Setenv("QMIGRATION_EXPERIMENTAL_DAMENG_LOG_CDC", "1")
+	t.Setenv("DTS_EXPERIMENTAL_DAMENG_LOG_CDC", "1")
 	d = f.Capabilities(domain.DataSourceDameng)
 	for _, cap := range []connector.Capability{connector.CapabilityCDCRead, connector.CapabilityCDCPosition, connector.CapabilityValidationSnapshot} {
 		if !d.Has(cap) {
@@ -290,8 +290,8 @@ func TestDamengMutationCoalescingNetEffect(t *testing.T) {
 }
 
 func TestDamengValidationSnapshotUsesASOFSCNAndIsReadOnly(t *testing.T) {
-	t.Setenv("QMIGRATION_EXPERIMENTAL_DAMENG_NATIVE", "1")
-	t.Setenv("QMIGRATION_EXPERIMENTAL_DAMENG_LOG_CDC", "1")
+	t.Setenv("DTS_EXPERIMENTAL_DAMENG_NATIVE", "1")
+	t.Setenv("DTS_EXPERIMENTAL_DAMENG_LOG_CDC", "1")
 	base := &Connector{ds: domain.DataSource{Type: domain.DataSourceDameng, Host: "127.0.0.1", Port: 5236}}
 	raw, err := base.OpenValidationSnapshot(context.Background(), domain.CDCPosition{PositionType: "DM_LSN", PositionValue: "12345"})
 	if err != nil {
@@ -315,8 +315,8 @@ func TestDamengValidationSnapshotUsesASOFSCNAndIsReadOnly(t *testing.T) {
 }
 
 func TestDamengLogMinerRewindsForTransactionStartedBeforeCheckpoint(t *testing.T) {
-	t.Setenv("QMIGRATION_EXPERIMENTAL_DAMENG_NATIVE", "1")
-	t.Setenv("QMIGRATION_EXPERIMENTAL_DAMENG_LOG_CDC", "1")
+	t.Setenv("DTS_EXPERIMENTAL_DAMENG_NATIVE", "1")
+	t.Setenv("DTS_EXPERIMENTAL_DAMENG_LOG_CDC", "1")
 	fr := &fakeRunner{}
 	logQueries := 0
 	fr.queryFn = func(q string, args []any) ([][]connector.Value, error) {
@@ -375,8 +375,8 @@ func TestDamengLogMinerRewindsForTransactionStartedBeforeCheckpoint(t *testing.T
 }
 
 func TestDamengLogMinerAggregatesSameCommitLSNAcrossXIDs(t *testing.T) {
-	t.Setenv("QMIGRATION_EXPERIMENTAL_DAMENG_NATIVE", "1")
-	t.Setenv("QMIGRATION_EXPERIMENTAL_DAMENG_LOG_CDC", "1")
+	t.Setenv("DTS_EXPERIMENTAL_DAMENG_NATIVE", "1")
+	t.Setenv("DTS_EXPERIMENTAL_DAMENG_LOG_CDC", "1")
 	fr := &fakeRunner{}
 	fr.queryFn = func(q string, args []any) ([][]connector.Value, error) {
 		switch {

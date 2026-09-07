@@ -41,7 +41,7 @@ const (
 )
 
 // oracleTTCColumn is intentionally protocol-facing. It records exactly the
-// describe metadata needed to compile a later QMigration source row reader;
+// describe metadata needed to compile a later DTS source row reader;
 // it is not yet exposed as Connector metadata until a real Oracle instance is
 // qualified end-to-end.
 type oracleTTCColumn struct {

@@ -11,18 +11,18 @@ import (
 	"strings"
 	"time"
 
-	"qmigration/backend/internal/connector"
-	"qmigration/backend/internal/domain"
-	"qmigration/backend/internal/faultinject"
-	"qmigration/backend/internal/migration"
-	"qmigration/backend/internal/repository/memory"
+	"dts/backend/internal/connector"
+	"dts/backend/internal/domain"
+	"dts/backend/internal/faultinject"
+	"dts/backend/internal/migration"
+	"dts/backend/internal/repository/memory"
 )
 
 const (
-	chaosChildEnv      = "QMIGRATION_CHAOS_CHILD"
-	chaosRepoPathEnv   = "QMIGRATION_CHAOS_REPO_PATH"
-	chaosTargetPathEnv = "QMIGRATION_CHAOS_TARGET_PATH"
-	chaosJobIDEnv      = "QMIGRATION_CHAOS_JOB_ID"
+	chaosChildEnv      = "DTS_CHAOS_CHILD"
+	chaosRepoPathEnv   = "DTS_CHAOS_REPO_PATH"
+	chaosTargetPathEnv = "DTS_CHAOS_TARGET_PATH"
+	chaosJobIDEnv      = "DTS_CHAOS_JOB_ID"
 )
 
 type persistentTargetState struct {
@@ -238,7 +238,7 @@ func runKilledChild(scenario, repoPath, targetPath, jobID, plan string) error {
 func processSIGKILLChecks() []check {
 	out := []check{}
 	out = append(out, runCheck("process-sigkill-target-commit-before-checkpoint", func() (map[string]any, error) {
-		dir, err := os.MkdirTemp("", "qmigration-process-chaos-commit-")
+		dir, err := os.MkdirTemp("", "dts-process-chaos-commit-")
 		if err != nil {
 			return nil, err
 		}
@@ -288,7 +288,7 @@ func processSIGKILLChecks() []check {
 	}))
 
 	out = append(out, runCheck("process-sigkill-spool-persist-before-source-ack", func() (map[string]any, error) {
-		dir, err := os.MkdirTemp("", "qmigration-process-chaos-spool-")
+		dir, err := os.MkdirTemp("", "dts-process-chaos-spool-")
 		if err != nil {
 			return nil, err
 		}

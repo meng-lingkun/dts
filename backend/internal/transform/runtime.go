@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"qmigration/backend/internal/connector"
-	"qmigration/backend/internal/domain"
-	"qmigration/backend/internal/schema"
+	"dts/backend/internal/connector"
+	"dts/backend/internal/domain"
+	"dts/backend/internal/schema"
 	"strings"
 )
 

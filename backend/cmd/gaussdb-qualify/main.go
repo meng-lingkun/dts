@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"qmigration/backend/internal/connector"
-	postgresconnector "qmigration/backend/internal/connector/postgres"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/connector"
+	postgresconnector "dts/backend/internal/connector/postgres"
+	"dts/backend/internal/domain"
 )
 
 const toolVersion = "0.15.0-rc49"
@@ -120,9 +120,9 @@ func main() {
 		return string(b)
 	}
 
-	_ = os.Setenv("QMIGRATION_EXPERIMENTAL_GAUSSDB_NATIVE", "1")
+	_ = os.Setenv("DTS_EXPERIMENTAL_GAUSSDB_NATIVE", "1")
 	if *cdc {
-		_ = os.Setenv("QMIGRATION_EXPERIMENTAL_GAUSSDB_LOGICAL_CDC", "1")
+		_ = os.Setenv("DTS_EXPERIMENTAL_GAUSSDB_LOGICAL_CDC", "1")
 	}
 	ds := domain.DataSource{Type: domain.DataSourceGaussDB, Host: strings.TrimSpace(*host), Port: *port, Username: strings.TrimSpace(*user), Password: password, Database: strings.TrimSpace(*database), Schema: strings.TrimSpace(*schema), TLSMode: domain.TLSMode(strings.ToUpper(strings.TrimSpace(*tlsMode))), TLSServerName: strings.TrimSpace(*tlsServerName), TLSCACert: readFile(*tlsCAFile), TLSClientCert: readFile(*tlsCertFile), TLSClientKey: readFile(*tlsKeyFile)}
 	f := postgresconnector.NewFactory()
@@ -225,7 +225,7 @@ func main() {
 			} else {
 				r.skip("cdc-table-selection", "--table not supplied")
 			}
-			slot := fmt.Sprintf("qmigration_q_%d", time.Now().UnixNano())
+			slot := fmt.Sprintf("dts_q_%d", time.Now().UnixNano())
 			var qualifySlot string
 			slotOK := r.run("cdc-slot", func() (string, map[string]any, error) {
 				pos, e := cs.CreateCDCCheckpoint(ctx, slot)

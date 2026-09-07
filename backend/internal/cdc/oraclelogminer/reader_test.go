@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	oracleconnector "qmigration/backend/internal/connector/oracle"
-	"qmigration/backend/internal/domain"
+	oracleconnector "dts/backend/internal/connector/oracle"
+	"dts/backend/internal/domain"
 )
 
 type fakeSource struct {

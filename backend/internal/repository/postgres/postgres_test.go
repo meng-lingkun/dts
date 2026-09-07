@@ -2,7 +2,7 @@ package postgres
 
 import (
 	"context"
-	"qmigration/backend/internal/repository"
+	"dts/backend/internal/repository"
 	"strings"
 	"testing"
 	"time"

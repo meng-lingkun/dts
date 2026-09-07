@@ -1,4 +1,4 @@
-# QMigration V0.8.0 Release Notes
+# DTS V0.8.0 Release Notes
 
 ## 主题：Schema Object Migration / Sequence Cutover Safety
 
@@ -28,7 +28,7 @@ PostgreSQL Sequence 同步保存 `sequence_synced_at`。FULL_AND_INCREMENTAL 进
 默认：
 
 ```text
-QMIGRATION_SEQUENCE_SYNC_MAX_AGE_SECONDS=60
+DTS_SEQUENCE_SYNC_MAX_AGE_SECONDS=60
 ```
 
 源端仍有写入时可以重复执行 Sequence Sync，推荐在业务停写、CDC 追平后立即同步并进入割接。

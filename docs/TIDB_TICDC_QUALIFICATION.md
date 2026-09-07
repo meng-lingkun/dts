@@ -1,6 +1,6 @@
 # TiDB / TiCDC Native Qualification
 
-QMigration RC25 treats TiDB source CDC as an explicit TiCDC integration, not as
+DTS RC25 treats TiDB source CDC as an explicit TiCDC integration, not as
 a MySQL Binlog compatibility shortcut. The software path now supports
 multi-partition ordering, Kafka TLS/mTLS and SASL/PLAIN + SCRAM-SHA-256/512, but it remains
 `EXPERIMENTAL` until retained real-instance qualification exists.
@@ -26,25 +26,25 @@ export TIDB_TICDC_URL='ticdc://ticdc:8300?brokers=kafka1:9092,kafka2:9092&kafka_
 TLS / mTLS uses non-secret filesystem paths in `cdc_url`:
 
 ```bash
-export TIDB_TICDC_URL='ticdc://ticdc:8300?brokers=kafka1:9093,kafka2:9093&kafka_partitions=8&kafka_tls=true&kafka_ca=/etc/qmigration/kafka-ca.pem&kafka_cert=/etc/qmigration/kafka-client.pem&kafka_key=/etc/qmigration/kafka-client.key'
+export TIDB_TICDC_URL='ticdc://ticdc:8300?brokers=kafka1:9093,kafka2:9093&kafka_partitions=8&kafka_tls=true&kafka_ca=/etc/dts/kafka-ca.pem&kafka_cert=/etc/dts/kafka-client.pem&kafka_key=/etc/dts/kafka-client.key'
 ```
 
 SASL/PLAIN + SCRAM-SHA-256/512 credentials are never accepted in `cdc_url`:
 
 ```bash
-export QMIGRATION_TIDB_KAFKA_SASL_USERNAME='qmigration'
-export QMIGRATION_TIDB_KAFKA_SASL_PASSWORD='***'
+export DTS_TIDB_KAFKA_SASL_USERNAME='dts'
+export DTS_TIDB_KAFKA_SASL_PASSWORD='***'
 export TIDB_TICDC_URL='ticdc://ticdc:8300?brokers=kafka1:9093,kafka2:9093&kafka_partitions=8&kafka_tls=true&kafka_sasl_mechanism=plain'
 ```
 
 RC25 intentionally rejects unsupported SASL mechanisms instead of silently
-falling back to plaintext. TiCDC and the QMigration Worker must both be able to
+falling back to plaintext. TiCDC and the DTS Worker must both be able to
 read the configured CA/client certificate files when those paths are used in a
-QMigration-created changefeed.
+DTS-created changefeed.
 
 ## Multi-partition correctness contract
 
-TiCDC periodically publishes Resolved TS to every partition. QMigration uses
+TiCDC periodically publishes Resolved TS to every partition. DTS uses
 that signal as a global progress fence:
 
 1. DML/DDL records are buffered independently by Kafka partition.
@@ -57,18 +57,18 @@ that signal as a global progress fence:
 6. ACK requires monotonic TSO and monotonic per-partition offsets. A previously
    acknowledged partition may not disappear.
 7. An old single-partition non-zero checkpoint cannot be resumed after the
-   topic becomes multi-partition; QMigration requires a new capture rather than
+   topic becomes multi-partition; DTS requires a new capture rather than
    guessing offsets for newly discovered partitions.
 
 ## Exact TSO validation
 
 During Full+CDC validation RC25 freezes target CDC apply at the durable barrier
 while source capture continues into the encrypted Durable CDC Spool. For TiDB,
-QMigration opens an independent SQL session and sets `SESSION tidb_snapshot` to
+DTS opens an independent SQL session and sets `SESSION tidb_snapshot` to
 the barrier TSO; all validation SELECTs therefore read the exact historical
 source snapshot corresponding to the frozen target apply position.
 
-Set `QMIGRATION_VALIDATION_REQUIRE_EXACT_WATERMARK=1` when a workflow must fail
+Set `DTS_VALIDATION_REQUIRE_EXACT_WATERMARK=1` when a workflow must fail
 closed unless the source connector implements an exact historical validation
 snapshot. Other databases retain the existing catch-up/stable-window barrier
 until their vendor-specific snapshot implementation is added.
@@ -131,7 +131,7 @@ For every production claim verify at least:
 14. TiCDC pause/resume/restart and changefeed recreation rejection after durable progress;
 15. Full + CDC exact-TSO validation, catch-up, cutover and reverse/rollback workflows;
 16. GC/retention behavior for long Full Loads;
-17. large-volume soak under QMigration backpressure/spool pressure.
+17. large-volume soak under DTS backpressure/spool pressure.
 
 ## Exit criteria
 

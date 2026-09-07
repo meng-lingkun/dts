@@ -1,6 +1,6 @@
 # Exact Watermark Validation
 
-QMigration RC25 adds a connector-level exact historical validation snapshot SPI
+DTS RC25 adds a connector-level exact historical validation snapshot SPI
 and implements it for TiDB, Oracle and Dameng/DM8.
 
 ## Problem solved
@@ -48,7 +48,7 @@ exact historical position. If it cannot prove that contract it must fail.
 Set:
 
 ```bash
-QMIGRATION_VALIDATION_REQUIRE_EXACT_WATERMARK=1
+DTS_VALIDATION_REQUIRE_EXACT_WATERMARK=1
 ```
 
 to reject validation for connectors that do not implement this capability.
@@ -57,7 +57,7 @@ stable-window barrier and post-scan barrier-drift protection.
 
 ## TiDB implementation
 
-For a `TIDB_TSO` barrier QMigration parses the TSO from the durable position,
+For a `TIDB_TSO` barrier DTS parses the TSO from the durable position,
 opens an independent TiDB SQL connection, executes:
 
 ```sql
@@ -94,5 +94,5 @@ limitations or any unsupported flashback case fail closed.
 MySQL/PolarDB-X GTID, PostgreSQL-family LSN, SQL Server LSN, DB2 LRI, GaussDB
 LSN, OceanBase GTID and GBase 8s sequence positions still use the stable barrier
 contract unless/until a source-native historical snapshot can be tied to the
-exact durable CDC watermark. `QMIGRATION_VALIDATION_REQUIRE_EXACT_WATERMARK=1`
+exact durable CDC watermark. `DTS_VALIDATION_REQUIRE_EXACT_WATERMARK=1`
 continues to reject those paths rather than silently weakening the guarantee.

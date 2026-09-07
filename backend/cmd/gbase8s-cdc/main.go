@@ -13,9 +13,9 @@ import (
 	"strings"
 	"time"
 
-	"qmigration/backend/internal/cdc/gbase8scdc"
-	cdcruntime "qmigration/backend/internal/cdc/runtime"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/cdc/gbase8scdc"
+	cdcruntime "dts/backend/internal/cdc/runtime"
+	"dts/backend/internal/domain"
 )
 
 func env(k, d string) string {
@@ -49,8 +49,8 @@ func waitReady(ctx context.Context, c *http.Client, url, token string) error {
 		if token != "" {
 			req.Header.Set("Authorization", "Bearer "+token)
 		}
-		if wt := strings.TrimSpace(os.Getenv("QMIGRATION_WORKER_TOKEN")); wt != "" {
-			req.Header.Set("X-QMigration-Worker-Token", wt)
+		if wt := strings.TrimSpace(os.Getenv("DTS_WORKER_TOKEN")); wt != "" {
+			req.Header.Set("X-DTS-Worker-Token", wt)
 		}
 		resp, e := c.Do(req)
 		if e == nil {
@@ -91,8 +91,8 @@ func post(ctx context.Context, c *http.Client, url, token, direction string, eve
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	if wt := strings.TrimSpace(os.Getenv("QMIGRATION_WORKER_TOKEN")); wt != "" {
-		req.Header.Set("X-QMigration-Worker-Token", wt)
+	if wt := strings.TrimSpace(os.Getenv("DTS_WORKER_TOKEN")); wt != "" {
+		req.Header.Set("X-DTS-Worker-Token", wt)
 	}
 	resp, e := c.Do(req)
 	if e != nil {
@@ -101,7 +101,7 @@ func post(ctx context.Context, c *http.Client, url, token, direction string, eve
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("QMigration returned %s: %s", resp.Status, strings.TrimSpace(string(data)))
+		return nil, fmt.Errorf("DTS returned %s: %s", resp.Status, strings.TrimSpace(string(data)))
 	}
 	var out domain.CDCApplyResult
 	if len(data) > 0 {
@@ -113,38 +113,38 @@ func post(ctx context.Context, c *http.Client, url, token, direction string, eve
 }
 
 func run(ctx context.Context) error {
-	if !enabled("QMIGRATION_EXPERIMENTAL_GBASE8S_NATIVE") || !enabled("QMIGRATION_EXPERIMENTAL_GBASE8S_CDC") {
-		return errors.New("GBase 8s CDC requires QMIGRATION_EXPERIMENTAL_GBASE8S_NATIVE=1 and QMIGRATION_EXPERIMENTAL_GBASE8S_CDC=1")
+	if !enabled("DTS_EXPERIMENTAL_GBASE8S_NATIVE") || !enabled("DTS_EXPERIMENTAL_GBASE8S_CDC") {
+		return errors.New("GBase 8s CDC requires DTS_EXPERIMENTAL_GBASE8S_NATIVE=1 and DTS_EXPERIMENTAL_GBASE8S_CDC=1")
 	}
-	rawURL := env("QMIGRATION_GBASE8S_CDC_URL", "")
-	start := env("QMIGRATION_GBASE8S_CDC_START_POSITION", "")
-	database := env("QMIGRATION_GBASE8S_CDC_DATABASE", "")
+	rawURL := env("DTS_GBASE8S_CDC_URL", "")
+	start := env("DTS_GBASE8S_CDC_START_POSITION", "")
+	database := env("DTS_GBASE8S_CDC_DATABASE", "")
 	if rawURL == "" || start == "" {
 		return errors.New("GBase 8s CDC URL and start position are required")
 	}
 	var selections []gbase8scdc.TableSelection
-	if e := json.Unmarshal([]byte(env("QMIGRATION_GBASE8S_CDC_SELECTIONS_JSON", "")), &selections); e != nil || len(selections) == 0 {
+	if e := json.Unmarshal([]byte(env("DTS_GBASE8S_CDC_SELECTIONS_JSON", "")), &selections); e != nil || len(selections) == 0 {
 		return fmt.Errorf("invalid GBase 8s CDC selections: %v", e)
 	}
-	agent, e := gbase8scdc.NewClient(rawURL, os.Getenv("QMIGRATION_GBASE8S_CDC_CA_PEM"), os.Getenv("QMIGRATION_GBASE8S_CDC_SERVER_NAME"), os.Getenv("QMIGRATION_GBASE8S_CDC_TOKEN"))
+	agent, e := gbase8scdc.NewClient(rawURL, os.Getenv("DTS_GBASE8S_CDC_CA_PEM"), os.Getenv("DTS_GBASE8S_CDC_SERVER_NAME"), os.Getenv("DTS_GBASE8S_CDC_TOKEN"))
 	if e != nil {
 		return e
 	}
 	if e = agent.Health(ctx); e != nil {
 		return fmt.Errorf("GBase 8s CDC provider health: %w", e)
 	}
-	server := strings.TrimRight(env("QMIGRATION_SERVER", "http://127.0.0.1:8080"), "/")
-	taskID := env("QMIGRATION_TASK_ID", "")
+	server := strings.TrimRight(env("DTS_SERVER", "http://127.0.0.1:8080"), "/")
+	taskID := env("DTS_TASK_ID", "")
 	if taskID == "" {
-		return errors.New("QMIGRATION_TASK_ID is required")
+		return errors.New("DTS_TASK_ID is required")
 	}
-	direction := strings.ToLower(env("QMIGRATION_CDC_DIRECTION", "forward"))
+	direction := strings.ToLower(env("DTS_CDC_DIRECTION", "forward"))
 	if direction != "forward" && direction != "reverse" {
 		return errors.New("invalid CDC direction")
 	}
-	endpoint := env("QMIGRATION_CDC_ENDPOINT", server+"/api/v1/migrations/"+taskID+"/cdc/events")
-	ready := env("QMIGRATION_CDC_READY_ENDPOINT", "")
-	token := env("QMIGRATION_API_TOKEN", "")
+	endpoint := env("DTS_CDC_ENDPOINT", server+"/api/v1/migrations/"+taskID+"/cdc/events")
+	ready := env("DTS_CDC_READY_ENDPOINT", "")
+	token := env("DTS_API_TOKEN", "")
 	hc := &http.Client{Timeout: 90 * time.Second}
 	if e = waitReady(ctx, hc, ready, token); e != nil {
 		return e

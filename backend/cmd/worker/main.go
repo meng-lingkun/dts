@@ -11,18 +11,18 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"qmigration/backend/internal/connector"
-	damengconnector "qmigration/backend/internal/connector/dameng"
-	db2connector "qmigration/backend/internal/connector/db2"
-	gbaseconnector "qmigration/backend/internal/connector/gbase"
-	gbase8sconnector "qmigration/backend/internal/connector/gbase8s"
-	mysqlconnector "qmigration/backend/internal/connector/mysql"
-	oracleconnector "qmigration/backend/internal/connector/oracle"
-	postgresconnector "qmigration/backend/internal/connector/postgres"
-	sqlserverconnector "qmigration/backend/internal/connector/sqlserver"
-	"qmigration/backend/internal/domain"
-	fullpipeline "qmigration/backend/internal/pipeline"
-	"qmigration/backend/internal/transform"
+	"dts/backend/internal/connector"
+	damengconnector "dts/backend/internal/connector/dameng"
+	db2connector "dts/backend/internal/connector/db2"
+	gbaseconnector "dts/backend/internal/connector/gbase"
+	gbase8sconnector "dts/backend/internal/connector/gbase8s"
+	mysqlconnector "dts/backend/internal/connector/mysql"
+	oracleconnector "dts/backend/internal/connector/oracle"
+	postgresconnector "dts/backend/internal/connector/postgres"
+	sqlserverconnector "dts/backend/internal/connector/sqlserver"
+	"dts/backend/internal/domain"
+	fullpipeline "dts/backend/internal/pipeline"
+	"dts/backend/internal/transform"
 	"runtime"
 	"strconv"
 	"strings"
@@ -142,7 +142,7 @@ func workerLookPath(name string) (string, error) {
 		return p, nil
 	}
 	dirs := []string{}
-	if d := strings.TrimSpace(os.Getenv("QMIGRATION_BIN_DIR")); d != "" {
+	if d := strings.TrimSpace(os.Getenv("DTS_BIN_DIR")); d != "" {
 		dirs = append(dirs, d)
 	}
 	if exe, err := os.Executable(); err == nil {
@@ -154,7 +154,7 @@ func workerLookPath(name string) (string, error) {
 			return p, nil
 		}
 	}
-	return "", fmt.Errorf("executable %q not found in PATH, QMIGRATION_BIN_DIR or Worker binary directory", name)
+	return "", fmt.Errorf("executable %q not found in PATH, DTS_BIN_DIR or Worker binary directory", name)
 }
 
 func parseWorkerLabels(raw string) map[string]string {
@@ -185,126 +185,126 @@ func parseWorkerLabels(raw string) map[string]string {
 }
 
 func detect() []string {
-	// A Worker advertises QMigration protocol capabilities, never third-party
+	// A Worker advertises DTS protocol capabilities, never third-party
 	// executables. The control plane therefore schedules one unified engine.
-	out := []string{"qmigration", "qmigration:mysql-full", "qmigration:postgres-full"}
+	out := []string{"dts", "dts:mysql-full", "dts:postgres-full"}
 	if gaussDBExperimentalEnabled() {
-		out = append(out, "qmigration:gaussdb-full-experimental")
+		out = append(out, "dts:gaussdb-full-experimental")
 	}
 	if oracleExperimentalEnabled() {
-		out = append(out, "qmigration:oracle-full-experimental")
+		out = append(out, "dts:oracle-full-experimental")
 	}
 	if sqlServerExperimentalEnabled() {
-		out = append(out, "qmigration:sqlserver-full-experimental")
+		out = append(out, "dts:sqlserver-full-experimental")
 	}
 	if db2ExperimentalEnabled() {
-		out = append(out, "qmigration:db2-full-experimental")
+		out = append(out, "dts:db2-full-experimental")
 	}
 	if damengExperimentalEnabled() {
-		out = append(out, "qmigration:dameng-full-experimental")
+		out = append(out, "dts:dameng-full-experimental")
 	}
 	if gbaseExperimentalEnabled() {
-		out = append(out, "qmigration:gbase8a-full-experimental")
-		if envOn("QMIGRATION_EXPERIMENTAL_GBASE8A_TRANSACTIONAL_TARGET_CDC") {
-			out = append(out, "qmigration:gbase8a-transactional-target-cdc-experimental")
+		out = append(out, "dts:gbase8a-full-experimental")
+		if envOn("DTS_EXPERIMENTAL_GBASE8A_TRANSACTIONAL_TARGET_CDC") {
+			out = append(out, "dts:gbase8a-transactional-target-cdc-experimental")
 		}
-		if envOn("QMIGRATION_EXPERIMENTAL_GBASE8A_SOURCE_CDC") {
-			if _, err := workerLookPath("qmigration-gbase-cdc"); err == nil {
-				out = append(out, "qmigration:gbase8a-provider-cdc-experimental")
+		if envOn("DTS_EXPERIMENTAL_GBASE8A_SOURCE_CDC") {
+			if _, err := workerLookPath("dts-gbase-cdc"); err == nil {
+				out = append(out, "dts:gbase8a-provider-cdc-experimental")
 			}
 		}
 	}
 	if gbase8sExperimentalEnabled() {
-		out = append(out, "qmigration:gbase8s-full-target-experimental")
-		if envOn("QMIGRATION_EXPERIMENTAL_GBASE8S_CDC") {
-			out = append(out, "qmigration:gbase8s-csdk-cdc-experimental")
+		out = append(out, "dts:gbase8s-full-target-experimental")
+		if envOn("DTS_EXPERIMENTAL_GBASE8S_CDC") {
+			out = append(out, "dts:gbase8s-csdk-cdc-experimental")
 		}
 	}
-	if _, err := workerLookPath("qmigration-mysql-cdc"); err == nil {
-		out = append(out, "qmigration:mysql-cdc", "qmigration:oceanbase-binlog-cdc")
-		zstdBin := strings.TrimSpace(os.Getenv("QMIGRATION_ZSTD_BIN"))
+	if _, err := workerLookPath("dts-mysql-cdc"); err == nil {
+		out = append(out, "dts:mysql-cdc", "dts:oceanbase-binlog-cdc")
+		zstdBin := strings.TrimSpace(os.Getenv("DTS_ZSTD_BIN"))
 		if zstdBin == "" {
 			zstdBin = "zstd"
 		}
 		if _, err := exec.LookPath(zstdBin); err == nil {
-			out = append(out, "qmigration:mysql-cdc-zstd")
+			out = append(out, "dts:mysql-cdc-zstd")
 		}
 	}
-	if _, err := workerLookPath("qmigration-tidb-cdc"); err == nil {
-		out = append(out, "qmigration:tidb-ticdc")
+	if _, err := workerLookPath("dts-tidb-cdc"); err == nil {
+		out = append(out, "dts:tidb-ticdc")
 	}
-	if _, err := workerLookPath("qmigration-postgres-cdc"); err == nil {
-		out = append(out, "qmigration:postgres-cdc")
-		if envOn("QMIGRATION_EXPERIMENTAL_KINGBASE_LOGICAL_CDC") {
-			out = append(out, "qmigration:kingbase-kboutput-cdc-experimental")
+	if _, err := workerLookPath("dts-postgres-cdc"); err == nil {
+		out = append(out, "dts:postgres-cdc")
+		if envOn("DTS_EXPERIMENTAL_KINGBASE_LOGICAL_CDC") {
+			out = append(out, "dts:kingbase-kboutput-cdc-experimental")
 		}
 	}
-	if envOn("QMIGRATION_EXPERIMENTAL_OPENGAUSS_LOGICAL_CDC") {
-		if _, err := workerLookPath("qmigration-opengauss-cdc"); err == nil {
-			out = append(out, "qmigration:opengauss-logical-cdc-experimental")
+	if envOn("DTS_EXPERIMENTAL_OPENGAUSS_LOGICAL_CDC") {
+		if _, err := workerLookPath("dts-opengauss-cdc"); err == nil {
+			out = append(out, "dts:opengauss-logical-cdc-experimental")
 		}
 	}
 	if gaussDBCDCExperimentalEnabled() {
-		if _, err := workerLookPath("qmigration-gaussdb-cdc"); err == nil {
-			out = append(out, "qmigration:gaussdb-cdc-experimental")
+		if _, err := workerLookPath("dts-gaussdb-cdc"); err == nil {
+			out = append(out, "dts:gaussdb-cdc-experimental")
 		}
 	}
 	if sqlServerCDCExperimentalEnabled() {
-		if _, err := workerLookPath("qmigration-sqlserver-cdc"); err == nil {
-			out = append(out, "qmigration:sqlserver-cdc-experimental")
+		if _, err := workerLookPath("dts-sqlserver-cdc"); err == nil {
+			out = append(out, "dts:sqlserver-cdc-experimental")
 		}
 	}
 	if oracleCDCExperimentalEnabled() {
-		if _, err := workerLookPath("qmigration-oracle-cdc"); err == nil {
-			out = append(out, "qmigration:oracle-cdc-experimental")
+		if _, err := workerLookPath("dts-oracle-cdc"); err == nil {
+			out = append(out, "dts:oracle-cdc-experimental")
 		}
 	}
 	if db2CDCExperimentalEnabled() {
-		if _, err := workerLookPath("qmigration-db2-cdc"); err == nil {
-			out = append(out, "qmigration:db2-cdc-experimental")
+		if _, err := workerLookPath("dts-db2-cdc"); err == nil {
+			out = append(out, "dts:db2-cdc-experimental")
 		}
 	}
 	return out
 }
-func gaussDBExperimentalEnabled() bool { return envOn("QMIGRATION_EXPERIMENTAL_GAUSSDB_NATIVE") }
+func gaussDBExperimentalEnabled() bool { return envOn("DTS_EXPERIMENTAL_GAUSSDB_NATIVE") }
 func gaussDBCDCExperimentalEnabled() bool {
-	return gaussDBExperimentalEnabled() && envOn("QMIGRATION_EXPERIMENTAL_GAUSSDB_LOGICAL_CDC")
+	return gaussDBExperimentalEnabled() && envOn("DTS_EXPERIMENTAL_GAUSSDB_LOGICAL_CDC")
 }
 
 func sqlServerCDCExperimentalEnabled() bool {
-	return sqlServerExperimentalEnabled() && envOn("QMIGRATION_EXPERIMENTAL_SQLSERVER_CDC")
+	return sqlServerExperimentalEnabled() && envOn("DTS_EXPERIMENTAL_SQLSERVER_CDC")
 }
 
 func envOn(name string) bool {
 	v := strings.ToLower(strings.TrimSpace(os.Getenv(name)))
 	return v == "1" || v == "true" || v == "yes" || v == "on"
 }
-func oracleExperimentalEnabled() bool { return envOn("QMIGRATION_EXPERIMENTAL_ORACLE_NATIVE") }
+func oracleExperimentalEnabled() bool { return envOn("DTS_EXPERIMENTAL_ORACLE_NATIVE") }
 func oracleCDCExperimentalEnabled() bool {
-	native := strings.ToLower(strings.TrimSpace(os.Getenv("QMIGRATION_EXPERIMENTAL_ORACLE_NATIVE")))
-	cdc := strings.ToLower(strings.TrimSpace(os.Getenv("QMIGRATION_EXPERIMENTAL_ORACLE_LOGMINER_CDC")))
+	native := strings.ToLower(strings.TrimSpace(os.Getenv("DTS_EXPERIMENTAL_ORACLE_NATIVE")))
+	cdc := strings.ToLower(strings.TrimSpace(os.Getenv("DTS_EXPERIMENTAL_ORACLE_LOGMINER_CDC")))
 	on := func(v string) bool { return v == "1" || v == "true" || v == "yes" || v == "on" }
 	return on(native) && on(cdc)
 }
 func db2ExperimentalEnabled() bool {
-	v := strings.ToLower(strings.TrimSpace(os.Getenv("QMIGRATION_EXPERIMENTAL_DB2_NATIVE")))
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("DTS_EXPERIMENTAL_DB2_NATIVE")))
 	return v == "1" || v == "true" || v == "yes" || v == "on"
 }
 func db2CDCExperimentalEnabled() bool {
-	return db2ExperimentalEnabled() && envOn("QMIGRATION_EXPERIMENTAL_DB2_LOG_CDC")
+	return db2ExperimentalEnabled() && envOn("DTS_EXPERIMENTAL_DB2_LOG_CDC")
 }
 func damengExperimentalEnabled() bool {
-	return envOn("QMIGRATION_EXPERIMENTAL_DAMENG_NATIVE")
+	return envOn("DTS_EXPERIMENTAL_DAMENG_NATIVE")
 }
 func gbaseExperimentalEnabled() bool {
-	return envOn("QMIGRATION_EXPERIMENTAL_GBASE8A_NATIVE")
+	return envOn("DTS_EXPERIMENTAL_GBASE8A_NATIVE")
 }
 func gbase8sExperimentalEnabled() bool {
-	return envOn("QMIGRATION_EXPERIMENTAL_GBASE8S_NATIVE")
+	return envOn("DTS_EXPERIMENTAL_GBASE8S_NATIVE")
 }
 
 func sqlServerExperimentalEnabled() bool {
-	return envOn("QMIGRATION_EXPERIMENTAL_SQLSERVER_NATIVE")
+	return envOn("DTS_EXPERIMENTAL_SQLSERVER_NATIVE")
 }
 
 func doJSON(method, url string, in, out any) (int, error) {
@@ -323,8 +323,8 @@ func doJSON(method, url string, in, out any) (int, error) {
 		return 0, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if token := os.Getenv("QMIGRATION_WORKER_TOKEN"); token != "" {
-		req.Header.Set("X-QMigration-Worker-Token", token)
+	if token := os.Getenv("DTS_WORKER_TOKEN"); token != "" {
+		req.Header.Set("X-DTS-Worker-Token", token)
 	}
 	resp, err := httpClient.Do(req)
 	if err != nil {
@@ -398,7 +398,7 @@ func executeManagedEngineJob(parent context.Context, server, workerID string, cl
 	if len(cfg.Command) == 0 {
 		return domain.EngineJobResult{Error: "managed engine configuration has no executable command"}
 	}
-	dir, err := os.MkdirTemp("", "qmigration-cdc-*")
+	dir, err := os.MkdirTemp("", "dts-cdc-*")
 	if err != nil {
 		return domain.EngineJobResult{Error: err.Error()}
 	}
@@ -426,13 +426,13 @@ func executeManagedEngineJob(parent context.Context, server, workerID string, cl
 		cmd.Env = append(cmd.Env, key+"="+value)
 	}
 	cmd.Env = append(cmd.Env,
-		"QMIGRATION_SERVER="+server,
-		"QMIGRATION_TASK_ID="+claim.Job.TaskID,
-		"QMIGRATION_WORKER_ID="+workerID,
-		"QMIGRATION_ENGINE_JOB_ID="+claim.Job.ID,
-		"QMIGRATION_CDC_DIRECTION="+claim.Job.Direction,
-		"QMIGRATION_CDC_ENDPOINT="+fmt.Sprintf("%s/api/v1/workers/%s/engine-jobs/%s/cdc/events", server, workerID, claim.Job.ID),
-		"QMIGRATION_CDC_READY_ENDPOINT="+fmt.Sprintf("%s/api/v1/workers/%s/engine-jobs/%s/cdc/ready", server, workerID, claim.Job.ID),
+		"DTS_SERVER="+server,
+		"DTS_TASK_ID="+claim.Job.TaskID,
+		"DTS_WORKER_ID="+workerID,
+		"DTS_ENGINE_JOB_ID="+claim.Job.ID,
+		"DTS_CDC_DIRECTION="+claim.Job.Direction,
+		"DTS_CDC_ENDPOINT="+fmt.Sprintf("%s/api/v1/workers/%s/engine-jobs/%s/cdc/events", server, workerID, claim.Job.ID),
+		"DTS_CDC_READY_ENDPOINT="+fmt.Sprintf("%s/api/v1/workers/%s/engine-jobs/%s/cdc/ready", server, workerID, claim.Job.ID),
 	)
 	tail := &tailBuffer{max: 12000}
 	cmd.Stdout = tail
@@ -507,7 +507,7 @@ func executeJob(ctx context.Context, server, workerID string, job *domain.ChunkJ
 		switch {
 		case c.Type.IsPostgreSQLWireCompatible():
 			if c.Type == domain.DataSourceGaussDB && !gaussDBExperimentalEnabled() {
-				return nil, fmt.Errorf("GaussDB native worker requires QMIGRATION_EXPERIMENTAL_GAUSSDB_NATIVE=1")
+				return nil, fmt.Errorf("GaussDB native worker requires DTS_EXPERIMENTAL_GAUSSDB_NATIVE=1")
 			}
 			return postgresconnector.NewFactory().New(ds)
 		case c.Type.IsMySQLFamily():
@@ -525,7 +525,7 @@ func executeJob(ctx context.Context, server, workerID string, job *domain.ChunkJ
 		case c.Type == domain.DataSourceGBase8s && gbase8sExperimentalEnabled():
 			return gbase8sconnector.NewFactory().New(ds)
 		default:
-			return nil, fmt.Errorf("QMigration native worker connector is not implemented for %s", c.Type)
+			return nil, fmt.Errorf("DTS native worker connector is not implemented for %s", c.Type)
 		}
 	}
 	srcRaw, err := newConnector(job.Source)
@@ -542,12 +542,12 @@ func executeJob(ctx context.Context, server, workerID string, job *domain.ChunkJ
 	defer dstRaw.Close()
 	src, ok := srcRaw.(connector.DataConnector)
 	if !ok {
-		result.Error = "source QMigration connector does not implement data transfer"
+		result.Error = "source DTS connector does not implement data transfer"
 		return
 	}
 	dst, ok := dstRaw.(connector.DataConnector)
 	if !ok {
-		result.Error = "target QMigration connector does not implement data transfer"
+		result.Error = "target DTS connector does not implement data transfer"
 		return
 	}
 
@@ -609,7 +609,7 @@ func executeJob(ctx context.Context, server, workerID string, job *domain.ChunkJ
 	}
 	valuePlan, err := transform.CompileWithRules(job.Table.Columns, targetCols, job.TransformRules, job.Table.SourceSchema, job.Table.SourceTable)
 	if err != nil {
-		result.Error = fmt.Sprintf("compile QMigration transform plan: %v", err)
+		result.Error = fmt.Sprintf("compile DTS transform plan: %v", err)
 		return
 	}
 
@@ -667,7 +667,7 @@ func executeJob(ctx context.Context, server, workerID string, job *domain.ChunkJ
 		}
 		rows, e := valuePlan.TransformRows(batch.Rows)
 		if e != nil {
-			return nil, fmt.Errorf("QMigration value transform: %w", e)
+			return nil, fmt.Errorf("DTS value transform: %w", e)
 		}
 		cloned := &connector.RowBatch{Rows: rows, LastPK: batch.LastPK, LastKey: append([]connector.Value(nil), batch.LastKey...), Bytes: batch.Bytes}
 		out := *pb
@@ -730,12 +730,12 @@ func executeJob(ctx context.Context, server, workerID string, job *domain.ChunkJ
 		batchRows = 500
 	}
 	bufferBatches := 2
-	if raw := strings.TrimSpace(os.Getenv("QMIGRATION_PIPELINE_BUFFER_BATCHES")); raw != "" {
+	if raw := strings.TrimSpace(os.Getenv("DTS_PIPELINE_BUFFER_BATCHES")); raw != "" {
 		if n, e := strconv.Atoi(raw); e == nil && n >= 1 && n <= 32 {
 			bufferBatches = n
 		}
 	}
-	adaptive := !strings.EqualFold(strings.TrimSpace(os.Getenv("QMIGRATION_ADAPTIVE_BATCH")), "false")
+	adaptive := !strings.EqualFold(strings.TrimSpace(os.Getenv("DTS_ADAPTIVE_BATCH")), "false")
 	stats, err := (fullpipeline.Runner{Read: reader, Transform: transformer, Write: writer, Commit: committer}).Run(ctx, fullpipeline.Config{
 		InitialBatchRows: batchRows, MinBatchRows: 50, MaxBatchRows: 5000,
 		BufferBatches: bufferBatches, Adaptive: adaptive, InitialTargetBytesPerSec: job.TargetBytesPerSec,
@@ -760,13 +760,13 @@ func executeJob(ctx context.Context, server, workerID string, job *domain.ChunkJ
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	server := os.Getenv("QMIGRATION_SERVER")
+	server := os.Getenv("DTS_SERVER")
 	if server == "" {
 		server = "http://127.0.0.1:8080"
 	}
 	host, _ := os.Hostname()
 	previousCounters := readHostCounters()
-	w := runtimeWorker{Hostname: host, CPU: runtime.NumCPU(), Capabilities: detect(), Labels: parseWorkerLabels(os.Getenv("QMIGRATION_WORKER_LABELS"))}
+	w := runtimeWorker{Hostname: host, CPU: runtime.NumCPU(), Capabilities: detect(), Labels: parseWorkerLabels(os.Getenv("DTS_WORKER_LABELS"))}
 	applyHostUsage(&w, hostCounters{}, previousCounters)
 	if err := post(server+"/api/v1/workers/register", w, &w); err != nil {
 		log.Fatal(err)
@@ -797,14 +797,14 @@ func main() {
 	}()
 
 	concurrency := 1
-	if v := os.Getenv("QMIGRATION_WORKER_CONCURRENCY"); v != "" {
+	if v := os.Getenv("DTS_WORKER_CONCURRENCY"); v != "" {
 		if n, e := strconv.Atoi(v); e == nil && n > 0 && n <= 128 {
 			concurrency = n
 		}
 	}
 	log.Printf("worker concurrency=%d", concurrency)
 	cdcConcurrency := 1
-	if v := os.Getenv("QMIGRATION_CDC_CONCURRENCY"); v != "" {
+	if v := os.Getenv("DTS_CDC_CONCURRENCY"); v != "" {
 		if n, e := strconv.Atoi(v); e == nil && n >= 0 && n <= 32 {
 			cdcConcurrency = n
 		}
@@ -900,7 +900,7 @@ func main() {
 	<-ctx.Done()
 	log.Printf("shutdown signal received; stop claiming new work and cancel active CDC processes")
 	grace := 30 * time.Second
-	if raw := strings.TrimSpace(os.Getenv("QMIGRATION_WORKER_SHUTDOWN_GRACE_SECONDS")); raw != "" {
+	if raw := strings.TrimSpace(os.Getenv("DTS_WORKER_SHUTDOWN_GRACE_SECONDS")); raw != "" {
 		if n, err := strconv.Atoi(raw); err == nil && n >= 1 && n <= 300 {
 			grace = time.Duration(n) * time.Second
 		}

@@ -3,12 +3,12 @@ package repository
 import (
 	"testing"
 
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/domain"
 )
 
 func TestRC38EffectiveTopologyRecoveryCap(t *testing.T) {
-	t.Setenv("QMIGRATION_TOPOLOGY_DEGRADED_MAX_CONCURRENCY", "1")
-	t.Setenv("QMIGRATION_TOPOLOGY_RECOVERY_MAX_CONCURRENCY", "4")
+	t.Setenv("DTS_TOPOLOGY_DEGRADED_MAX_CONCURRENCY", "1")
+	t.Setenv("DTS_TOPOLOGY_RECOVERY_MAX_CONCURRENCY", "4")
 	table := &domain.MigrationTable{TopologyPerformance: map[string]domain.TableTopologyPerformance{
 		"dn-a": {Health: "DEGRADED", RecoveryConcurrencyCap: 3},
 	}}
@@ -28,7 +28,7 @@ func TestRC38EffectiveTopologyRecoveryCap(t *testing.T) {
 }
 
 func TestRC39CanonicalFaultDomainsAndPeerRisk(t *testing.T) {
-	t.Setenv("QMIGRATION_TOPOLOGY_FAULT_DOMAIN_PROTECTION", "true")
+	t.Setenv("DTS_TOPOLOGY_FAULT_DOMAIN_PROTECTION", "true")
 	fd := CanonicalFaultDomain(map[string]string{"cloud_region": "sg", "availability_zone": "az-1", "rack_id": "rack-2"})
 	if fd["region"] != "sg" || fd["zone"] != "sg/az-1" || fd["rack"] != "sg/az-1/rack-2" {
 		t.Fatalf("canonical fault domain=%v", fd)
@@ -62,7 +62,7 @@ func TestRC39CanonicalFaultDomainsAndPeerRisk(t *testing.T) {
 }
 
 func TestRC40FaultDomainPeerStateReturnsQualifiedScope(t *testing.T) {
-	t.Setenv("QMIGRATION_TOPOLOGY_FAULT_DOMAIN_PROTECTION", "true")
+	t.Setenv("DTS_TOPOLOGY_FAULT_DOMAIN_PROTECTION", "true")
 	table := &domain.MigrationTable{
 		Topology: []domain.TopologyPlacement{
 			{ID: "dn-a", Labels: map[string]string{"region": "sg", "zone": "az-1", "rack": "r1"}},

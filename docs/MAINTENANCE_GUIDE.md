@@ -1,4 +1,4 @@
-# QMigration 维护手册
+# DTS 维护手册
 
 适用版本：`0.15.0-rc49`
 
@@ -24,7 +24,7 @@
 | `backend/internal/repository` | 元数据一致性、Lease、加密装饰器、Spool |
 | `backend/migrations` | 有序、幂等的 PostgreSQL Schema 变更 |
 | `web/src` | 管理台、权限可见性、API 契约和长任务 UX |
-| `deployments` | 镜像、Compose/Kubernetes、备份恢复、资格验证 |
+| `deployments` | 镜像、Kubernetes、备份恢复、资格验证 |
 | `docs` | 当前事实、支持边界、发布和运维证据 |
 
 ## 3. 开发与验证
@@ -37,7 +37,7 @@ go test ./...
 go vet ./...
 go build ./cmd/server
 go build ./cmd/worker
-go build ./cmd/qmigrationctl
+go build ./cmd/dtsctl
 ```
 
 File Spool 已按 Build Tag 拆分：Linux 使用 `statfs`，Windows 开发测试使用 `GetDiskFreeSpaceExW`。GBase 8s 文件权限和动态库 Provider 仍属于 Linux 运行能力；Windows 只接受 JSON 环境配置。正式 Release Gate 必须在目标 Linux 环境运行，Windows 测试仅作为额外兼容性检查。
@@ -57,7 +57,7 @@ npm run build
 发布前至少验证：
 
 - Docker 镜像可构建并以非 root 用户运行；
-- Compose 解析和健康检查；
+- Kubernetes 安装、检查及保留数据卸载流程；
 - Kubernetes YAML、PDB、HPA、PVC 和 Secret 引用；
 - Prometheus Rule 语法和指标名一致；
 - `backup.sh`、`restore.sh`、`migrate-metadata.sh` 在临时数据库演练；
@@ -93,8 +93,8 @@ npm run build
 生产升级前：
 
 ```bash
-QMIGRATION_METADATA_PASSWORD='...' deployments/scripts/backup.sh
-QMIGRATION_METADATA_PASSWORD='...' deployments/scripts/migrate-metadata.sh
+DTS_METADATA_PASSWORD='...' deployments/scripts/backup.sh
+DTS_METADATA_PASSWORD='...' deployments/scripts/migrate-metadata.sh
 ```
 
 脚本按文件名顺序、单文件事务执行 `backend/migrations/*.sql`。迁移完成后确认：
@@ -117,9 +117,9 @@ Server 启动时也会应用嵌入的幂等 `schema.sql`。维护时必须保证
 sh deployments/offline/build-offline-package.sh
 ```
 
-Windows 构建机可运行 `deployments/offline/build-offline-package.ps1`；该流程使用 Go 直接组装标准 Docker image archive，不要求本机 Docker daemon。两种构建方式都会产出 `dist/qmigration-offline-<版本>-linux-amd64.tar.gz`、外层 SHA-256 文件和包内 `SHA256SUMS`。
+Windows 构建机可运行 `deployments/offline/build-offline-package.ps1`；该流程使用 Go 直接组装标准 Docker image archive，不要求本机 Docker daemon。两种构建方式都会产出 `dist/dts-kubernetes-offline-<版本>-linux-amd64.tar.gz`、外层 SHA-256 文件和包内 `SHA256SUMS`。
 
-发布前必须检查：所有镜像均为 `linux/amd64`；Server 镜像包含 Server、Worker、CLI、所有 CDC Runtime、`zstd` 和 CA 根证书；Docker Engine/Compose/kubectl 二进制与 `runtime/versions.env` 固定哈希一致；Compose/Kubernetes 只引用包内 Tag；`SHA256SUMS` 使用 LF；在隔离网络的多节点 Linux 集群完整执行逐节点镜像导入、DaemonSet Image Preflight、跨节点调度、节点排空、外部 HA PostgreSQL、登录、迁移冒烟和重启恢复。离线包包含 Docker Engine、Compose 和 kubectl，但不替代 Kubernetes 控制面、CNI、CSI、Ingress、宿主机内核、cgroup、iptables、磁盘及网络驱动的运维基线。
+发布前必须检查：所有镜像均为 `linux/amd64`；Server 镜像包含 Server、Worker、CLI、所有 CDC Runtime、`zstd` 和 CA 根证书；kubectl 二进制与 `runtime/versions.env` 固定哈希一致；Kubernetes 只引用包内 Tag；`SHA256SUMS` 使用 LF；在隔离网络的多节点 Linux 集群完整执行逐节点镜像导入、DaemonSet Image Preflight、跨节点调度、节点排空、外部 HA PostgreSQL、登录、迁移冒烟和重启恢复。离线包包含应用镜像和 kubectl，但不替代 Kubernetes 控制面、containerd、CNI、CSI、Ingress、宿主机内核、cgroup、iptables、磁盘及网络驱动的运维基线。
 
 ## 6. 备份与恢复
 
@@ -129,8 +129,8 @@ Windows 构建机可运行 `deployments/offline/build-offline-package.ps1`；该
 
 - PostgreSQL 元数据；
 - File Spool 共享卷，或 S3 Bucket/Prefix 及其版本/保留策略；
-- `QMIGRATION_MASTER_KEY`；
-- `QMIGRATION_AUTH_SECRET`；
+- `DTS_MASTER_KEY`；
+- `DTS_AUTH_SECRET`；
 - Worker Token 和静态 RBAC Token；
 - 报告签名私钥/HSM 配置、公钥 Trust Store、TSA 信任链；
 - 当前部署清单和镜像 Digest。
@@ -150,55 +150,55 @@ Master Key 不包含在 `backup.sh` 输出中，必须从 Secret Manager 单独�
 9. 核对 Pending Spool、Engine Job、Lease、DLQ 和任务状态；
 10. 在业务确认前不要直接执行 Cutover/Rollback。
 
-`restore.sh` 使用 `pg_restore --clean --if-exists`，属于破坏性操作，必须设置 `QMIGRATION_RESTORE_CONFIRM=YES`，且应只对已确认的目标数据库执行。
+`restore.sh` 使用 `pg_restore --clean --if-exists`，属于破坏性操作，必须设置 `DTS_RESTORE_CONFIRM=YES`，且应只对已确认的目标数据库执行。
 
 ## 7. 配置分类
 
 ### Server 与认证
 
-- `QMIGRATION_ADDR`；
-- `QMIGRATION_TLS_CERT`、`QMIGRATION_TLS_KEY`；
-- `QMIGRATION_AUTH_REQUIRED`；
-- `QMIGRATION_BOOTSTRAP_ADMIN_USER/PASSWORD`；
-- `QMIGRATION_AUTH_SECRET`；
-- `QMIGRATION_SESSION_TTL_HOURS`；
-- `QMIGRATION_RBAC_TOKENS`；
-- `QMIGRATION_CORS_ORIGIN`；
-- `QMIGRATION_WORKER_TOKEN`。
+- `DTS_ADDR`；
+- `DTS_TLS_CERT`、`DTS_TLS_KEY`；
+- `DTS_AUTH_REQUIRED`；
+- `DTS_BOOTSTRAP_ADMIN_USER/PASSWORD`；
+- `DTS_AUTH_SECRET`；
+- `DTS_SESSION_TTL_HOURS`；
+- `DTS_RBAC_TOKENS`；
+- `DTS_CORS_ORIGIN`；
+- `DTS_WORKER_TOKEN`。
 
 ### 元数据
 
-- `QMIGRATION_REPOSITORY=postgres`；
-- `QMIGRATION_METADATA_HOST/PORT/USER/PASSWORD/DATABASE`；
-- 开发用 `QMIGRATION_STATE_FILE`；
+- `DTS_REPOSITORY=postgres`；
+- `DTS_METADATA_HOST/PORT/USER/PASSWORD/DATABASE`；
+- 开发用 `DTS_STATE_FILE`；
 - Maintenance Retention 相关变量。
 
 ### Worker
 
-- `QMIGRATION_SERVER`；
-- `QMIGRATION_WORKER_CONCURRENCY`；
-- `QMIGRATION_CDC_CONCURRENCY`；
-- `QMIGRATION_WORKER_LABELS`；
-- `QMIGRATION_WORKER_SHUTDOWN_GRACE_SECONDS`；
-- `QMIGRATION_BIN_DIR`；
-- `QMIGRATION_PIPELINE_BUFFER_BATCHES`；
-- `QMIGRATION_ADAPTIVE_BATCH`。
+- `DTS_SERVER`；
+- `DTS_WORKER_CONCURRENCY`；
+- `DTS_CDC_CONCURRENCY`；
+- `DTS_WORKER_LABELS`；
+- `DTS_WORKER_SHUTDOWN_GRACE_SECONDS`；
+- `DTS_BIN_DIR`；
+- `DTS_PIPELINE_BUFFER_BATCHES`；
+- `DTS_ADAPTIVE_BATCH`。
 
 ### CDC Spool
 
-- `QMIGRATION_CDC_SPOOL_STORAGE=file|shared-fs|s3|metadata`；
-- `QMIGRATION_CDC_SPOOL_DIR`；
-- `QMIGRATION_CDC_SPOOL_MAX_TRANSACTION_BYTES`；
-- `QMIGRATION_CDC_SPOOL_MAX_PENDING_BYTES`；
-- `QMIGRATION_CDC_SPOOL_DISK_WARN_PCT`；
-- `QMIGRATION_CDC_SPOOL_DISK_CRITICAL_PCT`；
+- `DTS_CDC_SPOOL_STORAGE=file|shared-fs|s3|metadata`；
+- `DTS_CDC_SPOOL_DIR`；
+- `DTS_CDC_SPOOL_MAX_TRANSACTION_BYTES`；
+- `DTS_CDC_SPOOL_MAX_PENDING_BYTES`；
+- `DTS_CDC_SPOOL_DISK_WARN_PCT`；
+- `DTS_CDC_SPOOL_DISK_CRITICAL_PCT`；
 - S3 Endpoint、Bucket、Region、Credential、TLS 和 Retry 变量。
 
 S3 完整契约见 `docs/SPOOL_STORAGE.md`。报告归档、HSM/KMS、Ed25519 和 TSA 配置见现有 Validation Report 相关 Release/Implementation 文档和代码环境变量。
 
 ### 实验 Connector
 
-`QMIGRATION_EXPERIMENTAL_*` 只能在完成对应真实数据库资格验证、故障注入、长稳和回滚验证后开启。Server 与 Worker 必须使用一致的实验开关，否则能力上报与执行会不匹配。
+`DTS_EXPERIMENTAL_*` 只能在完成对应真实数据库资格验证、故障注入、长稳和回滚验证后开启。Server 与 Worker 必须使用一致的实验开关，否则能力上报与执行会不匹配。
 
 ## 8. 可观测性
 
@@ -210,12 +210,12 @@ S3 完整契约见 `docs/SPOOL_STORAGE.md`。报告归档、HSM/KMS、Ed25519 �
 
 ### 重点指标
 
-- `qmigration_migrations_failed`；
-- `qmigration_task_progress`、吞吐、ETA、P95/P99 SLA；
-- `qmigration_task_chunks_pending/running/failed`；
-- `qmigration_cdc_lag_seconds`；
-- `qmigration_cdc_spool_pending_*`、Storage Used、Critical ETA；
-- `qmigration_cdc_dlq_open`、Commit Uncertain、Replay Required；
+- `dts_migrations_failed`；
+- `dts_task_progress`、吞吐、ETA、P95/P99 SLA；
+- `dts_task_chunks_pending/running/failed`；
+- `dts_cdc_lag_seconds`；
+- `dts_cdc_spool_pending_*`、Storage Used、Critical ETA；
+- `dts_cdc_dlq_open`、Commit Uncertain、Replay Required；
 - Worker CPU、Memory、Running Jobs、Scheduler Load；
 - 元数据表大小、Dead Ratio、Maintenance Failures；
 - Validation Mismatch 和报告归档失败。
@@ -252,7 +252,7 @@ S3 完整契约见 `docs/SPOOL_STORAGE.md`。报告归档、HSM/KMS、Ed25519 �
 
 ### Worker 宕机
 
-停止新的领取，等待 Chunk/Engine Job Lease 过期后由其他 Worker 接管。核对旧 Worker 是否仍可能运行，避免时钟/网络分区造成双执行风险。QMigration Repository 的 Owner/Lease 校验是最后防线。
+停止新的领取，等待 Chunk/Engine Job Lease 过期后由其他 Worker 接管。核对旧 Worker 是否仍可能运行，避免时钟/网络分区造成双执行风险。DTS Repository 的 Owner/Lease 校验是最后防线。
 
 ### Server 宕机
 

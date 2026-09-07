@@ -2,8 +2,8 @@ package main
 
 import (
 	"encoding/binary"
-	"qmigration/backend/internal/cdc/mysqlbinlog"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/cdc/mysqlbinlog"
+	"dts/backend/internal/domain"
 	"testing"
 )
 

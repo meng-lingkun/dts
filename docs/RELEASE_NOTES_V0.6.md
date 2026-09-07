@@ -1,4 +1,4 @@
-# QMigration V0.6.0 Release Notes
+# DTS V0.6.0 Release Notes
 
 ## 重点升级
 

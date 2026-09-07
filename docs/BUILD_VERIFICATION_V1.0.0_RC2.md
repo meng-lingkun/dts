@@ -1,4 +1,4 @@
-# QMigration V1.0.0 RC2 Build Verification
+# DTS V1.0.0 RC2 Build Verification
 
 ## Passed in the release workspace
 
@@ -16,13 +16,13 @@ Shell syntax checks           PASS
 
 Built Go programs:
 
-- `qmigration-server`
-- `qmigration-worker`
-- `qmigration-cdc-bridge`
-- `qmigration-binlog-inspect`
-- `qmigration-postgres-cdc`
-- `qmigration-mysql-cdc`
-- `qmigrationctl`
+- `dts-server`
+- `dts-worker`
+- `dts-cdc-bridge`
+- `dts-binlog-inspect`
+- `dts-postgres-cdc`
+- `dts-mysql-cdc`
+- `dtsctl`
 
 The smoke test verifies the health/version response, datasource and migration APIs, Worker registration, Dashboard data, and the engine registry including `debezium` and `canal`.
 

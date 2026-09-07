@@ -1,4 +1,4 @@
-# QMigration V0.15.0-rc12 Release Notes
+# DTS V0.15.0-rc12 Release Notes
 
 RC12 completes the software-side Db2 VECTOR target path while preserving the
 serialized-text contract introduced for source Full/CDC in RC11. DB2 remains
@@ -17,7 +17,7 @@ experimental until retained real-instance qualification is complete.
 ## Prepared VECTOR target apply
 
 - Continue carrying VECTOR values as `VECTOR_SERIALIZE()` text through the
-  QMigration pipeline.
+  DTS pipeline.
 - Reconstruct the native target value with Db2's documented
   `VECTOR(CAST(? AS CLOB), dimension, coordinate-type)` constructor.
 - Reuse the existing Prepared SQLDTA path for small serialized vectors and the
@@ -28,7 +28,7 @@ experimental until retained real-instance qualification is complete.
 
 ## Qualification
 
-- `qmigration-db2-qualify` adds optional `--target-vector`; the shell wrapper
+- `dts-db2-qualify` adds optional `--target-vector`; the shell wrapper
   exposes `DB2_QUALIFY_TARGET_VECTOR=1`.
 - The destructive VECTOR qualifier creates FLOAT32 and INT8 VECTOR columns,
   writes through prepared binds and reads them back through `VECTOR_SERIALIZE()`.

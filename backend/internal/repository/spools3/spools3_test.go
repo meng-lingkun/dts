@@ -7,11 +7,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"qmigration/backend/internal/domain"
-	"qmigration/backend/internal/repository"
-	"qmigration/backend/internal/repository/memory"
-	securerepo "qmigration/backend/internal/repository/secure"
-	"qmigration/backend/internal/security"
+	"dts/backend/internal/domain"
+	"dts/backend/internal/repository"
+	"dts/backend/internal/repository/memory"
+	securerepo "dts/backend/internal/repository/secure"
+	"dts/backend/internal/security"
 	"strconv"
 	"strings"
 	"sync"
@@ -188,7 +188,7 @@ func newTestStore(t *testing.T) (*fakeS3, *Store, *securerepo.Store) {
 	ts := httptest.NewServer(f)
 	t.Cleanup(ts.Close)
 	base := memory.New()
-	st, err := New(base, Config{Endpoint: ts.URL, Bucket: "bucket", Prefix: "qmigration/test", Region: "us-east-1", AccessKey: "AKID", SecretKey: "SECRET", PathStyle: true, AppliedRetention: time.Hour, HTTPClient: ts.Client(), MaxPendingBytes: 1024 * 1024, WarnUsedPct: 80, CriticalUsedPct: 90})
+	st, err := New(base, Config{Endpoint: ts.URL, Bucket: "bucket", Prefix: "dts/test", Region: "us-east-1", AccessKey: "AKID", SecretKey: "SECRET", PathStyle: true, AppliedRetention: time.Hour, HTTPClient: ts.Client(), MaxPendingBytes: 1024 * 1024, WarnUsedPct: 80, CriticalUsedPct: 90})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -459,15 +459,15 @@ func TestS3TLSConfigFailsClosedOnInvalidMaterial(t *testing.T) {
 }
 
 func TestConfigFromEnvWiresTLSAndMultipart(t *testing.T) {
-	t.Setenv("QMIGRATION_CDC_SPOOL_S3_ENDPOINT", "https://minio.internal")
-	t.Setenv("QMIGRATION_CDC_SPOOL_S3_BUCKET", "cdc")
-	t.Setenv("QMIGRATION_CDC_SPOOL_S3_CA_CERT", "ca-pem")
-	t.Setenv("QMIGRATION_CDC_SPOOL_S3_TLS_SERVER_NAME", "minio.service.local")
-	t.Setenv("QMIGRATION_CDC_SPOOL_S3_TLS_CLIENT_CERT", "cert-pem")
-	t.Setenv("QMIGRATION_CDC_SPOOL_S3_TLS_CLIENT_KEY", "key-pem")
-	t.Setenv("QMIGRATION_CDC_SPOOL_S3_MULTIPART_THRESHOLD_BYTES", "10485760")
-	t.Setenv("QMIGRATION_CDC_SPOOL_S3_MULTIPART_PART_BYTES", "6291456")
-	t.Setenv("QMIGRATION_CDC_SPOOL_S3_MULTIPART_ABORT_AFTER_HOURS", "9")
+	t.Setenv("DTS_CDC_SPOOL_S3_ENDPOINT", "https://minio.internal")
+	t.Setenv("DTS_CDC_SPOOL_S3_BUCKET", "cdc")
+	t.Setenv("DTS_CDC_SPOOL_S3_CA_CERT", "ca-pem")
+	t.Setenv("DTS_CDC_SPOOL_S3_TLS_SERVER_NAME", "minio.service.local")
+	t.Setenv("DTS_CDC_SPOOL_S3_TLS_CLIENT_CERT", "cert-pem")
+	t.Setenv("DTS_CDC_SPOOL_S3_TLS_CLIENT_KEY", "key-pem")
+	t.Setenv("DTS_CDC_SPOOL_S3_MULTIPART_THRESHOLD_BYTES", "10485760")
+	t.Setenv("DTS_CDC_SPOOL_S3_MULTIPART_PART_BYTES", "6291456")
+	t.Setenv("DTS_CDC_SPOOL_S3_MULTIPART_ABORT_AFTER_HOURS", "9")
 	cfg := ConfigFromEnv()
 	if cfg.CACert != "ca-pem" || cfg.TLSServerName != "minio.service.local" || cfg.TLSClientCert != "cert-pem" || cfg.TLSClientKey != "key-pem" {
 		t.Fatalf("TLS env not wired: %+v", cfg)

@@ -1,4 +1,4 @@
-# QMigration V0.15.0-rc39 Release Notes
+# DTS V0.15.0-rc39 Release Notes
 
 RC39 extends topology protection from a single source placement to **correlated failure domains**. A scheduler must not assume two topology IDs are independent when they live in the same region, zone, or rack.
 
@@ -19,7 +19,7 @@ For a healthy candidate topology, rack and zone correlation is immediate. Region
 - independent / all peers HEALTHY: no additional domain cap;
 - same rack/zone peer DEGRADED: default domain cap `2`;
 - same rack/zone peer HALF_OPEN or CIRCUIT_OPEN: default domain cap `1`;
-- region-wide risk: enabled only after `QMIGRATION_TOPOLOGY_FAULT_DOMAIN_REGION_MIN_UNHEALTHY_ZONES` distinct zones show unhealthy evidence (default `2`).
+- region-wide risk: enabled only after `DTS_TOPOLOGY_FAULT_DOMAIN_REGION_MIN_UNHEALTHY_ZONES` distinct zones show unhealthy evidence (default `2`).
 
 Candidates are ordered by topology health first, then fault-domain peer risk and current fault-domain running count. This keeps an unhealthy topology from becoming eligible merely because its domain is quiet, while preferring an equally healthy topology in an independent domain.
 
@@ -35,22 +35,22 @@ Existing topology DEGRADED throttle and stricter backpressure remain authoritati
 ## Configuration
 
 ```text
-QMIGRATION_TOPOLOGY_FAULT_DOMAIN_PROTECTION=true
-QMIGRATION_TOPOLOGY_FAULT_DOMAIN_DEGRADED_MAX_CONCURRENCY=2
-QMIGRATION_TOPOLOGY_FAULT_DOMAIN_CRITICAL_MAX_CONCURRENCY=1
-QMIGRATION_TOPOLOGY_FAULT_DOMAIN_REGION_MIN_UNHEALTHY_ZONES=2
-QMIGRATION_TOPOLOGY_FAULT_DOMAIN_DEGRADED_BATCH_PCT=75
-QMIGRATION_TOPOLOGY_FAULT_DOMAIN_DEGRADED_PAUSE_MS=100
-QMIGRATION_TOPOLOGY_FAULT_DOMAIN_CRITICAL_BATCH_PCT=50
-QMIGRATION_TOPOLOGY_FAULT_DOMAIN_CRITICAL_PAUSE_MS=250
+DTS_TOPOLOGY_FAULT_DOMAIN_PROTECTION=true
+DTS_TOPOLOGY_FAULT_DOMAIN_DEGRADED_MAX_CONCURRENCY=2
+DTS_TOPOLOGY_FAULT_DOMAIN_CRITICAL_MAX_CONCURRENCY=1
+DTS_TOPOLOGY_FAULT_DOMAIN_REGION_MIN_UNHEALTHY_ZONES=2
+DTS_TOPOLOGY_FAULT_DOMAIN_DEGRADED_BATCH_PCT=75
+DTS_TOPOLOGY_FAULT_DOMAIN_DEGRADED_PAUSE_MS=100
+DTS_TOPOLOGY_FAULT_DOMAIN_CRITICAL_BATCH_PCT=50
+DTS_TOPOLOGY_FAULT_DOMAIN_CRITICAL_PAUSE_MS=250
 ```
 
 ## Observability
 
 Prometheus adds:
 
-- `qmigration_table_topology_fault_domain_info`
-- `qmigration_table_topology_fault_domain_peer_risk`
+- `dts_table_topology_fault_domain_info`
+- `dts_table_topology_fault_domain_peer_risk`
 
 ## Safety / scope
 

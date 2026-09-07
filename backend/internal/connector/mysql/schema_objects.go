@@ -3,8 +3,8 @@ package mysqlconnector
 import (
 	"context"
 	"fmt"
-	"qmigration/backend/internal/connector"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/connector"
+	"dts/backend/internal/domain"
 	"strings"
 )
 

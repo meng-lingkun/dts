@@ -1,4 +1,4 @@
--- QMigration V0.15.0-rc45: immutable terminal-task validation archive.
+-- DTS V0.15.0-rc45: immutable terminal-task validation archive.
 -- Detailed validation_results may be compacted after retention, but this
 -- insert-only task/table evidence summary remains permanently auditable.
 CREATE TABLE IF NOT EXISTS validation_archives(

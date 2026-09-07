@@ -79,8 +79,8 @@ func TestTTCVersionUsesLowerServerCapability(t *testing.T) {
 }
 
 func TestOracleExperimentalTTCDoesNotAdvertiseFullOrCDC(t *testing.T) {
-	t.Setenv("QMIGRATION_EXPERIMENTAL_ORACLE_TTC_NEGOTIATION", "1")
-	t.Setenv("QMIGRATION_EXPERIMENTAL_ORACLE_TTC_AUTH", "1")
+	t.Setenv("DTS_EXPERIMENTAL_ORACLE_TTC_NEGOTIATION", "1")
+	t.Setenv("DTS_EXPERIMENTAL_ORACLE_TTC_AUTH", "1")
 	d := NewFactory().Capabilities("ORACLE")
 	if len(d.Capabilities) != 1 || string(d.Capabilities[0]) != "protocol-probe" {
 		t.Fatalf("experimental TTC leaked production capabilities: %+v", d.Capabilities)

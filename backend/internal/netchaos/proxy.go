@@ -1,4 +1,4 @@
-// Package netchaos provides an opt-in TCP fault proxy for QMigration
+// Package netchaos provides an opt-in TCP fault proxy for DTS
 // qualification. It is deliberately protocol-neutral: rules are triggered by
 // byte sequences observed on the client->server stream, then act on the TCP
 // connection itself. This makes it useful for MySQL COM_QUERY, PostgreSQL

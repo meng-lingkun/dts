@@ -21,11 +21,11 @@ type oracleTypeRep struct {
 	Representation uint16
 }
 
-// qMigrationOracleTypeReps is intentionally limited to the Oracle scalar/LOB
-// families QMigration's migration engine can normalize today.  TTC allows the
+// dtsOracleTypeReps is intentionally limited to the Oracle scalar/LOB
+// families DTS's migration engine can normalize today.  TTC allows the
 // client to advertise representation support; unsupported vendor-internal
 // types are not claimed merely to imitate a general-purpose driver.
-var qMigrationOracleTypeReps = []oracleTypeRep{
+var dtsOracleTypeReps = []oracleTypeRep{
 	{1, 1, 1},  // VARCHAR2
 	{2, 2, 10}, // NUMBER
 	{3, 2, 10}, // INTEGER/NUMBER alias
@@ -173,7 +173,7 @@ func buildTTCDataTypeRequest(server ttcProtocolInfo) (ttcDataTypeInfo, []byte, e
 	w.fixedUint(uint64(server.ServerNCharset), 2, false)
 
 	wide := compile[27] != 0
-	for _, rep := range qMigrationOracleTypeReps {
+	for _, rep := range dtsOracleTypeReps {
 		vals := []uint16{rep.DataType, rep.NativeDataType}
 		if rep.NativeDataType != 0 {
 			vals = append(vals, rep.Representation, 0)
@@ -233,7 +233,7 @@ func parseTTCDataTypeResponse(payload []byte, info *ttcDataTypeInfo) error {
 	}
 	// The remainder is a server representation list.  The client does not need
 	// to materialize it for migration correctness because it already limits
-	// itself to the advertised QMigration scalar/LOB set; still require a legal
+	// itself to the advertised DTS scalar/LOB set; still require a legal
 	// terminating zero when bytes are present so truncated replies fail closed.
 	if r.remaining() == 0 {
 		return nil

@@ -1,4 +1,4 @@
-# QMigration V0.15.0-rc16 Support Matrix
+# DTS V0.15.0-rc16 Support Matrix
 
 | Database | Metadata | Full Read | Full Write / CDC Apply | Source CDC | Schema / DDL | Status |
 |---|---:|---:|---:|---|---:|---|
@@ -9,15 +9,15 @@
 | openGauss / Kingbase | Yes | Yes | Yes | Not advertised | Yes | NATIVE_FULL_ONLY |
 | Oracle | Yes | Yes | Yes | LogMiner / SCN | Yes | EXPERIMENTAL |
 | SQL Server | Yes | Yes | Yes | SQL Server CDC / LSN | Yes | EXPERIMENTAL |
-| DB2 LUW | Yes | Yes | Yes | QMigration Log Agent + IBM db2ReadLog | Yes | EXPERIMENTAL |
+| DB2 LUW | Yes | Yes | Yes | DTS Log Agent + IBM db2ReadLog | Yes | EXPERIMENTAL |
 | Dameng / DM8 | Yes | Yes | Yes | Not advertised | Table/PK/index/FK target | EXPERIMENTAL |
 | **GaussDB** | **Yes** | **Yes** | **Yes** | **mppdb_decoding binary DML + optional DDL-only classification / GAUSSDB_LSN** | **Target yes; selected-table DDL-only same-family replay** | **EXPERIMENTAL** |
 | GBase | No | No | No | No | No | PROBE_ONLY |
 
 ## GaussDB RC16 scope
 
-Behind `QMIGRATION_EXPERIMENTAL_GAUSSDB_NATIVE=1` and
-`QMIGRATION_EXPERIMENTAL_GAUSSDB_LOGICAL_CDC=1`:
+Behind `DTS_EXPERIMENTAL_GAUSSDB_NATIVE=1` and
+`DTS_EXPERIMENTAL_GAUSSDB_LOGICAL_CDC=1`:
 
 - PostgreSQL-wire Metadata, Full Read/Write, schema and transactional target
   apply;
@@ -27,7 +27,7 @@ Behind `QMIGRATION_EXPERIMENTAL_GAUSSDB_NATIVE=1` and
   boundary;
 - DDL-only source replay only for GaussDB -> GaussDB identity mappings,
   `cdc_ddl_mode=SAME_FAMILY`, explicit
-  `QMIGRATION_GAUSSDB_DDL_ONLY_TRANSACTIONS=1`, and
+  `DTS_GAUSSDB_DDL_ONLY_TRANSACTIONS=1`, and
   `enable_logical_replication_ddl=on`;
 - safe DDL subset: selected-table ALTER TABLE, TRUNCATE and CREATE [UNIQUE]
   INDEX.

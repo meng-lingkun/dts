@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"qmigration/backend/internal/validationreport"
+	"dts/backend/internal/validationreport"
 )
 
 type client struct {
@@ -31,7 +31,7 @@ func (c client) request(method, path string, body []byte) ([]byte, error) {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	if c.token != "" {
-		req.Header.Set("X-QMigration-API-Token", c.token)
+		req.Header.Set("X-DTS-API-Token", c.token)
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -68,7 +68,7 @@ func readFile(path string) ([]byte, error) {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, `qmigrationctl [--server URL] [--token TOKEN] COMMAND [args]
+	fmt.Fprintln(os.Stderr, `dtsctl [--server URL] [--token TOKEN] COMMAND [args]
 
 Commands:
   health                         server health
@@ -100,13 +100,13 @@ Commands:
     --public-key FILE            pin one externally trusted public key
     --trust-store FILE           verify through rotated/revoked local trust store
 
-Environment: QMIGRATION_SERVER, QMIGRATION_API_TOKEN`)
+Environment: DTS_SERVER, DTS_API_TOKEN`)
 }
 
 func main() {
-	fs := flag.NewFlagSet("qmigrationctl", flag.ContinueOnError)
-	server := fs.String("server", env("QMIGRATION_SERVER", "http://127.0.0.1:8080"), "QMigration server")
-	token := fs.String("token", env("QMIGRATION_API_TOKEN", ""), "API token")
+	fs := flag.NewFlagSet("dtsctl", flag.ContinueOnError)
+	server := fs.String("server", env("DTS_SERVER", "http://127.0.0.1:8080"), "DTS server")
+	token := fs.String("token", env("DTS_API_TOKEN", ""), "API token")
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		os.Exit(2)
 	}
@@ -120,13 +120,13 @@ func main() {
 	if cmd == "verify-report" {
 		vf := flag.NewFlagSet("verify-report", flag.ContinueOnError)
 		publicKey := vf.String("public-key", "", "trusted Ed25519 public key JSON/PEM/base64 file")
-		trustStorePath := vf.String("trust-store", "", "rotating/revoking QMigration report trust store")
+		trustStorePath := vf.String("trust-store", "", "rotating/revoking DTS report trust store")
 		tsaCA := vf.String("tsa-ca", "", "trusted RFC3161 TSA CA certificate file")
 		if err := vf.Parse(args[1:]); err != nil {
 			os.Exit(2)
 		}
 		if vf.NArg() != 1 || (*publicKey != "" && *trustStorePath != "") {
-			fmt.Fprintln(os.Stderr, "usage: qmigrationctl verify-report [--public-key FILE | --trust-store FILE] [--tsa-ca FILE] DIR")
+			fmt.Fprintln(os.Stderr, "usage: dtsctl verify-report [--public-key FILE | --trust-store FILE] [--tsa-ca FILE] DIR")
 			os.Exit(2)
 		}
 		var result validationreport.VerificationResult
@@ -173,7 +173,7 @@ func main() {
 			os.Exit(2)
 		}
 		if *storePath == "" || *publicKey == "" || vf.NArg() != 0 {
-			fmt.Fprintln(os.Stderr, "usage: qmigrationctl trust-init --store FILE --public-key FILE")
+			fmt.Fprintln(os.Stderr, "usage: dtsctl trust-init --store FILE --public-key FILE")
 			os.Exit(2)
 		}
 		doc, err := validationreport.LoadPublicKeyDocumentFile(*publicKey)
@@ -202,7 +202,7 @@ func main() {
 			os.Exit(2)
 		}
 		if *storePath == "" || *certPath == "" || vf.NArg() != 0 {
-			fmt.Fprintln(os.Stderr, "usage: qmigrationctl trust-apply-transition --store FILE --certificate FILE")
+			fmt.Fprintln(os.Stderr, "usage: dtsctl trust-apply-transition --store FILE --certificate FILE")
 			os.Exit(2)
 		}
 		store, err := validationreport.LoadTrustStore(*storePath)
@@ -240,7 +240,7 @@ func main() {
 			os.Exit(2)
 		}
 		if *storePath == "" || *certPath == "" || vf.NArg() != 0 {
-			fmt.Fprintln(os.Stderr, "usage: qmigrationctl trust-apply-revocation --store FILE --certificate FILE")
+			fmt.Fprintln(os.Stderr, "usage: dtsctl trust-apply-revocation --store FILE --certificate FILE")
 			os.Exit(2)
 		}
 		store, err := validationreport.LoadTrustStore(*storePath)
@@ -277,7 +277,7 @@ func main() {
 			os.Exit(2)
 		}
 		if *storePath == "" || vf.NArg() != 0 {
-			fmt.Fprintln(os.Stderr, "usage: qmigrationctl trust-show --store FILE")
+			fmt.Fprintln(os.Stderr, "usage: dtsctl trust-show --store FILE")
 			os.Exit(2)
 		}
 		store, err := validationreport.LoadTrustStore(*storePath)

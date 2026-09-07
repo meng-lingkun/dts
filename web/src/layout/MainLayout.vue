@@ -21,7 +21,7 @@ watch(()=>route.fullPath,()=>{mobileOpen.value=false})
   <div class="shell">
     <button v-if="mobileOpen" class="nav-backdrop" aria-label="关闭导航" @click="mobileOpen=false"></button>
     <aside class="sidebar" :class="{open:mobileOpen}">
-      <div class="brand"><div class="logo">Q</div><div><b>QMigration</b><small>Database Migration</small></div></div>
+      <div class="brand"><div class="logo">Q</div><div><b>DTS</b><small>Database Migration</small></div></div>
       <nav aria-label="主导航">
         <div v-for="group in groups" :key="group.label" class="nav-group">
           <span class="nav-label">{{group.label}}</span>
@@ -33,7 +33,7 @@ watch(()=>route.fullPath,()=>{mobileOpen.value=false})
     </aside>
     <main>
       <header class="topbar">
-        <div class="topbar-title"><button class="menu-button" aria-label="打开导航" @click="mobileOpen=true">☰</button><div><h2>{{pageTitle}}</h2><span>QMigration 统一数据库迁移平台</span></div></div>
+        <div class="topbar-title"><button class="menu-button" aria-label="打开导航" @click="mobileOpen=true">☰</button><div><h2>{{pageTitle}}</h2><span>DTS 统一数据库迁移平台</span></div></div>
         <div class="topbar-actions"><el-tag v-if="auth.identity" effect="plain">{{auth.identity.username}} · {{auth.identity.role}}</el-tag><el-button v-if="auth.identity&&!auth.identity.open_mode" text @click="logout">退出</el-button></div>
       </header>
       <section class="content"><RouterView /></section>

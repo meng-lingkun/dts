@@ -1,4 +1,4 @@
--- QMigration V0.15.0-rc43: bounded validation paging and latest-result coverage.
+-- DTS V0.15.0-rc43: bounded validation paging and latest-result coverage.
 CREATE INDEX IF NOT EXISTS idx_chunks_validation_table_page
   ON migration_chunks(task_id, table_id, chunk_no, id);
 CREATE INDEX IF NOT EXISTS idx_validation_task_chunk_latest

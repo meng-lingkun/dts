@@ -57,7 +57,7 @@ func wrapLine(s string, width int) []string {
 func reportLines(r Report) []string {
 	a := r.Validation
 	lines := []string{
-		"QMigration Validation Acceptance Report",
+		"DTS Validation Acceptance Report",
 		"",
 		"Task: " + r.Task.Name + " (" + r.Task.ID + ")",
 		"Mode: " + string(r.Task.Mode),
@@ -130,7 +130,7 @@ func renderPDF(r Report) ([]byte, error) {
 		objects[contentObj-1] = []byte(fmt.Sprintf("<< /Length %d >>\nstream\n%sendstream", len(data), data))
 	}
 	var out bytes.Buffer
-	out.WriteString("%PDF-1.4\n%QMigration\n")
+	out.WriteString("%PDF-1.4\n%DTS\n")
 	offsets := make([]int, len(objects)+1)
 	for i, obj := range objects {
 		offsets[i+1] = out.Len()
@@ -149,7 +149,7 @@ func renderPDF(r Report) ([]byte, error) {
 }
 
 func renderPDFWithOptionalRenderer(r Report, html []byte) ([]byte, error) {
-	bin := strings.TrimSpace(os.Getenv("QMIGRATION_VALIDATION_REPORT_PDF_RENDERER"))
+	bin := strings.TrimSpace(os.Getenv("DTS_VALIDATION_REPORT_PDF_RENDERER"))
 	if bin == "" {
 		return renderPDF(r)
 	}

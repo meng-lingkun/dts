@@ -2,7 +2,7 @@ package repository
 
 import (
 	"context"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/domain"
 )
 
 // TableRunnableCounts is the small control-plane view needed by running chunk

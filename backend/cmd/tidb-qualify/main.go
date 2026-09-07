@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"qmigration/backend/internal/cdc/ticdc"
-	"qmigration/backend/internal/connector"
-	mysqlconnector "qmigration/backend/internal/connector/mysql"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/cdc/ticdc"
+	"dts/backend/internal/connector"
+	mysqlconnector "dts/backend/internal/connector/mysql"
+	"dts/backend/internal/domain"
 )
 
 const toolVersion = "0.15.0-rc49"
@@ -273,7 +273,7 @@ func runLifecycle(r *runner, control *ticdc.ControlClient, ep ticdc.Endpoint, sc
 			}
 			return "query qualification changefeed", nil, err
 		}
-		kafka, err := ticdc.NewKafkaClientForEndpoint(ep, "qmigration-tidb-qualify")
+		kafka, err := ticdc.NewKafkaClientForEndpoint(ep, "dts-tidb-qualify")
 		if err != nil {
 			return "create Kafka client", nil, err
 		}

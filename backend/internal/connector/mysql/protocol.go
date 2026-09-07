@@ -20,7 +20,7 @@ import (
 	"strings"
 	"time"
 
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/domain"
 )
 
 const (

@@ -1,21 +1,21 @@
-# QMigration 使用手册
+# DTS 使用手册
 
 适用版本：`0.15.0-rc49`
 
 ## 1. 使用前须知
 
-QMigration 当前是 RC 版本。建议先在非生产环境完成目标数据库版本、数据类型、CDC 前置条件、长稳和故障恢复验证。
+DTS 当前是 RC 版本。建议先在非生产环境完成目标数据库版本、数据类型、CDC 前置条件、长稳和故障恢复验证。
 
-Docker Compose 已强制认证和生产配置校验。新部署管理员账号默认为 `admin` / `Cljslrl0620!`，首次登录后必须立即修改；数据库密码、Master Key、Worker Token 和 Auth Secret 仍须使用互不相同的强随机值，并将私有环境文件排除在版本控制之外。
+Kubernetes 部署已强制认证和生产配置校验。新部署管理员账号默认为 `admin` / `Cljslrl0620!`，首次登录后必须立即修改；数据库密码、Master Key、Worker Token 和 Auth Secret 仍须使用互不相同的强随机值，并将私有环境文件排除在版本控制之外。
 
 ## 2. 环境要求
 
-### 容器方式
+### Kubernetes 方式
 
-- Docker Engine 或兼容容器运行时；
-- Docker Compose v2；
-- 可拉取 Go、Node、Nginx、Alpine 和 PostgreSQL 基础镜像；
-- File Spool 需要持久卷，多 Server 需要 RWX；或准备 S3-Compatible 对象存储。
+- 现有 Linux amd64 Kubernetes 集群，节点使用 containerd；
+- CNI、RWX Spool 存储；内置 PostgreSQL 需要 RWO 存储；
+- 配置好 kubeconfig，包内提供 kubectl；
+- Docker 仅在联网构建机制作镜像，运行节点无需 Docker Engine/Compose。
 
 ### 源码方式
 
@@ -24,41 +24,26 @@ Docker Compose 已强制认证和生产配置校验。新部署管理员账号�
 - PostgreSQL 17（生产元数据模式）；
 - Linux 是正式构建/运行基线；File Spool 同时提供 Linux `statfs` 与 Windows `GetDiskFreeSpaceExW` 实现，便于开发机执行测试。
 
-## 3. 本地快速启动
+## 3. Kubernetes 离线安装
+
+使用 `dts-kubernetes-offline-<版本>-linux-amd64.tar.gz`，核验同名 SHA-256 文件后解压。在每个可调度节点运行：
 
 ```bash
-cp deployments/.env.example deployments/.env.local
-# 编辑 deployments/.env.local，填入所有空的内部 Secret
-docker compose --env-file deployments/.env.local -f deployments/docker-compose.yml up --build
+sudo sh load-images-kubernetes.sh
 ```
 
-访问 `http://127.0.0.1:8088`。API 位于 `http://127.0.0.1:8080`。
-
-停止服务：
+在配置好 kubeconfig 的控制机执行：
 
 ```bash
-docker compose --env-file deployments/.env.local -f deployments/docker-compose.yml down
+sh install.sh
+./runtime/kubectl -n dts port-forward svc/web 8088:80
 ```
 
-`down -v` 会删除 PostgreSQL 和 Spool 卷，除非明确要清空数据，否则不要使用。
+访问 `http://127.0.0.1:8088`。统一安装入口调用 Kubernetes 安装器，临时 DaemonSet 会检查各节点镜像。副本数、RWX StorageClass、外部 HA PostgreSQL、HPA、Ingress 和 LoadBalancer 参数见包内 README。
 
-### Linux 离线安装
+`sh verify.sh` 检查包完整性及 Kubernetes 运行状态；`sh uninstall.sh` 移除应用和入口，保留 PostgreSQL、PVC、namespace 和 Secret。重装需使用相同数据库及存储配置。
 
-将 `qmigration-offline-<版本>-linux-amd64.tar.gz` 和同名 `.sha256` 文件复制到 Linux x86_64 主机，先核验外层文件，再安装：
-
-```bash
-sha256sum -c qmigration-offline-*.tar.gz.sha256
-tar -xzf qmigration-offline-*.tar.gz
-cd qmigration-offline-*
-sudo sh install.sh
-sudo cat INITIAL_ADMIN_CREDENTIALS.txt
-```
-
-安装脚本会先核验包内所有文件；Docker 不可用时安装包内 Docker Engine 29.7.2、Compose v2.40.2 并创建 systemd 服务，然后使用 `docker load` 导入三个本地镜像、生成权限为 `0600` 的 Secret 环境文件，最后以 `--pull never` 启动服务。安装过程不访问网络。执行 `sudo sh verify.sh` 可复核文件完整性、容器状态和 Server Readiness。
-
-宿主机无需预装 Docker，但必须提供 Linux x86_64 内核、systemd、cgroup、iptables、`tar` 和 `sha256sum`。安装器不会覆盖已有 Docker，不会自动授予普通用户具有 root 等价权限的 `docker` 组成员资格。默认卸载保留数据卷和容器运行时；只有确认永久删除元数据和 Spool 后才使用 `sudo sh uninstall.sh --purge`。
-
-若使用现有 Kubernetes 多节点集群，应先在每个可调度节点运行 `sudo sh load-images-kubernetes.sh`，再在控制机运行 `sh install-kubernetes.sh`。安装器使用临时 DaemonSet 检查各节点镜像，并支持 Server/Worker/Web 副本数、HPA、LoadBalancer、Ingress 及外部 HA PostgreSQL。包内含 kubectl v1.37.0；可用 `KUBECTL=/path/to/kubectl` 指定兼容客户端。Kubernetes 模式要求集群预先提供 CNI 和 RWX Spool 存储；内置 PostgreSQL 还要求 RWO 存储，且仅适用于测试/小规模环境。
+本包包含应用镜像和 kubectl，不安装 Kubernetes 控制面、containerd、CNI 或 CSI。Docker Engine、Compose 已从运行与安装流程中移除。
 
 ## 4. 安全启动
 
@@ -66,20 +51,20 @@ sudo cat INITIAL_ADMIN_CREDENTIALS.txt
 
 | 配置 | 要求 |
 |---|---|
-| `QMIGRATION_AUTH_REQUIRED=true` | 强制 API 认证 |
-| `QMIGRATION_BOOTSTRAP_ADMIN_PASSWORD` | 首次启动创建管理员；包内默认 `Cljslrl0620!`，登录后立即修改并移除 |
-| `QMIGRATION_AUTH_SECRET` | 长随机值，用于 Session 签名 |
-| `QMIGRATION_MASTER_KEY` | 长随机值，用于静态加密；必须独立备份 |
-| `QMIGRATION_WORKER_TOKEN` | 长随机值，Server 与 Worker 一致 |
-| `QMIGRATION_METADATA_PASSWORD` | 强随机数据库密码 |
-| `QMIGRATION_TLS_CERT` / `QMIGRATION_TLS_KEY` | 或在可信 Ingress/Proxy 终止 TLS |
+| `DTS_AUTH_REQUIRED=true` | 强制 API 认证 |
+| `DTS_BOOTSTRAP_ADMIN_PASSWORD` | 首次启动创建管理员；包内默认 `Cljslrl0620!`，登录后立即修改并移除 |
+| `DTS_AUTH_SECRET` | 长随机值，用于 Session 签名 |
+| `DTS_MASTER_KEY` | 长随机值，用于静态加密；必须独立备份 |
+| `DTS_WORKER_TOKEN` | 长随机值，Server 与 Worker 一致 |
+| `DTS_METADATA_PASSWORD` | 强随机数据库密码 |
+| `DTS_TLS_CERT` / `DTS_TLS_KEY` | 或在可信 Ingress/Proxy 终止 TLS |
 
-Compose 已声明并强制透传这些配置。`QMIGRATION_PRODUCTION=true` 时，Server 会拒绝 Open Mode、短 Secret、示例值、复用 Secret、非 PostgreSQL 元数据仓库以及通配 CORS。
+Kubernetes 清单通过 ConfigMap/Secret 传入这些配置。`DTS_PRODUCTION=true` 时，Server 会拒绝 Open Mode、短 Secret、示例值、复用 Secret、非 PostgreSQL 元数据仓库以及通配 CORS。
 
 首次启动后，使用 Bootstrap Admin 登录。日常操作推荐账号登录；CI/CD 或灾备脚本可使用：
 
 ```text
-QMIGRATION_RBAC_TOKENS=admin:tokenA,dba:tokenB,operator:tokenC,viewer:tokenD
+DTS_RBAC_TOKENS=admin:tokenA,dba:tokenB,operator:tokenC,viewer:tokenD
 ```
 
 ## 5. 创建数据源
@@ -242,34 +227,34 @@ QMIGRATION_RBAC_TOKENS=admin:tokenA,dba:tokenB,operator:tokenC,viewer:tokenD
 - 签名 Manifest；
 - Ed25519 验签公钥。
 
-启用 S3/WORM 配置后可将报告归档。离线验签使用 `qmigrationctl verify-report`，公钥轮换场景建议使用本地 Trust Store。
+启用 S3/WORM 配置后可将报告归档。离线验签使用 `dtsctl verify-report`，公钥轮换场景建议使用本地 Trust Store。
 
 ## 10. CLI 示例
 
 ```bash
-export QMIGRATION_SERVER=http://127.0.0.1:8080
-export QMIGRATION_API_TOKEN='viewer-or-operator-token'
+export DTS_SERVER=http://127.0.0.1:8080
+export DTS_API_TOKEN='viewer-or-operator-token'
 
-qmigrationctl health
-qmigrationctl datasources
-qmigrationctl migrations
-qmigrationctl migration MIGRATION_ID
-qmigrationctl start MIGRATION_ID
-qmigrationctl logs MIGRATION_ID
-qmigrationctl cdc MIGRATION_ID
+dtsctl health
+dtsctl datasources
+dtsctl migrations
+dtsctl migration MIGRATION_ID
+dtsctl start MIGRATION_ID
+dtsctl logs MIGRATION_ID
+dtsctl cdc MIGRATION_ID
 ```
 
 创建数据源或任务：
 
 ```bash
-qmigrationctl create-datasource datasource.json
-qmigrationctl create-migration migration.json
+dtsctl create-datasource datasource.json
+dtsctl create-migration migration.json
 ```
 
 报告离线验签：
 
 ```bash
-qmigrationctl verify-report --public-key public-key.json report-directory
+dtsctl verify-report --public-key public-key.json report-directory
 ```
 
 ## 11. 常见问题

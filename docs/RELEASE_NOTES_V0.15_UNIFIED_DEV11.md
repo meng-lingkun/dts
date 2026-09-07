@@ -1,12 +1,12 @@
-# QMigration V0.15.0-unified-dev11 Release Notes
+# DTS V0.15.0-unified-dev11 Release Notes
 
 ## Scope
 
-This snapshot continues the single QMigration Unified Engine. It does not add an external migration runtime. The main change is to advance the native Oracle connector from a post-ACCEPT TTC session skeleton to an executable, testable TTC negotiation and password-authentication wire path without falsely enabling Oracle Full/CDC capabilities.
+This snapshot continues the single DTS Unified Engine. It does not add an external migration runtime. The main change is to advance the native Oracle connector from a post-ACCEPT TTC session skeleton to an executable, testable TTC negotiation and password-authentication wire path without falsely enabling Oracle Full/CDC capabilities.
 
 ## Oracle Native TTC wire codecs
 
-- Added strict QMigration-owned TTC compact integer, fixed integer, CLR and key/value dictionary codecs.
+- Added strict DTS-owned TTC compact integer, fixed integer, CLR and key/value dictionary codecs.
 - Added TTC protocol negotiation on the live TNS/TCPS session and parsing of server protocol version, charset/ncharset, flags and compile/runtime capabilities.
 - Added TTC datatype negotiation with client/server capability intersection, timezone handling and the migration-relevant Oracle scalar/LOB representation table.
 - Malformed, truncated, over-sized or unterminated negotiation frames fail closed.
@@ -24,8 +24,8 @@ This snapshot continues the single QMigration Unified Engine. It does not add an
 Oracle deep probing is opt-in only:
 
 ```text
-QMIGRATION_EXPERIMENTAL_ORACLE_TTC_NEGOTIATION=1
-QMIGRATION_EXPERIMENTAL_ORACLE_TTC_AUTH=1
+DTS_EXPERIMENTAL_ORACLE_TTC_NEGOTIATION=1
+DTS_EXPERIMENTAL_ORACLE_TTC_AUTH=1
 ```
 
 Even with those gates enabled, the production Connector descriptor still exposes only `protocol-probe`. This version does **not** claim real-Oracle E2E qualification, native SQL Execute, Data Dictionary execution, Full Reader/Writer or Redo/LogMiner CDC.

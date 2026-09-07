@@ -1,4 +1,4 @@
-# QMigration V0.13.0 Release Notes
+# DTS V0.13.0 Release Notes
 
 ## UNIQUE NOT NULL Native Migration Key
 
@@ -15,4 +15,4 @@ V0.13 allows resumable Native full-load migration for tables without a primary k
 
 ### Safety
 
-Nullable or generated-column unique indexes are never used as Native resume keys. Tables with no safe primary/unique key remain external-engine workloads; QMigration does not fall back to OFFSET-based pseudo-checkpointing.
+Nullable or generated-column unique indexes are never used as Native resume keys. Tables with no safe primary/unique key remain external-engine workloads; DTS does not fall back to OFFSET-based pseudo-checkpointing.

@@ -2,7 +2,7 @@
 
 ## Scope
 
-RC4 adds QMigration-owned OceanBase MySQL source CDC by combining the existing
+RC4 adds DTS-owned OceanBase MySQL source CDC by combining the existing
 native MySQL Binlog V4/GTID decoder with an explicit OceanBase Binlog Service
 subscription endpoint routed through ODP.
 
@@ -16,7 +16,7 @@ cdc_url=obbinlog://odp1:2883?fallback=odp2:2883
         -> tenant ODP -> OceanBase Binlog Service -> MySQL Binlog V4/GTID
 ```
 
-Do **not** put credentials in `cdc_url`; QMigration reuses the encrypted tenant
+Do **not** put credentials in `cdc_url`; DTS reuses the encrypted tenant
 datasource credential. `obbinlogs://` forces TLS for the CDC path and may carry a
 non-secret shared certificate name using `server_name=`.
 
@@ -34,7 +34,7 @@ listener and must not be assumed to be the tenant subscription endpoint.
 - Format Description / Previous GTIDs / Rotate / GTID / Query / Table Map.
 - MySQL-native DDL Query events emitted by OceanBase Binlog Service.
 - GTID preferred durable restart; file/position fallback.
-- apply-before-ACK via QMigration Unified CDC Runtime.
+- apply-before-ACK via DTS Unified CDC Runtime.
 - reconnect from the last acknowledged durable position.
 - up to 8 ODP subscription endpoints (primary + 7 fallbacks).
 - plaintext `obbinlog://` or TLS `obbinlogs://`.
@@ -97,10 +97,10 @@ Retain evidence for every claimed OceanBase/Binlog/ODP combination:
 ## Fail-closed boundaries
 
 - Missing/invalid `cdc_url` prevents CDC planning/precheck.
-- QMigration never guesses the Binlog Service subscription address from the SQL endpoint.
+- DTS never guesses the Binlog Service subscription address from the SQL endpoint.
 - Credentials embedded in `cdc_url` are rejected.
 - If all configured ODP endpoints are unavailable, the reader stops at the last durable checkpoint.
-- Unsupported row/event types fail before QMigration advances the source checkpoint.
+- Unsupported row/event types fail before DTS advances the source checkpoint.
 - OceanBase-only MySQL-incompatible data types must be qualified explicitly before production CDC.
 
 ## Exit criteria for removing EXPERIMENTAL maturity

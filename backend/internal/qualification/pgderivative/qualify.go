@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"qmigration/backend/internal/connector"
-	postgresconnector "qmigration/backend/internal/connector/postgres"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/connector"
+	postgresconnector "dts/backend/internal/connector/postgres"
+	"dts/backend/internal/domain"
 )
 
 const ToolVersion = "0.15.0-rc27"
@@ -130,9 +130,9 @@ func Run(product domain.DataSourceType, args []string) int {
 		fmt.Fprintln(os.Stderr, e)
 		return 2
 	}
-	gate := "QMIGRATION_EXPERIMENTAL_OPENGAUSS_LOGICAL_CDC"
+	gate := "DTS_EXPERIMENTAL_OPENGAUSS_LOGICAL_CDC"
 	if product == domain.DataSourceKingbase {
-		gate = "QMIGRATION_EXPERIMENTAL_KINGBASE_LOGICAL_CDC"
+		gate = "DTS_EXPERIMENTAL_KINGBASE_LOGICAL_CDC"
 	}
 	if *cdc {
 		_ = os.Setenv(gate, "1")
@@ -207,7 +207,7 @@ func Run(product domain.DataSourceType, args []string) int {
 	} else {
 		r.skip("cdc-table-selection", "--table not supplied")
 	}
-	slot := fmt.Sprintf("qmigration_q_%d", time.Now().UnixNano())
+	slot := fmt.Sprintf("dts_q_%d", time.Now().UnixNano())
 	var resource string
 	slotOK := r.run("cdc-slot", func() (string, map[string]any, error) {
 		p, e := cs.CreateCDCCheckpoint(ctx, slot)
@@ -239,7 +239,7 @@ func Run(product domain.DataSourceType, args []string) int {
 		if strings.TrimSpace(*table) == "" {
 			r.skip("cdc-publication", "--table not supplied")
 		} else {
-			pub := fmt.Sprintf("qmigration_qpub_%d", time.Now().UnixNano())
+			pub := fmt.Sprintf("dts_qpub_%d", time.Now().UnixNano())
 			ok := r.run("cdc-publication", func() (string, map[string]any, error) {
 				e := pg.EnsurePublication(ctx, pub, []string{ds.Schema + "." + strings.TrimSpace(*table)})
 				return "temporary Kingbase kboutput publication created", map[string]any{"publication": pub}, e

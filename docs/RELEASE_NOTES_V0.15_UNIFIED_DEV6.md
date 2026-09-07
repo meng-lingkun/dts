@@ -1,13 +1,13 @@
-# QMigration V0.15.0-unified-dev6 Release Notes
+# DTS V0.15.0-unified-dev6 Release Notes
 
 ## Theme
 
-**Durable CDC staging during Full Snapshot.** QMigration now owns the long-running Snapshot+CDC bridge instead of relying on source log retention for the complete snapshot duration.
+**Durable CDC staging during Full Snapshot.** DTS now owns the long-running Snapshot+CDC bridge instead of relying on source log retention for the complete snapshot duration.
 
 ## Durable CDC Spool
 
 ```text
-Source CDC -> QMigration transaction -> compress -> encrypt -> durable spool -> source ACK
+Source CDC -> DTS transaction -> compress -> encrypt -> durable spool -> source ACK
                                                            |
 Full Snapshot ---------------------------------------------+
                                                            ↓
@@ -28,13 +28,13 @@ Full Snapshot ---------------------------------------------+
 
 ## Capacity / Operations
 
-- `QMIGRATION_CDC_SPOOL_MAX_TRANSACTION_BYTES` — default `16777216` (16 MiB).
-- `QMIGRATION_CDC_SPOOL_MAX_PENDING_BYTES` — default `68719476736` (64 GiB).
-- `QMIGRATION_CDC_SPOOL_DRAIN_PER_REQUEST` — default `1000`.
-- `QMIGRATION_CDC_SPOOL_KEEP_APPLIED` — default `1000`.
-- `QMIGRATION_VALIDATION_MAX_CDC_LAG_MS` — default `5000`.
+- `DTS_CDC_SPOOL_MAX_TRANSACTION_BYTES` — default `16777216` (16 MiB).
+- `DTS_CDC_SPOOL_MAX_PENDING_BYTES` — default `68719476736` (64 GiB).
+- `DTS_CDC_SPOOL_DRAIN_PER_REQUEST` — default `1000`.
+- `DTS_CDC_SPOOL_KEEP_APPLIED` — default `1000`.
+- `DTS_VALIDATION_MAX_CDC_LAG_MS` — default `5000`.
 
-If a spool capacity limit would be exceeded, QMigration fails the staging request and **does not ACK the source position**.
+If a spool capacity limit would be exceeded, DTS fails the staging request and **does not ACK the source position**.
 
 ## Lifecycle correction
 

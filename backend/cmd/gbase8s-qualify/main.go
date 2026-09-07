@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"qmigration/backend/internal/cdc/gbase8scdc"
-	"qmigration/backend/internal/connector"
-	gbase8sconnector "qmigration/backend/internal/connector/gbase8s"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/cdc/gbase8scdc"
+	"dts/backend/internal/connector"
+	gbase8sconnector "dts/backend/internal/connector/gbase8s"
+	"dts/backend/internal/domain"
 )
 
 const toolVersion = "0.15.0-rc49"
@@ -113,14 +113,14 @@ func main() {
 	if strings.TrimSpace(*schema) == "" {
 		*schema = strings.TrimSpace(*user)
 	}
-	_ = os.Setenv("QMIGRATION_EXPERIMENTAL_GBASE8S_NATIVE", "1")
+	_ = os.Setenv("DTS_EXPERIMENTAL_GBASE8S_NATIVE", "1")
 	if *cdcSmartLOB {
 		*cdc = true
 	}
 	if *cdc {
-		_ = os.Setenv("QMIGRATION_EXPERIMENTAL_GBASE8S_CDC", "1")
+		_ = os.Setenv("DTS_EXPERIMENTAL_GBASE8S_CDC", "1")
 		if *cdcSmartLOB {
-			_ = os.Setenv("QMIGRATION_EXPERIMENTAL_GBASE8S_SMART_LOB_CDC", "1")
+			_ = os.Setenv("DTS_EXPERIMENTAL_GBASE8S_SMART_LOB_CDC", "1")
 		}
 		if strings.TrimSpace(*cdcURL) == "" || strings.TrimSpace(*table) == "" {
 			fmt.Fprintln(os.Stderr, "--cdc requires --table and --cdc-url (or GBASE8S_CDC_URL)")
@@ -147,7 +147,7 @@ func main() {
 		Target: map[string]any{
 			"host": ds.Host, "port": ds.Port, "user": ds.Username, "database": ds.Database, "schema": ds.Schema,
 			"product_family": "GBase 8s V8.8", "driver": ds.DriverClass,
-			"odbc_dsn_configured": true, "provider_plugin_configured": strings.TrimSpace(os.Getenv("QMIGRATION_GBASE8S_DRIVER_PLUGIN")) != "", "cdc_provider_configured": strings.TrimSpace(*cdcURL) != "",
+			"odbc_dsn_configured": true, "provider_plugin_configured": strings.TrimSpace(os.Getenv("DTS_GBASE8S_DRIVER_PLUGIN")) != "", "cdc_provider_configured": strings.TrimSpace(*cdcURL) != "",
 		},
 		Descriptor: factory.Capabilities(domain.DataSourceGBase8s),
 	}
@@ -227,7 +227,7 @@ func main() {
 		rr.skip("source-cdc", "--cdc not requested")
 	} else {
 		rr.run("cdc-agent", func() (string, map[string]any, error) {
-			client, err := gbase8scdc.NewClient(strings.TrimSpace(*cdcURL), os.Getenv("QMIGRATION_GBASE8S_CDC_CA_PEM"), os.Getenv("QMIGRATION_GBASE8S_CDC_SERVER_NAME"), os.Getenv("QMIGRATION_GBASE8S_CDC_TOKEN"))
+			client, err := gbase8scdc.NewClient(strings.TrimSpace(*cdcURL), os.Getenv("DTS_GBASE8S_CDC_CA_PEM"), os.Getenv("DTS_GBASE8S_CDC_SERVER_NAME"), os.Getenv("DTS_GBASE8S_CDC_TOKEN"))
 			if err != nil {
 				return "", nil, err
 			}
@@ -238,7 +238,7 @@ func main() {
 			return "CDC agent/provider health succeeded", map[string]any{"api_version": info.APIVersion, "provider_kind": info.Provider.Kind, "provider_abi": info.Provider.ABIVersion, "sha256_pinned": info.Provider.SHA256Pinned}, nil
 		})
 		rr.run("cdc-agent-status", func() (string, map[string]any, error) {
-			client, err := gbase8scdc.NewClient(strings.TrimSpace(*cdcURL), os.Getenv("QMIGRATION_GBASE8S_CDC_CA_PEM"), os.Getenv("QMIGRATION_GBASE8S_CDC_SERVER_NAME"), os.Getenv("QMIGRATION_GBASE8S_CDC_TOKEN"))
+			client, err := gbase8scdc.NewClient(strings.TrimSpace(*cdcURL), os.Getenv("DTS_GBASE8S_CDC_CA_PEM"), os.Getenv("DTS_GBASE8S_CDC_SERVER_NAME"), os.Getenv("DTS_GBASE8S_CDC_TOKEN"))
 			if err != nil {
 				return "", nil, err
 			}
@@ -286,7 +286,7 @@ func main() {
 				if err != nil {
 					return "", nil, err
 				}
-				client, err := gbase8scdc.NewClient(strings.TrimSpace(*cdcURL), os.Getenv("QMIGRATION_GBASE8S_CDC_CA_PEM"), os.Getenv("QMIGRATION_GBASE8S_CDC_SERVER_NAME"), os.Getenv("QMIGRATION_GBASE8S_CDC_TOKEN"))
+				client, err := gbase8scdc.NewClient(strings.TrimSpace(*cdcURL), os.Getenv("DTS_GBASE8S_CDC_CA_PEM"), os.Getenv("DTS_GBASE8S_CDC_SERVER_NAME"), os.Getenv("DTS_GBASE8S_CDC_TOKEN"))
 				if err != nil {
 					return "", nil, err
 				}
@@ -307,7 +307,7 @@ func main() {
 	} else {
 		c := raw.(*gbase8sconnector.Connector)
 		rr.run("target-write", func() (string, map[string]any, error) {
-			name := fmt.Sprintf("qmigration_q_%x", uint64(time.Now().UnixNano()))
+			name := fmt.Sprintf("dts_q_%x", uint64(time.Now().UnixNano()))
 			cols := []domain.ColumnInfo{
 				{Name: "id", DataType: "bigint", ColumnType: "BIGINT", Nullable: false},
 				{Name: "txt", DataType: "varchar", ColumnType: "VARCHAR(200)", Nullable: true},

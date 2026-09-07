@@ -2,10 +2,10 @@
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-BIN=${QMIGRATION_ORACLE_QUALIFY_BIN:-"$ROOT/bin/qmigration-oracle-qualify"}
+BIN=${DTS_ORACLE_QUALIFY_BIN:-"$ROOT/bin/dts-oracle-qualify"}
 
 if [[ ! -x "$BIN" ]]; then
-  echo "building qmigration-oracle-qualify" >&2
+  echo "building dts-oracle-qualify" >&2
   (cd "$ROOT/backend" && go build -o "$BIN" ./cmd/oracle-qualify)
 fi
 

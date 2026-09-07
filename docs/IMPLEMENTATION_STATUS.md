@@ -3,7 +3,7 @@
 - DONE: multi-public-key offline Trust Store with ACTIVE / RETIRED / REVOKED state.
 - DONE: signed Ed25519 key-transition certificates preserve historical validation while establishing a new signing key.
 - DONE: signed key-revocation certificates fail closed for revoked report signers.
-- DONE: `qmigrationctl verify-report --trust-store` validates full transition path plus artifact/manifest proof.
+- DONE: `dtsctl verify-report --trust-store` validates full transition path plus artifact/manifest proof.
 - DONE: atomic local Trust Store persistence; failed last-active-key revocation cannot corrupt state.
 - FAIL-SAFE: a transitioned key cannot validate a report whose signed generated_at predates the transition.
 - SECURITY BOUNDARY: a compromised retired private key can backdate a signed report; WORM/external trusted timestamping remains required for compromise-safe historical time.
@@ -17,7 +17,7 @@
 
 - DONE: optional Ed25519 public signing of JSON/HTML/PDF artifacts and canonical manifest payload.
 - DONE: public-key JSON export with key ID and SHA-256 fingerprint; signing private key never leaves server configuration.
-- DONE: fully offline `qmigrationctl verify-report`, including optional externally pinned trust key.
+- DONE: fully offline `dtsctl verify-report`, including optional externally pinned trust key.
 - DONE: immutable external validation-report archive registry survives Memory/PostgreSQL plus Secure/file/S3 decorators.
 - FAIL-SAFE: artifact/signature/hash/evidence/READY mismatch and archive registry mutation conflict are rejected.
 - QUALIFICATION REQUIRED: real customer key rotation and retained AWS/MinIO Object-Lock/WORM lifecycle tests.
@@ -75,7 +75,7 @@
 ## V0.15.0-rc38
 
 - DONE: DEGRADED -> HEALTHY recovery requires consecutive good samples plus a configurable minimum degraded dwell.
-- DONE: recovery concurrency ramps from degraded cap toward `QMIGRATION_TOPOLOGY_RECOVERY_MAX_CONCURRENCY` before HEALTHY is restored.
+- DONE: recovery concurrency ramps from degraded cap toward `DTS_TOPOLOGY_RECOVERY_MAX_CONCURRENCY` before HEALTHY is restored.
 - DONE: bad recovery samples reset good-streak and collapse the recovery cap to the conservative degraded value.
 - DONE: PostgreSQL ClaimChunk, in-memory scheduling, running-chunk shedding and cooperative throttling share the same effective topology cap.
 - DONE: successful HALF_OPEN probes can recover despite historical P99 outliers; current-sample evidence drives recovery while rolling P99 remains a degradation signal.
@@ -85,7 +85,7 @@
 
 ## V0.15.0-rc37
 
-- DONE: already-running DEGRADED topology work converges to `QMIGRATION_TOPOLOGY_DEGRADED_MAX_CONCURRENCY` at durable cursors.
+- DONE: already-running DEGRADED topology work converges to `DTS_TOPOLOGY_DEGRADED_MAX_CONCURRENCY` at durable cursors.
 - DONE: deterministic oldest-first survivor set prevents all concurrent workers from yielding simultaneously.
 - DONE: surviving DEGRADED work receives cooperative batch/pause/byte-budget throttling.
 - DONE: `adaptive_topology_degraded_yields` API/WebSocket/Web/Prometheus telemetry.
@@ -108,7 +108,7 @@
 - DONE: P95/P99 tail-adjusted SLA ETA/risk telemetry.
 - Connector maturity unchanged.
 
-# QMigration Implementation Status
+# DTS Implementation Status
 
 ## V0.15.0-rc40
 
@@ -130,7 +130,7 @@
 - [x] operator COMMITTED decision advances checkpoint only; subsequent source redelivery is duplicate-suppressed
 - [x] child-process SIGKILL after durable spool persist / before source ACK
 - [x] restart/source redelivery retains one durable spool transaction
-- [x] `qmigration-chaos-qualify` now 10/10 scenarios
+- [x] `dts-chaos-qualify` now 10/10 scenarios
 - [ ] external TCP proxy response-drop at a real vendor target COMMIT boundary remains retained qualification work
 
 ### Predictive 10–40 TB Full+CDC flow control
@@ -159,14 +159,14 @@
 
 - [x] Agent API v4 and native C provider ABI v4 make the RC28 image contract mandatory
 - [x] selected BLOB/CLOB columns are explicitly tagged in the provider table-selection contract
-- [x] optional `QMIGRATION_EXPERIMENTAL_GBASE8S_SMART_LOB_CDC=1` gate; ordinary GBase 8s CDC remains separately gated
+- [x] optional `DTS_EXPERIMENTAL_GBASE8S_SMART_LOB_CDC=1` gate; ordinary GBase 8s CDC remains separately gated
 - [x] checkpoint/read responses for selected smart LOBs must declare `cdc-event-owned-lob-v1`
 - [x] every non-NULL BLOB/CLOB image requires column/kind/byte-length/SHA-256/acquisition proof
 - [x] BLOB values remain byte-exact base64; CLOB proof hashes the exact transported UTF-8 bytes
 - [x] proof kind/column/hash/length/acquisition/NULL semantics are validated before target apply
 - [x] current-row SQL SELECT fallback is explicitly rejected because it cannot prove the historical CDC event image
 - [x] INSERT/DELETE/UPDATE-before/UPDATE-after all use the same proof validator
-- [x] `qmigration-gbase8s-qualify --cdc-smart-lob` verifies the provider declares the event-owned image contract
+- [x] `dts-gbase8s-qualify --cdc-smart-lob` verifies the provider declares the event-owned image contract
 - [ ] retained real GBase 8s V8.8 CSDK locator/stream qualification must prove historical bytes under CDC lag and later-row updates
 - [ ] smart LOB values above the configured provider/read response bounds remain fail-closed; unbounded chunk streaming is future work
 - [ ] TEXT/BYTE/opaque/collection/UDT source CDC remains outside this contract
@@ -174,26 +174,26 @@
 ### Target COMMIT outcome uncertainty guard
 
 - [x] any transactional target `CommitCDCTransaction` error is treated as an unknown outcome rather than an ordinary retryable apply failure
-- [x] QMigration never issues an automatic rollback after a COMMIT response error because the target may already have committed
+- [x] DTS never issues an automatic rollback after a COMMIT response error because the target may already have committed
 - [x] durable CDC DLQ status `COMMIT_UNCERTAIN` blocks later CDC in the same task/direction
 - [x] automatic DLQ replay is forbidden while commit outcome is uncertain
 - [x] operator `COMMITTED` resolution advances the retained source checkpoint without replaying target DML
 - [x] operator `NOT_COMMITTED` resolution reopens the retained item and immediately executes one explicit replay, resolving it only on success
 - [x] `POST /api/v1/migrations/{id}/cdc/dlq/{dlq_id}/resolve-commit` and Web UI resolution actions
-- [x] Prometheus `qmigration_cdc_commit_uncertain` gauge
-- [x] `qmigration-chaos-qualify` covers both COMMITTED and NOT_COMMITTED target-commit-unknown decisions; neither permits duplicate target writes
+- [x] Prometheus `dts_cdc_commit_uncertain` gauge
+- [x] `dts-chaos-qualify` covers both COMMITTED and NOT_COMMITTED target-commit-unknown decisions; neither permits duplicate target writes
 - [x] durable pre-COMMIT ambiguity fence retains the exact transaction before target COMMIT and is cleared only after durable checkpoint
 - [x] process failure after target COMMIT but before checkpoint restarts blocked instead of blindly replaying target DML
 - [x] historical durable-spool COMMIT uncertainty is attached to the actual failed spool transaction rather than a newer live request
 - [x] failed NOT_COMMITTED controlled replay remains `REPLAY_REQUIRED` and blocks later source flow until explicit replay succeeds
-- [x] `qmigration-chaos-qualify` covers eight deterministic durability/recovery windows
+- [x] `dts-chaos-qualify` covers eight deterministic durability/recovery windows
 - [ ] external proxy/network process-kill qualification at the target COMMIT response boundary remains future soak work
 
 ## V0.15.0-rc27
 
 ### GBase 8a target CDC apply (non-transactional)
 
-- [x] explicit `QMIGRATION_EXPERIMENTAL_GBASE8A_TARGET_CDC` gate
+- [x] explicit `DTS_EXPERIMENTAL_GBASE8A_TARGET_CDC` gate
 - [x] advertise target `cdc-apply` + `point-lookup` only under the gate
 - [x] INSERT/UPDATE reuse validated HASH staging+MERGE idempotent path
 - [x] stable-key DELETE + LAST_WRITE_WINS point lookup
@@ -213,7 +213,7 @@
 - [x] persisted-spool-before-ACK retry reuses one durable spool record
 - [x] apply-before-spool-mark retry uses checkpoint duplicate suppression and avoids a second target write
 - [x] checkpoint-before-source-ACK retry is detected as duplicate
-- [x] `qmigration-chaos-qualify` standalone JSON self-test
+- [x] `dts-chaos-qualify` standalone JSON self-test
 - [x] `deployments/scripts/qualify-chaos.sh` wrapper
 - [ ] external process kill / network partition / disk-full multi-hour soak remains qualification work
 
@@ -224,11 +224,11 @@
 - [x] openGauss dedicated `OPENGAUSS_LSN` checkpoint and `mppdb_decoding` SQL logical reader
 - [x] openGauss complete BEGIN/COMMIT/XID transaction assembly, selected-table filter and apply-before-slot-advance ACK
 - [x] openGauss PK/replication/slot/sender/SSL prechecks and fail-closed binary/partial transaction handling
-- [x] `qmigration-opengauss-cdc` + `qmigration-opengauss-qualify`
+- [x] `dts-opengauss-cdc` + `dts-opengauss-qualify`
 - [x] Kingbase dedicated `KINGBASE_LSN` checkpoint using `sys_current_wal_lsn()`
 - [x] Kingbase `sys_create_logical_replication_slot(...,'kboutput')`, `sys_drop_replication_slot`, `sys_replication_slots` and `sys_publication` integration
 - [x] Kingbase managed stream keeps a distinct `kingbase:` event namespace and rejects a slot whose output plugin is not `kboutput`
-- [x] strict Kingbase `kboutput` decoder dialect and `qmigration-kingbase-qualify` qualification entry point
+- [x] strict Kingbase `kboutput` decoder dialect and `dts-kingbase-qualify` qualification entry point
 - [x] openGauss/Kingbase CDC remains behind independent experimental gates; Full Load remains available without the gates
 - [ ] retained openGauss version/topology/SSL/restart/failover qualification
 - [ ] retained Kingbase `kboutput` wire-conformance/version/restart/failover qualification
@@ -259,7 +259,7 @@
 - [x] connector SPI adds `validation-snapshot` exact historical read capability
 - [x] TiDB implements an independent `SESSION tidb_snapshot=<TIDB_TSO>` validation connection
 - [x] TiDB snapshot session verifies `@@tidb_snapshot` before validation reads
-- [x] `QMIGRATION_VALIDATION_REQUIRE_EXACT_WATERMARK=1` fails closed for connectors without exact snapshot support
+- [x] `DTS_VALIDATION_REQUIRE_EXACT_WATERMARK=1` fails closed for connectors without exact snapshot support
 - [x] Oracle `ORACLE_SCN` and Dameng `DM_LSN` exact historical snapshots
 - [ ] exact historical snapshots for remaining GTID/LSN/LRI families
 
@@ -267,7 +267,7 @@
 ### Oracle/DM exact validation + DM8 archived-log CDC
 
 - [x] Oracle LogMiner capability advertises `validation-snapshot` and validates `ORACLE_SCN` with read-only `AS OF SCN` source reads
-- [x] Dameng adds separate `QMIGRATION_EXPERIMENTAL_DAMENG_LOG_CDC` gate
+- [x] Dameng adds separate `DTS_EXPERIMENTAL_DAMENG_LOG_CDC` gate
 - [x] Dameng `DM_LSN` captures the newest fully archived LogMiner-safe position
 - [x] continuous local archive coverage is checked before a DBMS_LOGMNR read window
 - [x] COMMIT/XA_COMMIT `START_SCN` rewinds LogMiner for long transactions that began before the durable checkpoint
@@ -275,9 +275,9 @@
 - [x] complete DM before/after rows are reconstructed with `AS OF SCN commit-1/commit`; SQL_REDO literals are not parsed into row data
 - [x] repeated UPDATEs are coalesced to transaction net effect; INSERT->DELETE emits checkpoint-only progress
 - [x] selected DDL/BATCH_UPDATE/UNSUPPORTED, missing ROWID/PK, archive gaps and unavailable flashback history fail before checkpoint advancement
-- [x] `qmigration-dameng-cdc` Reader/Unified Engine integration uses apply-before-ACK `DM_LSN` checkpoints
+- [x] `dts-dameng-cdc` Reader/Unified Engine integration uses apply-before-ACK `DM_LSN` checkpoints
 - [x] Dameng implements exact `DM_LSN` validation snapshots and read-only enforcement
-- [x] `qmigration-dameng-qualify --cdc` checks LogMiner prerequisites, archived position, PK selection and exact flashback snapshot
+- [x] `dts-dameng-qualify --cdc` checks LogMiner prerequisites, archived position, PK selection and exact flashback snapshot
 - [ ] retained real DM8 version/topology/archive-switch/UNDO/LOB/restart qualification; MPP/DPC-specific semantics are not promoted
 
 - [x] same-`COMMIT_SCN` XIDs are aggregated before target apply so one durable `DM_LSN` cannot suppress another committed source transaction
@@ -321,7 +321,7 @@
 - [x] decode documented CDC_REC_TRUNCATE user-data/table identity into a first-class `CDCTruncate` event
 - [x] require TRUNCATE to have no row payload and to belong to an open transaction
 - [x] enforce GBase 8s source rule: no INSERT/DELETE/UPDATE/DISCARD/second TRUNCATE after TRUNCATE before COMMIT/ROLLBACK
-- [x] preserve preceding source DML + TRUNCATE in one QMigration transaction
+- [x] preserve preceding source DML + TRUNCATE in one DTS transaction
 - [x] add `TruncateTableConnector` target primitive rather than translating TRUNCATE through heterogeneous DDL strings
 - [x] GBase 8s target executes TRUNCATE only inside an active CDC transaction and commits immediately after the final event
 - [x] target apply rejects TRUNCATE when the target lacks transactional truncate support
@@ -355,7 +355,7 @@
 ### GBase 8s syscdcv1/CSDK source CDC
 
 - [x] separate source CDC from RC19 ODBC SQL transport; use a datasource-local CSDK smart-LOB provider
-- [x] bundled `qmigration-gbase8s-cdc-agent` HTTP/TLS/token wrapper + local provider plugin contract
+- [x] bundled `dts-gbase8s-cdc-agent` HTTP/TLS/token wrapper + local provider plugin contract
 - [x] selection-aware checkpoint captured before Full starts
 - [x] deterministic selected-table user-data IDs independent of mapping order
 - [x] `GBASE8S_CDC_SEQ` durable `restart=<open BEGIN>;commit=<applied COMMIT>` position
@@ -364,7 +364,7 @@
 - [x] 100,000 events / 128 MiB / 10,000 open transaction safety gates
 - [x] provider next-sequence monotonic continuation contract
 - [x] RC20 fail closed on TRUNCATE and smart BLOB/CLOB/complex source columns
-- [x] `qmigration-gbase8s-cdc`, provider agent, protocol docs and `--cdc` qualification flow
+- [x] `dts-gbase8s-cdc`, provider agent, protocol docs and `--cdc` qualification flow
 - [ ] retained real GBase 8s V8.8/CSDK syscdcv1 restart/long-transaction/failover qualification
 - [ ] vendor CSDK provider plugin real build in this environment
 
@@ -383,8 +383,8 @@
 - [x] stable-key prepared UPDATE -> existence -> INSERT replay path
 - [x] exact BLOB/binary database/sql binds
 - [x] point lookup/delete + explicit transactional target CDC Apply
-- [x] GBase 8s prechecks and `qmigration-gbase8s-qualify` workflow
-- [x] QMigration TLS PREFERRED/REQUIRED fail closed until CSDK SSL mapping is retained-qualified
+- [x] GBase 8s prechecks and `dts-gbase8s-qualify` workflow
+- [x] DTS TLS PREFERRED/REQUIRED fail closed until CSDK SSL mapping is retained-qualified
 - [x] source CDC remains unadvertised despite syscdcv1/full-row-logging facilities
 - [ ] retained GBase 8s V8.8/CSDK/unixODBC/charset/topology qualification
 - [ ] supported durable source CDC consume/checkpoint/ACK API qualification
@@ -429,16 +429,16 @@
 
 - [x] fix product scope to GBase 8a MPP Cluster; GBase 8s/8c are not implied
 - [x] replace GBase generic/external-JDBC placeholder with a distinct qualification-gated Connector Factory
-- [x] reuse QMigration native MySQL/GBase-compatible packet transport without inheriting MySQL Binlog CDC capability
+- [x] reuse DTS native MySQL/GBase-compatible packet transport without inheriting MySQL Binlog CDC capability
 - [x] information_schema Schema/Table/Column/PK/Index metadata
 - [x] numeric/composite stable-key Full Read and ordered NTILE keyset boundaries
 - [x] GBase-specific type conversion and `ENGINE=EXPRESS` target creation
 - [x] auto-created target deliberately uses random distribution instead of guessing HASH/REPLICATED placement
 - [x] keyless GBase target Full Write fails closed
 - [x] keyed target Full Write uses per-batch staging table + GBase MERGE instead of MySQL ON DUPLICATE KEY
-- [x] AUTO_INCREMENT is not copied onto auto-created target because QMigration writes explicit source values
+- [x] AUTO_INCREMENT is not copied onto auto-created target because DTS writes explicit source values
 - [x] GBase source CDC, target transactional CDC apply, FK replay and post-load schema capabilities are not advertised
-- [x] `qmigration-gbase-qualify` + `deployments/scripts/qualify-gbase.sh`
+- [x] `dts-gbase-qualify` + `deployments/scripts/qualify-gbase.sh`
 - [ ] retained GBase 8a real-instance version/topology/charset/auth/TLS qualification
 - [ ] retained long-running Full/restart and staging+MERGE failure-window qualification
 - [ ] production HASH/REPLICATED target layout qualification
@@ -460,7 +460,7 @@
 - [x] merge DDL-only and DML-only source transactions back into commit order before target apply
 - [x] DDL-only ACK uses text `pg_logical_slot_get_changes`; DML ACK remains byte-safe binary `get_binary_changes`
 - [x] reject a decoded transaction containing both DDL and DML
-- [x] require explicit worker policy `QMIGRATION_GAUSSDB_DDL_ONLY_TRANSACTIONS=1` because GaussDB itself can omit DML after DDL in hybrid transactions
+- [x] require explicit worker policy `DTS_GAUSSDB_DDL_ONLY_TRANSACTIONS=1` because GaussDB itself can omit DML after DDL in hybrid transactions
 - [x] require source `enable_logical_replication_ddl=on` when DDL replay is requested
 - [x] safe replay subset is limited to selected-table `ALTER TABLE`, `TRUNCATE`, and `CREATE [UNIQUE] INDEX`
 - [x] reject multi-statement DDL, CONCURRENTLY, unselected-table DDL and unsupported object families
@@ -490,7 +490,7 @@
 - [x] embedded NUL/non-UTF8 values use byte-preserving base64 CDC fields
 - [x] PostgreSQL-compatible OID 17 `bytea` `\\x...` values restore exact bytes before CDC apply
 - [x] binary tables are no longer rejected solely because JSON logical decoding was unsafe
-- [x] `qmigration-gaussdb-qualify --cdc` executes the same temporary binary peek path used by the worker
+- [x] `dts-gaussdb-qualify --cdc` executes the same temporary binary peek path used by the worker
 - [x] `enable-ddl-decoding=false` remains explicit rather than silently mixing DDL and row events
 - [x] synthetic protocol tests cover INSERT/UPDATE/DELETE, NULL/empty, NUL/non-UTF8, bytea, malformed frames, XID/LSN mismatch and partial transactions
 - [x] full `go test ./...`, `go vet ./...` and GaussDB Connector race coverage
@@ -509,7 +509,7 @@
 
 ## V0.15.0-rc14
 
-### GaussDB QMigration data plane + SQL logical CDC
+### GaussDB DTS data plane + SQL logical CDC
 
 - [x] remove GaussDB from generic external-JDBC placeholder routing
 - [x] qualification-gated PostgreSQL-wire Metadata / Full Read / Full Write / target transactional CDC Apply
@@ -524,7 +524,7 @@
 - [x] 100,000 event / 128 MiB decoded-transaction bounds
 - [x] binary/NUL-sensitive JSON CDC families fail closed
 - [x] GaussDB logical-replication GUC and SYSADMIN/REPLICATION/gs_role_replication prechecks
-- [x] `qmigration-gaussdb-qualify` + `qualify-gaussdb.sh`
+- [x] `dts-gaussdb-qualify` + `qualify-gaussdb.sh`
 - [x] synthetic transaction/gate/query tests and Unified Engine render coverage
 - [ ] retained centralized/distributed GaussDB real-instance Full + CDC qualification
 - [ ] byte-safe binary CDC path
@@ -542,7 +542,7 @@
 
 ## V0.15.0-rc13
 
-### Dameng / DM8 QMigration data plane
+### Dameng / DM8 DTS data plane
 
 - [x] remove Dameng from generic external-JDBC placeholder routing
 - [x] qualification-gated Dameng Connector in Server and Worker
@@ -557,12 +557,12 @@
 - [x] Linux runtime DM database/sql provider plugin loading without vendoring proprietary driver source
 - [x] provider/driver absence produces an explicit qualification/precheck failure
 - [x] Dameng TLS PREFERRED/REQUIRED fail closed until provider-specific TLS properties are qualified
-- [x] `qmigration-dameng-qualify`, `qualify-dameng.sh` and provider plugin build helper
+- [x] `dts-dameng-qualify`, `qualify-dameng.sh` and provider plugin build helper
 - [x] synthetic connector tests plus full `go test ./...`, `go vet ./...` and race coverage
 - [ ] retained DM8 real-instance Full/target qualification reports
 - [ ] provider TLS qualification and secure DSN mapping
 - [ ] Dameng source CDC/log API implementation and retained qualification
-- [ ] remove `QMIGRATION_EXPERIMENTAL_DAMENG_NATIVE` only after exit criteria
+- [ ] remove `DTS_EXPERIMENTAL_DAMENG_NATIVE` only after exit criteria
 
 ### Remaining highest-priority connector gaps
 
@@ -585,7 +585,7 @@
 - [x] small VECTOR values use SQLDTA string parameters; large VECTOR strings reuse CLOB/EXTDTA
 - [x] Full Load and transactional CDC Apply reuse the same prepared VECTOR writer
 - [x] point lookup/readback continues through `VECTOR_SERIALIZE()` for representation consistency
-- [x] `qmigration-db2-qualify --target-vector` and `DB2_QUALIFY_TARGET_VECTOR=1` destructive real-instance workflow
+- [x] `dts-db2-qualify --target-vector` and `DB2_QUALIFY_TARGET_VECTOR=1` destructive real-instance workflow
 - [x] synthetic tests cover DDL, prepared constructor SQL, malformed metadata/value rejection and large-vector EXTDTA
 - [ ] retained Db2 12.1.2+ VECTOR target reports and 12.1.4+ source-CDC VECTOR reports
 - [ ] retained DB2 11.5 / 12.1 qualification for remaining row/log cases
@@ -698,7 +698,7 @@
 
 ### DB2 LUW Native DRDA/DDM + db2ReadLog CDC
 
-- [x] QMigration-owned pure-Go DRDA/DDM transport for Metadata / Full / target apply; no JDBC/Python runtime
+- [x] DTS-owned pure-Go DRDA/DDM transport for Metadata / Full / target apply; no JDBC/Python runtime
 - [x] EXCSAT / ACCSEC / SECCHK / ACCRDB session establishment
 - [x] SECMEC 9 encrypted credentials and fail-closed TLS rule for plaintext SECMEC 3
 - [x] direct TLS / CA / ServerName / optional mTLS
@@ -716,10 +716,10 @@
 - [x] exact packed DECIMAL target encoding with no-rounding fail-closed checks
 - [x] transactional target CDC Apply / delete / point lookup
 - [x] schema-object View/Sequence/Trigger/Routine discovery foundation
-- [x] `qmigration-db2-qualify` + `qualify-db2.sh`
-- [x] DB2 source CDC architecture uses QMigration Log Agent + IBM-supported `db2ReadLog` rather than SQL polling
-- [x] `qmigration-db2-log-agent` with HTTP/TLS and optional bearer token
-- [x] QMigration-owned native provider source; IBM SDK/libdb2 required only on Agent host
+- [x] `dts-db2-qualify` + `qualify-db2.sh`
+- [x] DB2 source CDC architecture uses DTS Log Agent + IBM-supported `db2ReadLog` rather than SQL polling
+- [x] `dts-db2-log-agent` with HTTP/TLS and optional bearer token
+- [x] DTS-owned native provider source; IBM SDK/libdb2 required only on Agent host
 - [x] durable `DB2_LRI` current-position/resume contract using `nextStartLRI`
 - [x] `DATA CAPTURE CHANGES`, recoverability and primary-key prechecks
 - [x] source-local Initialize Table descriptor bootstrap before captured migration LRI
@@ -739,7 +739,7 @@
 - [ ] lossless compensation/savepoint/undo net-effect reconstruction
 - [ ] pureScale multi-log-stream ordering/failover qualification
 - [ ] retained DB2 11.5 / 12.1 real-instance Full + CDC qualification reports
-- [ ] remove `QMIGRATION_EXPERIMENTAL_DB2_NATIVE` / `QMIGRATION_EXPERIMENTAL_DB2_LOG_CDC` only after exit criteria
+- [ ] remove `DTS_EXPERIMENTAL_DB2_NATIVE` / `DTS_EXPERIMENTAL_DB2_LOG_CDC` only after exit criteria
 
 ### Remaining highest-priority connector gaps
 
@@ -759,10 +759,10 @@
 - [x] current GTID/BINLOG capture through ODP `SHOW MASTER STATUS` / `SHOW BINARY LOG STATUS`
 - [x] `SHOW BINARY LOGS` readiness/precheck and common 2983 management-port warning
 - [x] Unified Engine `native-oceanbase-binlog` adapter
-- [x] QMigration native MySQL Binlog V4/GTID decoder reuse for OceanBase Binlog Service
+- [x] DTS native MySQL Binlog V4/GTID decoder reuse for OceanBase Binlog Service
 - [x] target apply + durable checkpoint before local reader ACK/reconnect state advance
 - [x] Worker failover always resumes from last acknowledged GTID/file-position
-- [x] `qmigration-oceanbase-qualify` + `qualify-oceanbase.sh` structured qualification workflow
+- [x] `dts-oceanbase-qualify` + `qualify-oceanbase.sh` structured qualification workflow
 - [x] Web datasource editor enables OceanBase Binlog/ODP `cdc_url`
 - [ ] real OceanBase/Binlog Service/ODP version + GTID retention + failover qualification matrix
 - [ ] remove EXPERIMENTAL maturity only after retained qualification reports
@@ -781,20 +781,20 @@
 - [x] explicit datasource `cdc_url` separates TiDB SQL and TiCDC/Kafka endpoints
 - [x] TiCDC OpenAPI v2 health + deterministic changefeed create/reuse/resume/delete
 - [x] Kafka Canal-JSON sink with TiDB extension and one-partition ordering requirement
-- [x] QMigration-owned pure-Go Kafka metadata/fetch consumer
+- [x] DTS-owned pure-Go Kafka metadata/fetch consumer
 - [x] Canal-JSON INSERT/UPDATE/DELETE/DDL/WATERMARK decoding
 - [x] UPDATE `old` expansion to complete before-image
 - [x] binary MySQL families restored from Canal Latin-1 representation to byte-preserving CDC fields
 - [x] current TiDB TSO capture before Full Load
 - [x] changefeed creation before Full Load readiness gate
 - [x] durable `TIDB_TSO` position with `tso=<TSO>;kafka=<nextOffset>`
-- [x] consecutive same-`commitTs` rows assembled as one QMigration target transaction
+- [x] consecutive same-`commitTs` rows assembled as one DTS target transaction
 - [x] 100,000 event / 128 MiB transaction fail-closed bounds, including first record
 - [x] durable duplicate suppression after restart
 - [x] fail closed when non-zero durable Kafka offset exists but deterministic changefeed is missing
-- [x] QMigration target apply + durable checkpoint before reader ACK
-- [x] `qmigration-tidb-cdc` Worker/Planner integration
-- [x] `qmigration-tidb-qualify` + `qualify-tidb.sh` qualification workflow
+- [x] DTS target apply + durable checkpoint before reader ACK
+- [x] `dts-tidb-cdc` Worker/Planner integration
+- [x] `dts-tidb-qualify` + `qualify-tidb.sh` qualification workflow
 - [x] MySQL Native Binlog CDC datasource TLS/CA/ServerName/mTLS propagation carried forward
 - [ ] real TiDB/TiCDC/Kafka version + failure/restart/GC qualification matrix
 - [ ] Kafka TLS/SASL transport
@@ -829,7 +829,7 @@
 - [x] IDENTITY seed/increment discovery and target `IDENTITY(seed,increment)` restoration
 - [x] Full Writer / CDC Apply `IDENTITY_INSERT` lifecycle with fail-safe session discard on cleanup failure
 - [x] same-family SQL Server schema-object/DDL policy path
-- [x] `qmigration-sqlserver-qualify` structured PASS / FAIL / SKIP real-instance qualification binary
+- [x] `dts-sqlserver-qualify` structured PASS / FAIL / SKIP real-instance qualification binary
 - [x] qualification covers TDS login, metadata, Full Read, partitions, runtime load, schema objects, optional CDC LSN/retention and optional target transaction/identity/large-value/index test
 - [x] `deployments/scripts/qualify-sqlserver.sh` one-command wrapper
 - [ ] retain real SQL Server release/encryption/Always On/CDC/LOB soak qualification reports before removing experimental gates
@@ -856,7 +856,7 @@ See `docs/SUPPORT_MATRIX_V0.15_RC2.md` and `docs/SQLSERVER_NATIVE_QUALIFICATION.
 
 ### Release qualification and diagnostics
 
-- [x] `qmigration-oracle-qualify` direct real-instance qualification binary
+- [x] `dts-oracle-qualify` direct real-instance qualification binary
 - [x] structured PASS / FAIL / SKIP JSON report without credential/private-key leakage
 - [x] read-only connection/version/NLS/metadata/full-read/partition/runtime/schema-object qualification
 - [x] optional LogMiner prerequisite + current-SCN qualification (`--cdc`)
@@ -889,7 +889,7 @@ See `docs/SUPPORT_MATRIX_V0.15_RC2.md` and `docs/SQLSERVER_NATIVE_QUALIFICATION.
 - [x] explicit target CDC begin/commit/rollback and CDC apply capability
 - [x] source Metadata / Full Reader / LOB / keyset / partition data plane from dev14 retained
 - [x] LogMiner / SCN CDC reader and shared durable apply-before-ACK runtime retained
-- [x] `QMIGRATION_EXPERIMENTAL_ORACLE_TARGET=1` target capability gate
+- [x] `DTS_EXPERIMENTAL_ORACLE_TARGET=1` target capability gate
 - [x] no DataX/SeaTunnel/Flink CDC/Debezium/Canal/JDBC/OCI migration runtime dependency
 - [x] full `go test ./...` and `go vet ./...`
 - [ ] real Oracle 11g/12c/19c/21c/23ai + NLS/TCPS/RAC qualification matrix
@@ -897,9 +897,9 @@ See `docs/SUPPORT_MATRIX_V0.15_RC2.md` and `docs/SQLSERVER_NATIVE_QUALIFICATION.
 
 ### Capability gates
 
-- `QMIGRATION_EXPERIMENTAL_ORACLE_NATIVE=1`: source Metadata/Full Reader/keyset/partition/runtime/schema-object/point-lookup/precheck.
-- `QMIGRATION_EXPERIMENTAL_ORACLE_TARGET=1`: additionally Full Writer/schema/post-load DDL/transactional CDC apply; requires native gate.
-- `QMIGRATION_EXPERIMENTAL_ORACLE_LOGMINER_CDC=1`: additionally SCN position + LogMiner CDC read; requires native gate.
+- `DTS_EXPERIMENTAL_ORACLE_NATIVE=1`: source Metadata/Full Reader/keyset/partition/runtime/schema-object/point-lookup/precheck.
+- `DTS_EXPERIMENTAL_ORACLE_TARGET=1`: additionally Full Writer/schema/post-load DDL/transactional CDC apply; requires native gate.
+- `DTS_EXPERIMENTAL_ORACLE_LOGMINER_CDC=1`: additionally SCN position + LogMiner CDC read; requires native gate.
 
 ### Deliberate policy boundaries
 
@@ -920,7 +920,7 @@ See `docs/SUPPORT_MATRIX_V0.15_RC2.md` and `docs/SQLSERVER_NATIVE_QUALIFICATION.
 - [x] Oracle 11g-compatible ordered outer-ROWNUM batching
 - [x] metadata discovery avoids unnecessary `V$PARAMETER` privilege dependency
 - [x] numeric qualification literals fail closed on malformed/injection-shaped input
-- [x] source-side capability gate (`QMIGRATION_EXPERIMENTAL_ORACLE_NATIVE=1`)
+- [x] source-side capability gate (`DTS_EXPERIMENTAL_ORACLE_NATIVE=1`)
 - [x] Oracle target write/schema/DDL capabilities remain hidden pending bind + large-LOB DML qualification
 - [ ] real Oracle 11g/12c/19c/21c/23ai E2E qualification
 - [ ] un-gated production Full Reader
@@ -928,7 +928,7 @@ See `docs/SUPPORT_MATRIX_V0.15_RC2.md` and `docs/SQLSERVER_NATIVE_QUALIFICATION.
 
 ### Oracle LogMiner / SCN CDC
 
-- [x] built-in `qmigration-oracle-cdc` binary and Worker/Unified Engine wiring
+- [x] built-in `dts-oracle-cdc` binary and Worker/Unified Engine wiring
 - [x] current SCN capture and bounded SCN polling windows
 - [x] selected-table LogMiner predicate
 - [x] committed transaction grouping by XID + commit SCN
@@ -938,15 +938,15 @@ See `docs/SUPPORT_MATRIX_V0.15_RC2.md` and `docs/SQLSERVER_NATIVE_QUALIFICATION.
 - [x] `RS_ID` / `SSN` / `CSF` continuation coalescing for long SQL_REDO/SQL_UNDO
 - [x] internal DDL filtering and `STATUS=0` user-DDL fail-safe
 - [x] Reader regression tests for bounded SCN windows and ACK ordering
-- [x] second gate `QMIGRATION_EXPERIMENTAL_ORACLE_LOGMINER_CDC=1`
+- [x] second gate `DTS_EXPERIMENTAL_ORACLE_LOGMINER_CDC=1`
 - [ ] real redo/archive-log retention gap qualification
 - [ ] Flashback/UNDO retention and row-movement soak qualification
 - [ ] production CDC gate removal
 
 ### Experimental controls
 
-- `QMIGRATION_EXPERIMENTAL_ORACLE_NATIVE=1`: enables source Metadata/Full Reader capabilities only.
-- `QMIGRATION_EXPERIMENTAL_ORACLE_LOGMINER_CDC=1`: additionally exposes Oracle SCN position + LogMiner CDC reader; requires the native gate.
+- `DTS_EXPERIMENTAL_ORACLE_NATIVE=1`: enables source Metadata/Full Reader capabilities only.
+- `DTS_EXPERIMENTAL_ORACLE_LOGMINER_CDC=1`: additionally exposes Oracle SCN position + LogMiner CDC reader; requires the native gate.
 - Oracle target `full-write` / schema create / DDL apply remain deliberately unadvertised in dev14.
 
 ## V0.15.0-unified-dev13
@@ -972,9 +972,9 @@ See `docs/SUPPORT_MATRIX_V0.15_RC2.md` and `docs/SQLSERVER_NATIVE_QUALIFICATION.
 
 ### Experimental controls
 
-- `QMIGRATION_EXPERIMENTAL_ORACLE_TTC_NEGOTIATION=1`: protocol + datatype deep probe.
-- `QMIGRATION_EXPERIMENTAL_ORACLE_TTC_AUTH=1`: negotiation + password authentication.
-- `QMIGRATION_EXPERIMENTAL_ORACLE_TTC_QUERY=1`: negotiation + authentication + bounded SELECT probe using the dev13 coalesced/fetch-capable dataset runtime.
+- `DTS_EXPERIMENTAL_ORACLE_TTC_NEGOTIATION=1`: protocol + datatype deep probe.
+- `DTS_EXPERIMENTAL_ORACLE_TTC_AUTH=1`: negotiation + password authentication.
+- `DTS_EXPERIMENTAL_ORACLE_TTC_QUERY=1`: negotiation + authentication + bounded SELECT probe using the dev13 coalesced/fetch-capable dataset runtime.
 
 ## V0.15.0-unified-dev12
 
@@ -986,7 +986,7 @@ See `docs/SUPPORT_MATRIX_V0.15_RC2.md` and `docs/SQLSERVER_NATIVE_QUALIFICATION.
 - [x] Oracle DATE decoding without inventing source timezone semantics
 - [x] RAW / LOB-locator / unsupported scalar values preserve bytes instead of lossy coercion
 - [x] bounded query probe limits for SQL size, fetch rows, describe columns, message count and row count
-- [x] `QMIGRATION_EXPERIMENTAL_ORACLE_TTC_QUERY=1` implies TTC authentication and validates `SELECT 1 AS QMIGRATION_PROBE FROM DUAL`
+- [x] `DTS_EXPERIMENTAL_ORACLE_TTC_QUERY=1` implies TTC authentication and validates `SELECT 1 AS DTS_PROBE FROM DUAL`
 - [x] Fake-TTC transcript covers OALL8 request -> describe -> row header -> row -> status
 - [x] production Connector capability remains `protocol-probe` only
 - [ ] qualification against real Oracle 11g/12c/19c/21c/23ai instances
@@ -998,9 +998,9 @@ See `docs/SUPPORT_MATRIX_V0.15_RC2.md` and `docs/SQLSERVER_NATIVE_QUALIFICATION.
 
 ### Experimental controls
 
-- `QMIGRATION_EXPERIMENTAL_ORACLE_TTC_NEGOTIATION=1`: protocol + datatype deep probe.
-- `QMIGRATION_EXPERIMENTAL_ORACLE_TTC_AUTH=1`: negotiation + password authentication.
-- `QMIGRATION_EXPERIMENTAL_ORACLE_TTC_QUERY=1`: negotiation + authentication + bounded SELECT probe; this is still a qualification switch, not a production metadata/full-read capability switch.
+- `DTS_EXPERIMENTAL_ORACLE_TTC_NEGOTIATION=1`: protocol + datatype deep probe.
+- `DTS_EXPERIMENTAL_ORACLE_TTC_AUTH=1`: negotiation + password authentication.
+- `DTS_EXPERIMENTAL_ORACLE_TTC_QUERY=1`: negotiation + authentication + bounded SELECT probe; this is still a qualification switch, not a production metadata/full-read capability switch.
 
 ## V0.15.0-unified-dev11
 
@@ -1022,8 +1022,8 @@ See `docs/SUPPORT_MATRIX_V0.15_RC2.md` and `docs/SQLSERVER_NATIVE_QUALIFICATION.
 
 ### Experimental controls
 
-- `QMIGRATION_EXPERIMENTAL_ORACLE_TTC_NEGOTIATION=1` enables protocol + datatype deep probing after TNS ACCEPT.
-- `QMIGRATION_EXPERIMENTAL_ORACLE_TTC_AUTH=1` additionally performs the password-auth wire flow. It remains a qualification tool, not a production Full/CDC capability switch.
+- `DTS_EXPERIMENTAL_ORACLE_TTC_NEGOTIATION=1` enables protocol + datatype deep probing after TNS ACCEPT.
+- `DTS_EXPERIMENTAL_ORACLE_TTC_AUTH=1` additionally performs the password-auth wire flow. It remains a qualification tool, not a production Full/CDC capability switch.
 
 ## V0.15.0-unified-dev10
 
@@ -1035,8 +1035,8 @@ See `docs/SUPPORT_MATRIX_V0.15_RC2.md` and `docs/SQLSERVER_NATIVE_QUALIFICATION.
 - [x] integrity-tagged `spools3:v2` references verify SHA-256 before secure-repository decryption
 - [x] backward-compatible hydration of `spools3:v1` references created by dev8
 - [x] fixed environment wiring for private CA / TLS ServerName / S3 mTLS cert/key
-- [x] `QMIGRATION_CDC_SPOOL_S3_MULTIPART_THRESHOLD_BYTES` default 8 MiB
-- [x] `QMIGRATION_CDC_SPOOL_S3_MULTIPART_PART_BYTES` default 8 MiB
+- [x] `DTS_CDC_SPOOL_S3_MULTIPART_THRESHOLD_BYTES` default 8 MiB
+- [x] `DTS_CDC_SPOOL_S3_MULTIPART_PART_BYTES` default 8 MiB
 
 ### Oracle Native transport continuation
 
@@ -1067,7 +1067,7 @@ See `docs/SUPPORT_MATRIX_V0.15_RC2.md` and `docs/SQLSERVER_NATIVE_QUALIFICATION.
 
 ### Storage modes
 
-- `QMIGRATION_CDC_SPOOL_STORAGE=file|shared-fs|s3|metadata`
+- `DTS_CDC_SPOOL_STORAGE=file|shared-fs|s3|metadata`
 - S3 configuration is documented in `docs/SPOOL_STORAGE.md`
 
 ## V0.15.0-unified-dev7
@@ -1086,28 +1086,28 @@ See `docs/SUPPORT_MATRIX_V0.15_RC2.md` and `docs/SQLSERVER_NATIVE_QUALIFICATION.
 ### Validation Watermark Barrier
 
 - [x] persistent barrier position/type/resource/capture timestamp
-- [x] quiet window via `QMIGRATION_VALIDATION_STABLE_WINDOW_SECONDS` (default 2s)
+- [x] quiet window via `DTS_VALIDATION_STABLE_WINDOW_SECONDS` (default 2s)
 - [x] validation requires empty spool + lag gate + stable durable CDC checkpoint
 - [x] CDC checkpoint drift during validation discards that result generation and returns to catch-up
 - [ ] vendor-specific historical snapshot reads exactly at GTID/LSN remain future work for nonstop-write validation
 
 ### New controls
 
-- `QMIGRATION_CDC_SPOOL_STORAGE=file|metadata` (default `file`)
-- `QMIGRATION_CDC_SPOOL_DIR` default `data/cdc-spool`
-- `QMIGRATION_CDC_SPOOL_DISK_WARN_PCT` default 80
-- `QMIGRATION_CDC_SPOOL_DISK_CRITICAL_PCT` default 90
-- `QMIGRATION_CDC_SPOOL_WARN_BACKPRESSURE_MS` default 250
-- `QMIGRATION_CDC_SPOOL_APPLIED_FILE_RETENTION_HOURS` default 24
-- `QMIGRATION_CDC_SPOOL_DRAIN_LEASE_SECONDS` default 300
-- `QMIGRATION_VALIDATION_STABLE_WINDOW_SECONDS` default 2
+- `DTS_CDC_SPOOL_STORAGE=file|metadata` (default `file`)
+- `DTS_CDC_SPOOL_DIR` default `data/cdc-spool`
+- `DTS_CDC_SPOOL_DISK_WARN_PCT` default 80
+- `DTS_CDC_SPOOL_DISK_CRITICAL_PCT` default 90
+- `DTS_CDC_SPOOL_WARN_BACKPRESSURE_MS` default 250
+- `DTS_CDC_SPOOL_APPLIED_FILE_RETENTION_HOURS` default 24
+- `DTS_CDC_SPOOL_DRAIN_LEASE_SECONDS` default 300
+- `DTS_VALIDATION_STABLE_WINDOW_SECONDS` default 2
 
 ## V0.15.0-unified-dev6
 
 ### Durable CDC staging / spool
 
 - [x] Native CDC capture starts during `FULL_MIGRATING` rather than waiting for Full completion
-- [x] Source transaction ACK only after durable QMigration spool persistence
+- [x] Source transaction ACK only after durable DTS spool persistence
 - [x] gzip compression + AES-256-GCM encrypted spool payloads
 - [x] deterministic/idempotent transaction identity by task/direction/source position
 - [x] Worker failover resumes from newest durable spool source position
@@ -1123,16 +1123,16 @@ See `docs/SUPPORT_MATRIX_V0.15_RC2.md` and `docs/SQLSERVER_NATIVE_QUALIFICATION.
 
 - [x] Full completion enters CDC catch-up before automatic validation
 - [x] automatic validation requires empty durable spool
-- [x] configurable `QMIGRATION_VALIDATION_MAX_CDC_LAG_MS` gate (default 5000ms)
+- [x] configurable `DTS_VALIDATION_MAX_CDC_LAG_MS` gate (default 5000ms)
 - [x] SQL Server CDC retention message updated: with durable staging, retention protects capture outages/backpressure instead of the full snapshot duration
 - [ ] transactionally consistent online validation at an exact vendor log watermark remains a future database-specific enhancement; current validation is gated by catch-up but source writes may continue
 
 ### Spool operational limits
 
-- `QMIGRATION_CDC_SPOOL_MAX_TRANSACTION_BYTES` default 16 MiB
-- `QMIGRATION_CDC_SPOOL_MAX_PENDING_BYTES` default 64 GiB
-- `QMIGRATION_CDC_SPOOL_DRAIN_PER_REQUEST` default 1000
-- `QMIGRATION_CDC_SPOOL_KEEP_APPLIED` default 1000
+- `DTS_CDC_SPOOL_MAX_TRANSACTION_BYTES` default 16 MiB
+- `DTS_CDC_SPOOL_MAX_PENDING_BYTES` default 64 GiB
+- `DTS_CDC_SPOOL_DRAIN_PER_REQUEST` default 1000
+- `DTS_CDC_SPOOL_KEEP_APPLIED` default 1000
 
 ## V0.15.0-unified-dev5
 
@@ -1148,7 +1148,7 @@ See `docs/SUPPORT_MATRIX_V0.15_RC2.md` and `docs/SQLSERVER_NATIVE_QUALIFICATION.
 
 - [x] Checkpoint-only CDC transactions durably advance unrelated-table LSN windows before source ACK
 - [x] Cleanup retention precheck from `msdb.dbo.cdc_jobs`
-- [x] Configurable `QMIGRATION_SQLSERVER_CDC_MIN_RETENTION_MINUTES` safety floor (default 4320)
+- [x] Configurable `DTS_SQLSERVER_CDC_MIN_RETENTION_MINUTES` safety floor (default 4320)
 - [x] Existing retained-min-LSN gap detection remains active while consuming
 - [x] durable CDC staging/spool during long Full snapshots (implemented in dev6; independent file storage added in dev7)
 
@@ -1188,12 +1188,12 @@ See `docs/SUPPORT_MATRIX_V0.15_RC2.md` and `docs/SQLSERVER_NATIVE_QUALIFICATION.
 - [x] minimum retained LSN / retention-gap guard
 - [x] shared `cdc/runtime.Reader` integration
 - [x] target Apply + durable Checkpoint before source cursor ACK
-- [x] built-in `qmigration-sqlserver-cdc` worker binary
+- [x] built-in `dts-sqlserver-cdc` worker binary
 - [ ] real SQL Server E2E qualification / long-running CDC soak
 
 ### Managed CDC / Scheduler
 
-- [x] Worker always injects `QMIGRATION_TASK_ID` into managed CDC processes
+- [x] Worker always injects `DTS_TASK_ID` into managed CDC processes
 - [x] CDC source validation is Capability-SPI driven
 - [x] rollback CDC source selection is Capability-SPI driven
 
@@ -1220,9 +1220,9 @@ See `docs/SUPPORT_MATRIX_V0.15_RC2.md` and `docs/SQLSERVER_NATIVE_QUALIFICATION.
 
 - [x] Connector Factory 显式声明 `metadata/full-read/full-write/cdc-read/cdc-apply/...` 能力
 - [x] Migration Planner 通过 Capability SPI 判断 Full/CDC 是否可执行，不再仅按数据库名称分支
-- [x] 新增 `GET /api/v1/connectors` 返回 QMigration Native Connector 能力矩阵
+- [x] 新增 `GET /api/v1/connectors` 返回 DTS Native Connector 能力矩阵
 - [x] 未实现数据库只保留连接探测，不再被误判成可迁移 Connector
-- [x] openGauss / Kingbase 通过 QMigration PostgreSQL Wire Protocol 接入 Native Full Load
+- [x] openGauss / Kingbase 通过 DTS PostgreSQL Wire Protocol 接入 Native Full Load
 - [x] openGauss / Kingbase 不虚标 pgoutput CDC 能力
 
 ### Unified Transform Runtime
@@ -1237,7 +1237,7 @@ See `docs/SUPPORT_MATRIX_V0.15_RC2.md` and `docs/SQLSERVER_NATIVE_QUALIFICATION.
 ### Unified Native CDC Runtime
 
 - [x] 新增协议无关 `cdc/runtime.Reader` / `Transaction` / `Runner`
-- [x] 统一顺序：Decode -> QMigration Apply + Durable Checkpoint -> Source ACK
+- [x] 统一顺序：Decode -> DTS Apply + Durable Checkpoint -> Source ACK
 - [x] PostgreSQL pgoutput 已迁入统一 CDC Runtime
 - [x] MySQL Binlog/GTID 已迁入统一 CDC Runtime
 - [x] MySQL Transaction Payload / DDL / GTID / metadata refresh 仍由 Native Reader 保留
@@ -1257,7 +1257,7 @@ See `docs/SUPPORT_MATRIX_V0.15_RC2.md` and `docs/SQLSERVER_NATIVE_QUALIFICATION.
 
 ## V0.15.0-unified-dev1
 
-- [x] Server 只注册 `qmigration` 单一执行内核
+- [x] Server 只注册 `dts` 单一执行内核
 - [x] 删除 SeaTunnel/DataX/Flink CDC Adapter 运行代码
 - [x] Full Load 改为 Reader -> bounded channel -> Transformer -> Writer -> Checkpoint
 - [x] Worker 不再执行第三方迁移程序

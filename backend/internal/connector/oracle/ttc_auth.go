@@ -38,7 +38,7 @@ type oracleAuthProof struct {
 }
 
 // parseOracleAuthChallenge decodes a TTC dictionary message and extracts only
-// the authentication material QMigration needs. Unknown keys are intentionally
+// the authentication material DTS needs. Unknown keys are intentionally
 // ignored so newer Oracle releases can add session properties without breaking
 // the authentication boundary.
 func parseOracleAuthChallenge(payload []byte) (oracleAuthChallenge, error) {
@@ -129,7 +129,7 @@ func buildOracleAuthResponse(username string, proof oracleAuthProof, client orac
 	add("AUTH_CONNECT_STRING", client.ConnectString, 0)
 	add("SESSION_CLIENT_CHARSET", strconv.Itoa(int(client.Charset)), 0)
 	add("SESSION_CLIENT_LIB_TYPE", "0", 0)
-	add("SESSION_CLIENT_DRIVER_NAME", "QMigration", 0)
+	add("SESSION_CLIENT_DRIVER_NAME", "DTS", 0)
 	add("SESSION_CLIENT_VERSION", "0.15", 0)
 	add("SESSION_CLIENT_LOBATTR", "1", 0)
 	_, off := time.Now().Zone()
@@ -447,9 +447,9 @@ func (c *Connector) authenticateTTC(ctx context.Context, accepted *acceptedSessi
 	}
 	host, _ := os.Hostname()
 	if host == "" {
-		host = "qmigration"
+		host = "dts"
 	}
-	identity := oracleClientIdentity{Terminal: host, Program: "QMigration", Machine: host, PID: strconv.Itoa(os.Getpid()), OSUser: "qmigration", Charset: proto.ServerCharset, ConnectString: c.ds.Database}
+	identity := oracleClientIdentity{Terminal: host, Program: "DTS", Machine: host, PID: strconv.Itoa(os.Getpid()), OSUser: "dts", Charset: proto.ServerCharset, ConnectString: c.ds.Database}
 	init, err := buildOracleAuthInit(c.ds.Username, identity)
 	if err != nil {
 		return out, err

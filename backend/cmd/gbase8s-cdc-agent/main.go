@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"qmigration/backend/internal/cdc/gbase8scdc"
+	"dts/backend/internal/cdc/gbase8scdc"
 )
 
 func env(k, d string) string {
@@ -26,10 +26,10 @@ func env(k, d string) string {
 	return d
 }
 func providerConfig() (string, error) {
-	direct := strings.TrimSpace(os.Getenv("QMIGRATION_GBASE8S_CDC_PROVIDER_CONFIG_JSON"))
-	path := strings.TrimSpace(os.Getenv("QMIGRATION_GBASE8S_CDC_PROVIDER_CONFIG_FILE"))
+	direct := strings.TrimSpace(os.Getenv("DTS_GBASE8S_CDC_PROVIDER_CONFIG_JSON"))
+	path := strings.TrimSpace(os.Getenv("DTS_GBASE8S_CDC_PROVIDER_CONFIG_FILE"))
 	if direct != "" && path != "" {
-		return "", errors.New("set only one of QMIGRATION_GBASE8S_CDC_PROVIDER_CONFIG_JSON or QMIGRATION_GBASE8S_CDC_PROVIDER_CONFIG_FILE")
+		return "", errors.New("set only one of DTS_GBASE8S_CDC_PROVIDER_CONFIG_JSON or DTS_GBASE8S_CDC_PROVIDER_CONFIG_FILE")
 	}
 	if path == "" {
 		if direct == "" {
@@ -45,7 +45,7 @@ func providerConfig() (string, error) {
 		return "", errors.New("GBase 8s CDC provider config must be a regular file")
 	}
 	if runtime.GOOS == "windows" {
-		return "", errors.New("GBase 8s CDC provider config files are not supported on Windows because Unix owner permissions cannot be verified; use QMIGRATION_GBASE8S_CDC_PROVIDER_CONFIG_JSON")
+		return "", errors.New("GBase 8s CDC provider config files are not supported on Windows because Unix owner permissions cannot be verified; use DTS_GBASE8S_CDC_PROVIDER_CONFIG_JSON")
 	}
 	if st.Mode().Perm()&0o007 != 0 {
 		return "", errors.New("GBase 8s CDC provider config must not be accessible by other users")
@@ -66,8 +66,8 @@ func providerConfig() (string, error) {
 }
 
 func loadProvider() (gbase8scdc.Agent, error) {
-	library := strings.TrimSpace(os.Getenv("QMIGRATION_GBASE8S_CDC_PROVIDER_LIBRARY"))
-	goPlugin := strings.TrimSpace(os.Getenv("QMIGRATION_GBASE8S_CDC_PROVIDER_PLUGIN"))
+	library := strings.TrimSpace(os.Getenv("DTS_GBASE8S_CDC_PROVIDER_LIBRARY"))
+	goPlugin := strings.TrimSpace(os.Getenv("DTS_GBASE8S_CDC_PROVIDER_PLUGIN"))
 	if library != "" && goPlugin != "" {
 		return nil, errors.New("configure only one GBase 8s CDC provider: native C ABI library or legacy Go plugin")
 	}
@@ -76,14 +76,14 @@ func loadProvider() (gbase8scdc.Agent, error) {
 		if err != nil {
 			return nil, err
 		}
-		p, err := gbase8scdc.OpenNativeProvider(library, os.Getenv("QMIGRATION_GBASE8S_CDC_PROVIDER_SHA256"), config)
+		p, err := gbase8scdc.OpenNativeProvider(library, os.Getenv("DTS_GBASE8S_CDC_PROVIDER_SHA256"), config)
 		if err != nil {
 			return nil, err
 		}
 		return gbase8scdc.SerializeAgent(p), nil
 	}
 	if goPlugin == "" {
-		return nil, errors.New("set QMIGRATION_GBASE8S_CDC_PROVIDER_LIBRARY (recommended C ABI) or QMIGRATION_GBASE8S_CDC_PROVIDER_PLUGIN (legacy Go plugin)")
+		return nil, errors.New("set DTS_GBASE8S_CDC_PROVIDER_LIBRARY (recommended C ABI) or DTS_GBASE8S_CDC_PROVIDER_PLUGIN (legacy Go plugin)")
 	}
 	p, err := plugin.Open(goPlugin)
 	if err != nil {
@@ -144,7 +144,7 @@ func validateAgentExposure(addr, token, cert, key string) error {
 		return nil
 	}
 	if strings.TrimSpace(token) == "" {
-		return errors.New("non-loopback GBase 8s CDC agent requires QMIGRATION_GBASE8S_CDC_AGENT_TOKEN")
+		return errors.New("non-loopback GBase 8s CDC agent requires DTS_GBASE8S_CDC_AGENT_TOKEN")
 	}
 	if cert == "" {
 		return errors.New("non-loopback GBase 8s CDC agent requires TLS cert/key")
@@ -260,9 +260,9 @@ func main() {
 			_ = c.Close()
 		}
 	}()
-	token := env("QMIGRATION_GBASE8S_CDC_AGENT_TOKEN", "")
-	addr := env("QMIGRATION_GBASE8S_CDC_AGENT_LISTEN", "127.0.0.1:9188")
-	cert, key := env("QMIGRATION_GBASE8S_CDC_AGENT_TLS_CERT_FILE", ""), env("QMIGRATION_GBASE8S_CDC_AGENT_TLS_KEY_FILE", "")
+	token := env("DTS_GBASE8S_CDC_AGENT_TOKEN", "")
+	addr := env("DTS_GBASE8S_CDC_AGENT_LISTEN", "127.0.0.1:9188")
+	cert, key := env("DTS_GBASE8S_CDC_AGENT_TLS_CERT_FILE", ""), env("DTS_GBASE8S_CDC_AGENT_TLS_KEY_FILE", "")
 	if err := validateAgentExposure(addr, token, cert, key); err != nil {
 		log.Fatal(err)
 	}

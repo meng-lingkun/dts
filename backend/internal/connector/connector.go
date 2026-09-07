@@ -4,13 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/domain"
 	"regexp"
 	"sort"
 	"strings"
 )
 
-var ErrMetadataUnavailable = errors.New("connector metadata unavailable; a QMigration native connector implementation is required")
+var ErrMetadataUnavailable = errors.New("connector metadata unavailable; a DTS native connector implementation is required")
 
 var ErrCapabilityUnavailable = errors.New("connector capability is not available")
 
@@ -73,7 +73,7 @@ const (
 	CapabilityValidationSnapshot Capability = "validation-snapshot"
 )
 
-// Descriptor is the stable QMigration Connector SPI contract advertised by a
+// Descriptor is the stable DTS Connector SPI contract advertised by a
 // native connector family.  Planner/Worker code uses capabilities instead of
 // database-name branches, so a new database can enter the unified engine by
 // implementing the same roles without adding another migration runtime.
@@ -287,7 +287,7 @@ type CDCApplyConnector interface {
 
 // TruncateTableConnector applies a source TRUNCATE as a target-side table
 // primitive. Implementations used by CDC must preserve the active target
-// transaction: QMigration invokes TRUNCATE only as the final data operation
+// transaction: DTS invokes TRUNCATE only as the final data operation
 // before COMMIT because GBase 8s permits no later SQL in that transaction.
 type TruncateTableConnector interface {
 	Connector
@@ -390,7 +390,7 @@ type CompositeSchemaConnector interface {
 
 // SchemaObjectConnector discovers non-table schema objects such as views,
 // sequences, triggers and routines. It is optional until each database family
-// implements the corresponding QMigration native catalog adapter.
+// implements the corresponding DTS native catalog adapter.
 type SchemaObjectConnector interface {
 	Connector
 	ListSchemaObjects(context.Context, string) ([]domain.SchemaObject, error)
@@ -430,7 +430,7 @@ type PostLoadSchemaConnector interface {
 }
 
 // GeneratedValueStateConnector synchronizes database-managed generators after
-// QMigration copied explicit source values. It is intentionally separate from
+// DTS copied explicit source values. It is intentionally separate from
 // schema creation: identity/sequence state is a cutover correctness concern and
 // must run only after all concurrent Full Load chunks for the table have finished.
 type GeneratedValueStateConnector interface {
@@ -440,7 +440,7 @@ type GeneratedValueStateConnector interface {
 
 // CutoverGeneratedValueConnector restores production generation semantics after
 // the migration writer no longer needs to propagate explicit generated values.
-// Implementations must be safe to call repeatedly. QMigration invokes it for
+// Implementations must be safe to call repeatedly. DTS invokes it for
 // full-only tasks before FINISHED and for full+incremental tasks inside the
 // cutover critical section after native CDC capture has stopped.
 type CutoverGeneratedValueConnector interface {
@@ -498,7 +498,7 @@ func (r *Registry) Require(t domain.DataSourceType, c Capability) error {
 	}
 	// Custom connector factories created before the capability SPI remain usable.
 	// All production built-in factories implement CapabilityFactory, so feature
-	// gating remains strict for QMigration-supported datasource types.
+	// gating remains strict for DTS-supported datasource types.
 	if _, ok := f.(CapabilityFactory); !ok {
 		return nil
 	}

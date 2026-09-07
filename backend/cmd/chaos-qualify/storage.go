@@ -8,15 +8,15 @@ import (
 	"syscall"
 	"time"
 
-	"qmigration/backend/internal/domain"
-	"qmigration/backend/internal/faultinject"
-	"qmigration/backend/internal/repository/memory"
-	"qmigration/backend/internal/repository/spoolfile"
+	"dts/backend/internal/domain"
+	"dts/backend/internal/faultinject"
+	"dts/backend/internal/repository/memory"
+	"dts/backend/internal/repository/spoolfile"
 )
 
 func storageENOSPCCheck() check {
 	return runCheck("file-spool-enospc", func() (map[string]any, error) {
-		root, err := os.MkdirTemp("", "qmigration-chaos-enospc-")
+		root, err := os.MkdirTemp("", "dts-chaos-enospc-")
 		if err != nil {
 			return nil, err
 		}

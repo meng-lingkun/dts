@@ -1,4 +1,4 @@
--- QMigration V0.15.0-unified-dev4
+-- DTS V0.15.0-unified-dev4
 -- SQL Server Native TDS/TLS + CDC/LSN runtime release marker.
 -- No new task columns are required: datasource TLS and CDC position models are
 -- already generic. Advancing the schema version keeps /readyz upgrade-safe.

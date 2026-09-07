@@ -17,7 +17,7 @@ router.beforeEach(async to=>{
   if(to.meta.requiresAdmin&&auth.identity?.role!=='admin')return '/'
   return true
 })
-window.addEventListener('qmigration:unauthorized',()=>{
+window.addEventListener('dts:unauthorized',()=>{
   const auth=useAuthStore(pinia)
   auth.logout()
   if(router.currentRoute.value.path!=='/login')void router.replace({path:'/login',query:{redirect:router.currentRoute.value.fullPath}})

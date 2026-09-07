@@ -2,7 +2,7 @@ package migration
 
 import (
 	"fmt"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/domain"
 )
 
 var transitions = map[domain.MigrationStatus]map[domain.MigrationStatus]bool{

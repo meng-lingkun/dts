@@ -4,14 +4,14 @@ import (
 	"strings"
 	"testing"
 
-	"qmigration/backend/internal/connector"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/connector"
+	"dts/backend/internal/domain"
 )
 
 func TestOpenGaussAndKingbaseCDCQualificationGates(t *testing.T) {
 	f := NewFactory()
-	t.Setenv("QMIGRATION_EXPERIMENTAL_OPENGAUSS_LOGICAL_CDC", "")
-	t.Setenv("QMIGRATION_EXPERIMENTAL_KINGBASE_LOGICAL_CDC", "")
+	t.Setenv("DTS_EXPERIMENTAL_OPENGAUSS_LOGICAL_CDC", "")
+	t.Setenv("DTS_EXPERIMENTAL_KINGBASE_LOGICAL_CDC", "")
 	for _, typ := range []domain.DataSourceType{domain.DataSourceOpenGauss, domain.DataSourceKingbase} {
 		d := f.Capabilities(typ)
 		if !d.Has(connector.CapabilityFullRead) || !d.Has(connector.CapabilityFullWrite) || d.Has(connector.CapabilityCDCRead) {
@@ -22,7 +22,7 @@ func TestOpenGaussAndKingbaseCDCQualificationGates(t *testing.T) {
 		}
 	}
 
-	t.Setenv("QMIGRATION_EXPERIMENTAL_OPENGAUSS_LOGICAL_CDC", "1")
+	t.Setenv("DTS_EXPERIMENTAL_OPENGAUSS_LOGICAL_CDC", "1")
 	og := f.Capabilities(domain.DataSourceOpenGauss)
 	for _, cap := range []connector.Capability{connector.CapabilityCDCPosition, connector.CapabilityCDCCheckpoint, connector.CapabilityCDCRead} {
 		if !og.Has(cap) {
@@ -33,7 +33,7 @@ func TestOpenGaussAndKingbaseCDCQualificationGates(t *testing.T) {
 		t.Fatalf("unexpected openGauss descriptor: %+v", og)
 	}
 
-	t.Setenv("QMIGRATION_EXPERIMENTAL_KINGBASE_LOGICAL_CDC", "1")
+	t.Setenv("DTS_EXPERIMENTAL_KINGBASE_LOGICAL_CDC", "1")
 	kb := f.Capabilities(domain.DataSourceKingbase)
 	for _, cap := range []connector.Capability{connector.CapabilityCDCPosition, connector.CapabilityCDCCheckpoint, connector.CapabilityCDCRead} {
 		if !kb.Has(cap) {
@@ -46,11 +46,11 @@ func TestOpenGaussAndKingbaseCDCQualificationGates(t *testing.T) {
 }
 
 func TestOpenGaussLogicalDecodeQueryAndTransaction(t *testing.T) {
-	q, err := openGaussDecodeQuery("pg_logical_slot_peek_changes", "qmigration_og", 4096, "0/16B6C50", []string{"public.orders", "sales.items"})
+	q, err := openGaussDecodeQuery("pg_logical_slot_peek_changes", "dts_og", 4096, "0/16B6C50", []string{"public.orders", "sales.items"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"pg_logical_slot_peek_changes", "qmigration_og", "0/16B6C50", "skip-empty-xacts", "include-xids", "white-table-list", "public.orders,sales.items"} {
+	for _, want := range []string{"pg_logical_slot_peek_changes", "dts_og", "0/16B6C50", "skip-empty-xacts", "include-xids", "white-table-list", "public.orders,sales.items"} {
 		if !strings.Contains(q, want) {
 			t.Fatalf("query missing %q: %s", want, q)
 		}
@@ -68,7 +68,7 @@ func TestOpenGaussLogicalDecodeQueryAndTransaction(t *testing.T) {
 		{gv("0/103"), gv("42"), gv(`{"table_name":"public.orders","op_type":"UPDATE","columns_name":["id","name"],"columns_type":["integer","text"],"columns_val":["1","bob"],"old_keys_name":["id"],"old_keys_type":["integer"],"old_keys_val":["1"]}`)},
 		{gv("0/104"), gv("42"), gv("COMMIT 42")},
 	}}
-	txs, err := ParseOpenGaussLogicalRows(rows, "qmigration_og")
+	txs, err := ParseOpenGaussLogicalRows(rows, "dts_og")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func TestOpenGaussLogicalDecodeQueryAndTransaction(t *testing.T) {
 		t.Fatalf("txs=%+v", txs)
 	}
 	for _, ev := range txs[0].Events {
-		if ev.PositionType != "OPENGAUSS_LSN" || ev.PositionValue != "0/104" || ev.Resource != "qmigration_og" || !strings.HasPrefix(ev.ID, "opengauss:42:0/104:") {
+		if ev.PositionType != "OPENGAUSS_LSN" || ev.PositionValue != "0/104" || ev.Resource != "dts_og" || !strings.HasPrefix(ev.ID, "opengauss:42:0/104:") {
 			t.Fatalf("bad openGauss event identity: %+v", ev)
 		}
 	}

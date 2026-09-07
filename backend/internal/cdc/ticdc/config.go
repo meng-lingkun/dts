@@ -13,9 +13,9 @@ import (
 )
 
 // Endpoint describes the TiCDC control plane plus the Kafka bootstrap cluster
-// used by QMigration's native TiCDC consumer. Credentials are deliberately not
+// used by DTS's native TiCDC consumer. Credentials are deliberately not
 // accepted in cdc_url. Kafka SASL credentials are injected at runtime through
-// QMIGRATION_TIDB_KAFKA_SASL_USERNAME / QMIGRATION_TIDB_KAFKA_SASL_PASSWORD.
+// DTS_TIDB_KAFKA_SASL_USERNAME / DTS_TIDB_KAFKA_SASL_PASSWORD.
 //
 // Examples:
 //
@@ -24,7 +24,7 @@ import (
 //	ticdc://cdc:8300?brokers=k1:9093&kafka_tls=true&kafka_sasl_mechanism=plain
 //
 // kafka_ca/kafka_cert/kafka_key are filesystem paths that must be readable by
-// both the QMigration TiCDC worker and TiCDC when QMigration creates the sink.
+// both the DTS TiCDC worker and TiCDC when DTS creates the sink.
 type Endpoint struct {
 	ControlURL         string
 	Brokers            []string
@@ -132,7 +132,7 @@ func ProbeBrokers(ep Endpoint, timeout time.Duration) error {
 	if timeout <= 0 {
 		timeout = 3 * time.Second
 	}
-	client, err := NewKafkaClientForEndpoint(ep, "qmigration-ticdc-probe")
+	client, err := NewKafkaClientForEndpoint(ep, "dts-ticdc-probe")
 	if err != nil {
 		return err
 	}

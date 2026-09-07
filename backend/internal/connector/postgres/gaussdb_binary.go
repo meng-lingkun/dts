@@ -7,7 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/domain"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -371,7 +371,7 @@ func gaussDBBinaryField(col gaussDBBinaryColumn) (domain.CDCField, error) {
 	v := append([]byte(nil), col.Value...)
 	// PostgreSQL/GaussDB bytea uses its textual type-output representation
 	// inside the logical frame. OID 17 is stable for bytea; require hex output
-	// so QMigration never guesses escape-format bytes.
+	// so DTS never guesses escape-format bytes.
 	if col.TypeOID == 17 {
 		if len(v) == 0 {
 			f.Encoding = "base64"

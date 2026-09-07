@@ -12,9 +12,9 @@ import (
 	"strings"
 	"sync"
 
-	"qmigration/backend/internal/cdc/db2log"
-	"qmigration/backend/internal/connector"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/cdc/db2log"
+	"dts/backend/internal/connector"
+	"dts/backend/internal/domain"
 )
 
 type Factory struct{}
@@ -22,7 +22,7 @@ type Factory struct{}
 func NewFactory() *Factory { return &Factory{} }
 func (*Factory) Capabilities(t domain.DataSourceType) connector.Descriptor {
 	caps := []connector.Capability{connector.CapabilityProtocolProbe}
-	note := "QMigration native DB2 DRDA/DDM protocol probe is implemented; data-plane capabilities remain gated until explicitly enabled"
+	note := "DTS native DB2 DRDA/DDM protocol probe is implemented; data-plane capabilities remain gated until explicitly enabled"
 	if experimentalDB2NativeEnabled() {
 		caps = append(caps,
 			connector.CapabilityMetadata,
@@ -40,9 +40,9 @@ func (*Factory) Capabilities(t domain.DataSourceType) connector.Descriptor {
 		)
 		if experimentalDB2LogCDCEnabled() {
 			caps = append(caps, connector.CapabilityCDCPosition, connector.CapabilityCDCRead)
-			note = "EXPERIMENTAL QMigration native DB2 LUW Full + db2ReadLog CDC enabled; CDC requires the QMigration DB2 Log Agent on a host with IBM Data Server runtime and remains qualification-gated"
+			note = "EXPERIMENTAL DTS native DB2 LUW Full + db2ReadLog CDC enabled; CDC requires the DTS DB2 Log Agent on a host with IBM Data Server runtime and remains qualification-gated"
 		} else {
-			note = "EXPERIMENTAL QMigration native DB2 LUW DRDA full data plane enabled; source CDC requires QMIGRATION_EXPERIMENTAL_DB2_LOG_CDC plus a qualified QMigration DB2 Log Agent"
+			note = "EXPERIMENTAL DTS native DB2 LUW DRDA full data plane enabled; source CDC requires DTS_EXPERIMENTAL_DB2_LOG_CDC plus a qualified DTS DB2 Log Agent"
 		}
 	}
 	return connector.Descriptor{Type: t, Protocol: "drda", Native: true, Capabilities: caps, Maturity: connector.MaturityExperimental, QualificationRequired: true, Note: note}
@@ -54,7 +54,7 @@ func (*Factory) New(ds domain.DataSource) (connector.Connector, error) {
 	return &Connector{ds: ds}, nil
 }
 func experimentalDB2NativeEnabled() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("QMIGRATION_EXPERIMENTAL_DB2_NATIVE"))) {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("DTS_EXPERIMENTAL_DB2_NATIVE"))) {
 	case "1", "true", "yes", "on":
 		return true
 	}
@@ -65,7 +65,7 @@ func experimentalDB2LogCDCEnabled() bool {
 	if !experimentalDB2NativeEnabled() {
 		return false
 	}
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("QMIGRATION_EXPERIMENTAL_DB2_LOG_CDC"))) {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("DTS_EXPERIMENTAL_DB2_LOG_CDC"))) {
 	case "1", "true", "yes", "on":
 		return true
 	}
@@ -1028,7 +1028,7 @@ func db2ColumnDefinition(col domain.ColumnInfo) (string, error) {
 	}
 	if spec.enabled {
 		// Db2 LUW does not accept explicit INSERT values for GENERATED ALWAYS
-		// identity columns. During QMigration data propagation, create the
+		// identity columns. During DTS data propagation, create the
 		// target as BY DEFAULT so Full/CDC can preserve the exact source value.
 		// FinalizeGeneratedValueModes restores source ALWAYS semantics at the
 		// full-only finish or cutover boundary.
@@ -1361,7 +1361,7 @@ func (c *Connector) drainIdentitySyncTargets() []identitySyncTarget {
 	return out
 }
 
-// SyncGeneratedValueState advances Db2 identity generators after QMigration has
+// SyncGeneratedValueState advances Db2 identity generators after DTS has
 // copied explicit source identity values. Db2 documents that explicit values do
 // not advance the internally generated next value, so leaving this unsynchronised
 // can cause a duplicate immediately after cutover.
@@ -1487,7 +1487,7 @@ func (c *Connector) RollbackCDCTransaction(ctx context.Context) error {
 }
 
 // CDCSelection is the catalog identity needed to associate a propagatable Db2
-// Data Manager log record with a QMigration table mapping. TBSPACEID/TABLEID
+// Data Manager log record with a DTS table mapping. TBSPACEID/TABLEID
 // are intentionally kept out of the generic Connector SPI because they are
 // Db2-internal identifiers.
 type CDCSelection struct {
@@ -1501,14 +1501,14 @@ type CDCSelection struct {
 
 func (c *Connector) logAgentClient() (*db2log.Client, error) {
 	if !experimentalDB2LogCDCEnabled() {
-		return nil, errors.New("DB2 source CDC requires QMIGRATION_EXPERIMENTAL_DB2_NATIVE=1 and QMIGRATION_EXPERIMENTAL_DB2_LOG_CDC=1")
+		return nil, errors.New("DB2 source CDC requires DTS_EXPERIMENTAL_DB2_NATIVE=1 and DTS_EXPERIMENTAL_DB2_LOG_CDC=1")
 	}
 	if strings.TrimSpace(c.ds.CDCURL) == "" {
-		return nil, errors.New("DB2 source CDC requires cdc_url pointing to the QMigration DB2 Log Agent")
+		return nil, errors.New("DB2 source CDC requires cdc_url pointing to the DTS DB2 Log Agent")
 	}
-	ca := os.Getenv("QMIGRATION_DB2_LOG_TLS_CA")
-	serverName := os.Getenv("QMIGRATION_DB2_LOG_TLS_SERVER_NAME")
-	return db2log.NewClient(c.ds.CDCURL, ca, serverName, os.Getenv("QMIGRATION_DB2_LOG_TOKEN"))
+	ca := os.Getenv("DTS_DB2_LOG_TLS_CA")
+	serverName := os.Getenv("DTS_DB2_LOG_TLS_SERVER_NAME")
+	return db2log.NewClient(c.ds.CDCURL, ca, serverName, os.Getenv("DTS_DB2_LOG_TOKEN"))
 }
 
 func (c *Connector) CurrentCDCPosition(ctx context.Context) (*domain.CDCPosition, error) {
@@ -1587,7 +1587,7 @@ func (c *Connector) CDCSelections(ctx context.Context, tables []string) ([]CDCSe
 			for _, row := range notLogged {
 				bad = append(bad, cellString(row, 0)+"("+cellString(row, 1)+")")
 			}
-			return nil, fmt.Errorf("DB2 CDC table %s.%s has NOT LOGGED LOB column(s) %s; QMigration cannot reconstruct out-of-row values", schema, table, strings.Join(bad, ", "))
+			return nil, fmt.Errorf("DB2 CDC table %s.%s has NOT LOGGED LOB column(s) %s; DTS cannot reconstruct out-of-row values", schema, table, strings.Join(bad, ", "))
 		}
 		// XML out-of-row replication is available from Db2 11.5.8 when the
 		// instance has DB2_DCC_XML_SERIALIZE enabled.  Verify the live value
@@ -1648,7 +1648,7 @@ func (c *Connector) ValidateCDCSelection(ctx context.Context, mappings []domain.
 func (c *Connector) MigrationPrechecks(ctx context.Context, source bool) []domain.PrecheckItem {
 	items := []domain.PrecheckItem{}
 	if !experimentalDB2NativeEnabled() {
-		return append(items, domain.PrecheckItem{Name: "DB2 Native gate", Level: domain.PrecheckFailed, Message: "set QMIGRATION_EXPERIMENTAL_DB2_NATIVE=1 only after qualification"})
+		return append(items, domain.PrecheckItem{Name: "DB2 Native gate", Level: domain.PrecheckFailed, Message: "set DTS_EXPERIMENTAL_DB2_NATIVE=1 only after qualification"})
 	}
 	if strings.TrimSpace(c.ds.Database) == "" {
 		items = append(items, domain.PrecheckItem{Name: "DB2 database/RDB", Level: domain.PrecheckFailed, Message: "database/RDB name is required"})
@@ -1656,22 +1656,22 @@ func (c *Connector) MigrationPrechecks(ctx context.Context, source bool) []domai
 		items = append(items, domain.PrecheckItem{Name: "DB2 database/RDB", Level: domain.PrecheckPass, Message: c.ds.Database})
 	}
 	if c.ds.TLSMode == domain.TLSModeDisable {
-		items = append(items, domain.PrecheckItem{Name: "DB2 transport security", Level: domain.PrecheckWarning, Message: "TLS is disabled; QMigration prefers SECMEC 9 encrypted credentials but production deployments should qualify a TLS listener"})
+		items = append(items, domain.PrecheckItem{Name: "DB2 transport security", Level: domain.PrecheckWarning, Message: "TLS is disabled; DTS prefers SECMEC 9 encrypted credentials but production deployments should qualify a TLS listener"})
 	} else {
 		items = append(items, domain.PrecheckItem{Name: "DB2 transport security", Level: domain.PrecheckPass, Message: string(c.ds.TLSMode)})
 	}
 	if source {
 		if experimentalDB2LogCDCEnabled() {
 			if strings.TrimSpace(c.ds.CDCURL) == "" {
-				items = append(items, domain.PrecheckItem{Name: "DB2 source CDC", Level: domain.PrecheckFailed, Message: "cdc_url must point to the QMigration DB2 Log Agent"})
+				items = append(items, domain.PrecheckItem{Name: "DB2 source CDC", Level: domain.PrecheckFailed, Message: "cdc_url must point to the DTS DB2 Log Agent"})
 			} else {
-				items = append(items, domain.PrecheckItem{Name: "DB2 source CDC", Level: domain.PrecheckPass, Message: "db2ReadLog via QMigration DB2 Log Agent; DATA CAPTURE CHANGES and per-table descriptors are validated before capture"})
+				items = append(items, domain.PrecheckItem{Name: "DB2 source CDC", Level: domain.PrecheckPass, Message: "db2ReadLog via DTS DB2 Log Agent; DATA CAPTURE CHANGES and per-table descriptors are validated before capture"})
 			}
 		} else {
-			items = append(items, domain.PrecheckItem{Name: "DB2 source CDC", Level: domain.PrecheckWarning, Message: "enable QMIGRATION_EXPERIMENTAL_DB2_LOG_CDC only after the DB2 Log Agent is qualified"})
+			items = append(items, domain.PrecheckItem{Name: "DB2 source CDC", Level: domain.PrecheckWarning, Message: "enable DTS_EXPERIMENTAL_DB2_LOG_CDC only after the DB2 Log Agent is qualified"})
 		}
 	} else {
-		items = append(items, domain.PrecheckItem{Name: "DB2 identity cutover state", Level: domain.PrecheckPass, Message: "QMigration synchronizes identity RESTART WITH state after Full Load and after committed target CDC transactions"})
+		items = append(items, domain.PrecheckItem{Name: "DB2 identity cutover state", Level: domain.PrecheckPass, Message: "DTS synchronizes identity RESTART WITH state after Full Load and after committed target CDC transactions"})
 	}
 	return items
 }

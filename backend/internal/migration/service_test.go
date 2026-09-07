@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"qmigration/backend/internal/connector"
-	"qmigration/backend/internal/domain"
-	"qmigration/backend/internal/engine"
-	"qmigration/backend/internal/repository"
-	"qmigration/backend/internal/repository/memory"
+	"dts/backend/internal/connector"
+	"dts/backend/internal/domain"
+	"dts/backend/internal/engine"
+	"dts/backend/internal/repository"
+	"dts/backend/internal/repository/memory"
 	"strconv"
 	"strings"
 	"sync"
@@ -128,7 +128,7 @@ func TestServicePlansAndCompletesFullMigration(t *testing.T) {
 	dst := domain.DataSource{ID: "dst", Type: domain.DataSourcePolarDBX, Database: "app", CreatedAt: now}
 	_ = repo.CreateDataSource(ctx, &src)
 	_ = repo.CreateDataSource(ctx, &dst)
-	_ = repo.UpsertWorker(ctx, &domain.Worker{ID: "w1", Hostname: "w1", Status: "ONLINE", Capabilities: []string{"qmigration"}, LastHeartbeat: now})
+	_ = repo.UpsertWorker(ctx, &domain.Worker{ID: "w1", Hostname: "w1", Status: "ONLINE", Capabilities: []string{"dts"}, LastHeartbeat: now})
 	svc := NewService(repo, reg)
 	m := domain.MigrationTask{Name: "test", SourceID: "src", TargetID: "dst", Mode: domain.ModeFull, FullEngine: "native", ChunkRows: 100, BatchRows: 10, Parallelism: 2}
 	if err := svc.Create(ctx, &m); err != nil {
@@ -252,13 +252,13 @@ func TestLegacyExternalEngineRequestNormalizesToUnified(t *testing.T) {
 	now := time.Now()
 	_ = repo.CreateDataSource(ctx, &domain.DataSource{ID: "src-unified", Type: domain.DataSourceMySQL, Database: "app", CreatedAt: now})
 	_ = repo.CreateDataSource(ctx, &domain.DataSource{ID: "dst-unified", Type: domain.DataSourcePolarDBX, Database: "app", CreatedAt: now})
-	_ = repo.UpsertWorker(ctx, &domain.Worker{ID: "w-unified", Status: "ONLINE", Capabilities: []string{"qmigration"}, LastHeartbeat: now})
+	_ = repo.UpsertWorker(ctx, &domain.Worker{ID: "w-unified", Status: "ONLINE", Capabilities: []string{"dts"}, LastHeartbeat: now})
 	svc := NewService(repo, reg, er)
 	m := domain.MigrationTask{Name: "legacy-input", SourceID: "src-unified", TargetID: "dst-unified", Mode: domain.ModeFull, FullEngine: "datax", Parallelism: 2, ValidationEnabled: false}
 	if err := svc.Create(ctx, &m); err != nil {
 		t.Fatal(err)
 	}
-	if m.FullEngine != "qmigration" {
+	if m.FullEngine != "dts" {
 		t.Fatalf("legacy engine input was not normalized: %+v", m)
 	}
 	if err := svc.Start(ctx, m.ID); err != nil {
@@ -286,7 +286,7 @@ func TestLegacyExternalEngineRequestNormalizesToUnified(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if job.Engine != "qmigration" {
+	if job.Engine != "dts" {
 		t.Fatalf("unexpected unified job %+v", job)
 	}
 }
@@ -353,7 +353,7 @@ func TestUnifiedCDCJobLifecycle(t *testing.T) {
 	now := time.Now()
 	_ = repo.CreateDataSource(ctx, &domain.DataSource{ID: "cdc-src", Type: domain.DataSourceMySQL, Host: "src", Port: 3306, Username: "u", Password: "p", Database: "app", CreatedAt: now})
 	_ = repo.CreateDataSource(ctx, &domain.DataSource{ID: "cdc-dst", Type: domain.DataSourcePolarDBX, Host: "dst", Port: 8527, Username: "u", Password: "p", Database: "app2", CreatedAt: now})
-	_ = repo.UpsertWorker(ctx, &domain.Worker{ID: "cdc-worker", Status: "ONLINE", Capabilities: []string{"qmigration", "qmigration:mysql-cdc"}, LastHeartbeat: now})
+	_ = repo.UpsertWorker(ctx, &domain.Worker{ID: "cdc-worker", Status: "ONLINE", Capabilities: []string{"dts", "dts:mysql-cdc"}, LastHeartbeat: now})
 	svc := NewService(repo, reg, er)
 	m := domain.MigrationTask{Name: "unified-cdc", SourceID: "cdc-src", TargetID: "cdc-dst", Mode: domain.ModeFullAndIncremental, ChunkRows: 100, BatchRows: 10, Parallelism: 2}
 	if err := svc.Create(ctx, &m); err != nil {
@@ -378,13 +378,13 @@ func TestUnifiedCDCJobLifecycle(t *testing.T) {
 	}
 	jobs, err := svc.ListEngineJobs(ctx, m.ID)
 	if err != nil || len(jobs) != 1 {
-		t.Fatalf("expected one QMigration CDC runtime job: %v %+v", err, jobs)
+		t.Fatalf("expected one DTS CDC runtime job: %v %+v", err, jobs)
 	}
 	claim, err := svc.ClaimEngineJob(ctx, "cdc-worker")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if claim.Job.Engine != "qmigration" || len(claim.RuntimeConfig.Command) != 1 || claim.RuntimeConfig.Command[0] != "qmigration-mysql-cdc" {
+	if claim.Job.Engine != "dts" || len(claim.RuntimeConfig.Command) != 1 || claim.RuntimeConfig.Command[0] != "dts-mysql-cdc" {
 		t.Fatalf("unexpected claim: %+v", claim)
 	}
 	if err := svc.StartEngineJob(ctx, "cdc-worker", claim.Job.ID); err != nil {
@@ -435,7 +435,7 @@ func TestIncrementalUnifiedJobPlansTablesBeforeRender(t *testing.T) {
 	now := time.Now()
 	_ = repo.CreateDataSource(ctx, &domain.DataSource{ID: "is", Type: domain.DataSourceMySQL, Host: "src", Port: 3306, Username: "u", Password: "p", Database: "app", CreatedAt: now})
 	_ = repo.CreateDataSource(ctx, &domain.DataSource{ID: "it", Type: domain.DataSourcePolarDBX, Host: "dst", Port: 8527, Username: "u", Password: "p", Database: "app2", CreatedAt: now})
-	_ = repo.UpsertWorker(ctx, &domain.Worker{ID: "iw", Capabilities: []string{"qmigration", "qmigration:mysql-cdc"}, LastHeartbeat: now})
+	_ = repo.UpsertWorker(ctx, &domain.Worker{ID: "iw", Capabilities: []string{"dts", "dts:mysql-cdc"}, LastHeartbeat: now})
 	svc := NewService(repo, reg, er)
 	m := domain.MigrationTask{Name: "inc", SourceID: "is", TargetID: "it", Mode: domain.ModeIncremental}
 	if err := svc.Create(ctx, &m); err != nil {
@@ -466,8 +466,8 @@ func TestIncrementalUnifiedJobPlansTablesBeforeRender(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if claim.Job.Engine != "qmigration" || !strings.Contains(claim.RuntimeConfig.Content, "orders") {
-		t.Fatalf("unexpected QMigration runtime config: %+v", claim)
+	if claim.Job.Engine != "dts" || !strings.Contains(claim.RuntimeConfig.Content, "orders") {
+		t.Fatalf("unexpected DTS runtime config: %+v", claim)
 	}
 }
 
@@ -697,7 +697,7 @@ func TestManagedCDCStagesDuringFullLoadAndDrainsInOrder(t *testing.T) {
 	task := domain.MigrationTask{ID: "spool-task", SourceID: "spool-src", TargetID: "spool-dst", Mode: domain.ModeFullAndIncremental, Status: domain.StatusFullMigrating, CreatedAt: now, UpdatedAt: now}
 	_ = repo.CreateMigration(ctx, &task)
 	_ = repo.CreateMigrationTable(ctx, &domain.MigrationTable{ID: "spool-table", TaskID: task.ID, SourceSchema: "app", SourceTable: "orders", TargetSchema: "app", TargetTable: "orders", PrimaryKey: "id", PrimaryKeys: []string{"id"}, Columns: []domain.ColumnInfo{{Name: "id", DataType: "bigint", PrimaryKey: true}}, TargetColumns: []domain.ColumnInfo{{Name: "id", DataType: "bigint", PrimaryKey: true}}})
-	job := domain.EngineJob{ID: "spool-job", TaskID: task.ID, Kind: "CDC", Direction: "forward", Engine: "qmigration", Status: domain.EngineJobRunning, WorkerID: "worker-spool", UpdatedAt: now}
+	job := domain.EngineJob{ID: "spool-job", TaskID: task.ID, Kind: "CDC", Direction: "forward", Engine: "dts", Status: domain.EngineJobRunning, WorkerID: "worker-spool", UpdatedAt: now}
 	_ = repo.CreateEngineJob(ctx, &job)
 	svc := NewService(repo, reg)
 	mk := func(id, pos, value string) domain.CDCApplyRequest {
@@ -752,8 +752,8 @@ func TestCDCSpoolCapacityRejectsWithoutDurableAck(t *testing.T) {
 	ctx := context.Background()
 	repo := memory.New()
 	svc := NewService(repo, connector.NewRegistry())
-	t.Setenv("QMIGRATION_CDC_SPOOL_MAX_PENDING_BYTES", "1")
-	t.Setenv("QMIGRATION_CDC_SPOOL_MAX_TRANSACTION_BYTES", "1048576")
+	t.Setenv("DTS_CDC_SPOOL_MAX_PENDING_BYTES", "1")
+	t.Setenv("DTS_CDC_SPOOL_MAX_TRANSACTION_BYTES", "1048576")
 	events := []domain.CDCEvent{{ID: "quota-1", Operation: domain.CDCInsert, SourceSchema: "app", SourceTable: "orders", After: []domain.CDCField{{Column: "id", Value: "1"}}, PositionType: "GTID", PositionValue: "uuid:1", SourceTimestampMS: time.Now().UnixMilli()}}
 	if _, err := svc.stageCDCEvents(ctx, "quota-task", "forward", events); err == nil || !strings.Contains(err.Error(), "source position is not acknowledged") {
 		t.Fatalf("expected spool capacity failure without source ACK, got %v", err)
@@ -772,8 +772,8 @@ func TestChaosSpoolPersistedBeforeAckRetryIsIdempotent(t *testing.T) {
 	repo := memory.New()
 	svc := NewService(repo, connector.NewRegistry())
 	events := []domain.CDCEvent{{ID: "chaos-spool-1", Operation: domain.CDCInsert, SourceSchema: "app", SourceTable: "orders", After: []domain.CDCField{{Column: "id", Value: "1"}}, PositionType: "GTID", PositionValue: "uuid:1", Resource: "mysql-bin.000001"}}
-	t.Setenv("QMIGRATION_ENABLE_FAULT_INJECTION", "1")
-	t.Setenv("QMIGRATION_FAULT_PLAN", "cdc.spool.after_persist_before_ack=1")
+	t.Setenv("DTS_ENABLE_FAULT_INJECTION", "1")
+	t.Setenv("DTS_FAULT_PLAN", "cdc.spool.after_persist_before_ack=1")
 	if _, err := svc.stageCDCEvents(ctx, "chaos-spool-task", "forward", events); err == nil || !strings.Contains(err.Error(), "after_persist_before_ack") {
 		t.Fatalf("expected injected post-persist failure, got %v", err)
 	}
@@ -781,7 +781,7 @@ func TestChaosSpoolPersistedBeforeAckRetryIsIdempotent(t *testing.T) {
 	if err != nil || stats.PendingTransactions != 1 {
 		t.Fatalf("durable spool was lost after injected pre-ACK failure: err=%v stats=%+v", err, stats)
 	}
-	t.Setenv("QMIGRATION_ENABLE_FAULT_INJECTION", "")
+	t.Setenv("DTS_ENABLE_FAULT_INJECTION", "")
 	res, err := svc.stageCDCEvents(ctx, "chaos-spool-task", "forward", events)
 	if err != nil {
 		t.Fatal(err)
@@ -811,8 +811,8 @@ func TestChaosCheckpointPersistedBeforeSourceAckPreventsDoubleApply(t *testing.T
 	_ = repo.CreateMigrationTable(ctx, &domain.MigrationTable{ID: "chaos-ack-table", TaskID: task.ID, SourceSchema: "app", SourceTable: "orders", TargetSchema: "app", TargetTable: "orders", PrimaryKey: "id", PrimaryKeys: []string{"id"}, Columns: []domain.ColumnInfo{{Name: "id", DataType: "bigint", PrimaryKey: true}}, TargetColumns: []domain.ColumnInfo{{Name: "id", DataType: "bigint", PrimaryKey: true}}})
 	svc := NewService(repo, reg)
 	req := domain.CDCApplyRequest{Events: []domain.CDCEvent{{ID: "chaos-ack-e1", Operation: domain.CDCInsert, SourceSchema: "app", SourceTable: "orders", After: []domain.CDCField{{Column: "id", Value: "7"}}, PositionType: "GTID", PositionValue: "uuid:7"}}}
-	t.Setenv("QMIGRATION_ENABLE_FAULT_INJECTION", "1")
-	t.Setenv("QMIGRATION_FAULT_PLAN", "cdc.apply.after_checkpoint_before_source_ack=1")
+	t.Setenv("DTS_ENABLE_FAULT_INJECTION", "1")
+	t.Setenv("DTS_FAULT_PLAN", "cdc.apply.after_checkpoint_before_source_ack=1")
 	if _, err := svc.ApplyCDCEvents(ctx, task.ID, req); err == nil || !strings.Contains(err.Error(), "after_checkpoint_before_source_ack") {
 		t.Fatalf("expected injected post-checkpoint failure, got %v", err)
 	}
@@ -823,7 +823,7 @@ func TestChaosCheckpointPersistedBeforeSourceAckPreventsDoubleApply(t *testing.T
 	if len(pos) == 0 || pos[0].PositionValue != "uuid:7" {
 		t.Fatalf("checkpoint was not durable before source ACK: %+v", pos)
 	}
-	t.Setenv("QMIGRATION_ENABLE_FAULT_INJECTION", "")
+	t.Setenv("DTS_ENABLE_FAULT_INJECTION", "")
 	res, err := svc.ApplyCDCEvents(ctx, task.ID, req)
 	if err != nil {
 		t.Fatal(err)
@@ -852,8 +852,8 @@ func TestChaosSpoolApplyBeforeMarkRecoversWithoutDoubleWrite(t *testing.T) {
 	if _, err := svc.stageCDCEvents(ctx, task.ID, "forward", events); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("QMIGRATION_ENABLE_FAULT_INJECTION", "1")
-	t.Setenv("QMIGRATION_FAULT_PLAN", "cdc.spool.after_target_apply_before_mark=1")
+	t.Setenv("DTS_ENABLE_FAULT_INJECTION", "1")
+	t.Setenv("DTS_FAULT_PLAN", "cdc.spool.after_target_apply_before_mark=1")
 	if _, err := svc.DrainCDCSpool(ctx, task.ID, "forward", 10); err == nil || !strings.Contains(err.Error(), "after_target_apply_before_mark") {
 		t.Fatalf("expected injected drain failure, got %v", err)
 	}
@@ -864,7 +864,7 @@ func TestChaosSpoolApplyBeforeMarkRecoversWithoutDoubleWrite(t *testing.T) {
 	if stats.PendingTransactions != 1 {
 		t.Fatalf("spool should remain pending until mark: %+v", stats)
 	}
-	t.Setenv("QMIGRATION_ENABLE_FAULT_INJECTION", "")
+	t.Setenv("DTS_ENABLE_FAULT_INJECTION", "")
 	stats, err := svc.DrainCDCSpool(ctx, task.ID, "forward", 10)
 	if err != nil {
 		t.Fatal(err)
@@ -1161,7 +1161,7 @@ func TestAutoEngineRoutesStringPKToNativeKeyset(t *testing.T) {
 	now := time.Now()
 	_ = repo.CreateDataSource(ctx, &domain.DataSource{ID: "auto-s", Type: domain.DataSourceMySQL, Host: "s", Port: 3306, Database: "app", CreatedAt: now})
 	_ = repo.CreateDataSource(ctx, &domain.DataSource{ID: "auto-t", Type: domain.DataSourcePolarDBX, Host: "t", Port: 8527, Database: "app", CreatedAt: now})
-	_ = repo.UpsertWorker(ctx, &domain.Worker{ID: "auto-w", Capabilities: []string{"qmigration"}, LastHeartbeat: now})
+	_ = repo.UpsertWorker(ctx, &domain.Worker{ID: "auto-w", Capabilities: []string{"dts"}, LastHeartbeat: now})
 	svc := NewService(repo, reg, er)
 	m := domain.MigrationTask{Name: "auto", SourceID: "auto-s", TargetID: "auto-t", Mode: domain.ModeFull, FullEngine: "auto", AutoCreateTable: true, ValidationEnabled: false}
 	if err := svc.Create(ctx, &m); err != nil {
@@ -1185,7 +1185,7 @@ func TestAutoEngineRoutesStringPKToNativeKeyset(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	tables, _ := svc.Tables(ctx, m.ID)
-	if len(tables) != 1 || tables[0].Engine != "qmigration" {
+	if len(tables) != 1 || tables[0].Engine != "dts" {
 		t.Fatalf("unexpected auto route %+v", tables)
 	}
 	chunks, _ := svc.Chunks(ctx, m.ID)
@@ -1196,7 +1196,7 @@ func TestAutoEngineRoutesStringPKToNativeKeyset(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if job.Engine != "qmigration" {
+	if job.Engine != "dts" {
 		t.Fatalf("unexpected job %+v", job)
 	}
 }
@@ -1211,7 +1211,7 @@ func TestStringMigrationKeyPlansParallelBoundedKeyset(t *testing.T) {
 	now := time.Now()
 	_ = repo.CreateDataSource(ctx, &domain.DataSource{ID: "bk-s", Type: domain.DataSourceMySQL, Database: "app", CreatedAt: now})
 	_ = repo.CreateDataSource(ctx, &domain.DataSource{ID: "bk-t", Type: domain.DataSourcePolarDBX, Database: "app", CreatedAt: now})
-	_ = repo.UpsertWorker(ctx, &domain.Worker{ID: "bk-w", Capabilities: []string{"qmigration"}, LastHeartbeat: now})
+	_ = repo.UpsertWorker(ctx, &domain.Worker{ID: "bk-w", Capabilities: []string{"dts"}, LastHeartbeat: now})
 	svc := NewService(repo, reg)
 	m := domain.MigrationTask{Name: "bounded-keyset", SourceID: "bk-s", TargetID: "bk-t", Mode: domain.ModeFull, FullEngine: "native", AutoCreateTable: true, ValidationEnabled: false, ChunkRows: 2, Parallelism: 2}
 	if err := svc.Create(ctx, &m); err != nil {
@@ -1251,7 +1251,7 @@ func TestNativeCompositePKUsesResumableKeyset(t *testing.T) {
 	now := time.Now()
 	_ = repo.CreateDataSource(ctx, &domain.DataSource{ID: "cmp-s", Type: domain.DataSourceMySQL, Database: "app", CreatedAt: now})
 	_ = repo.CreateDataSource(ctx, &domain.DataSource{ID: "cmp-t", Type: domain.DataSourcePolarDBX, Database: "app", CreatedAt: now})
-	_ = repo.UpsertWorker(ctx, &domain.Worker{ID: "cmp-w", Capabilities: []string{"qmigration"}, LastHeartbeat: now})
+	_ = repo.UpsertWorker(ctx, &domain.Worker{ID: "cmp-w", Capabilities: []string{"dts"}, LastHeartbeat: now})
 	svc := NewService(repo, reg)
 	m := domain.MigrationTask{Name: "cmp", SourceID: "cmp-s", TargetID: "cmp-t", Mode: domain.ModeFull, FullEngine: "native", AutoCreateTable: true, ValidationEnabled: true}
 	if err := svc.Create(ctx, &m); err != nil {
@@ -1296,7 +1296,7 @@ func TestAutoEngineKeepsNumericPKNative(t *testing.T) {
 	now := time.Now()
 	_ = repo.CreateDataSource(ctx, &domain.DataSource{ID: "auto-ns", Type: domain.DataSourceMySQL, Database: "app", CreatedAt: now})
 	_ = repo.CreateDataSource(ctx, &domain.DataSource{ID: "auto-nt", Type: domain.DataSourcePolarDBX, Database: "app", CreatedAt: now})
-	_ = repo.UpsertWorker(ctx, &domain.Worker{ID: "auto-nw", Capabilities: []string{"qmigration"}, LastHeartbeat: now})
+	_ = repo.UpsertWorker(ctx, &domain.Worker{ID: "auto-nw", Capabilities: []string{"dts"}, LastHeartbeat: now})
 	svc := NewService(repo, reg, er)
 	m := domain.MigrationTask{Name: "auto-native", SourceID: "auto-ns", TargetID: "auto-nt", Mode: domain.ModeFull, FullEngine: "auto", AutoCreateTable: true, ValidationEnabled: false, ChunkRows: 5}
 	if err := svc.Create(ctx, &m); err != nil {
@@ -1320,7 +1320,7 @@ func TestAutoEngineKeepsNumericPKNative(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	tables, _ := svc.Tables(ctx, m.ID)
-	if len(tables) != 1 || tables[0].Engine != "qmigration" {
+	if len(tables) != 1 || tables[0].Engine != "dts" {
 		t.Fatalf("unexpected route %+v", tables)
 	}
 	chunks, _ := svc.Chunks(ctx, m.ID)
@@ -1341,7 +1341,7 @@ func TestUnifiedEngineDoesNotFallbackForUnstableTable(t *testing.T) {
 	now := time.Now()
 	_ = repo.CreateDataSource(ctx, &domain.DataSource{ID: "cap-s", Type: domain.DataSourceMySQL, Database: "app", CreatedAt: now})
 	_ = repo.CreateDataSource(ctx, &domain.DataSource{ID: "cap-t", Type: domain.DataSourcePolarDBX, Database: "app", CreatedAt: now})
-	_ = repo.UpsertWorker(ctx, &domain.Worker{ID: "q-worker", Capabilities: []string{"qmigration"}, LastHeartbeat: now})
+	_ = repo.UpsertWorker(ctx, &domain.Worker{ID: "q-worker", Capabilities: []string{"dts"}, LastHeartbeat: now})
 	svc := NewService(repo, reg, er)
 	m := domain.MigrationTask{Name: "unstable", SourceID: "cap-s", TargetID: "cap-t", Mode: domain.ModeFull, AutoCreateTable: true, ValidationEnabled: false}
 	if err := svc.Create(ctx, &m); err != nil {
@@ -1442,7 +1442,7 @@ func TestPauseResumeReturnsToCDCCatchingUp(t *testing.T) {
 	er.Register(engine.NewUnified())
 	svc := NewService(repo, reg, er)
 	now := time.Now()
-	task := domain.MigrationTask{ID: "resume-cdc", Mode: domain.ModeIncremental, Status: domain.StatusCDCCatchingUp, CDCEngine: "qmigration", CreatedAt: now, UpdatedAt: now}
+	task := domain.MigrationTask{ID: "resume-cdc", Mode: domain.ModeIncremental, Status: domain.StatusCDCCatchingUp, CDCEngine: "dts", CreatedAt: now, UpdatedAt: now}
 	if err := repo.CreateMigration(ctx, &task); err != nil {
 		t.Fatal(err)
 	}
@@ -1701,12 +1701,12 @@ func TestUnifiedCDCEngineFamilyValidationAndRollbackSelection(t *testing.T) {
 	if err := validateCDCEngineSource("native-postgres-cdc", domain.DataSource{Type: domain.DataSourceMySQL}, "forward"); err == nil {
 		t.Fatal("expected native PostgreSQL CDC to reject MySQL source")
 	}
-	if err := validateCDCEngineSource("qmigration", domain.DataSource{Type: domain.DataSourcePostgreSQL}, "forward"); err != nil {
+	if err := validateCDCEngineSource("dts", domain.DataSource{Type: domain.DataSourcePostgreSQL}, "forward"); err != nil {
 		t.Fatalf("unified engine should auto-select PostgreSQL protocol: %v", err)
 	}
 	svc := &Service{}
 	for _, ds := range []domain.DataSource{{Type: domain.DataSourcePostgreSQL}, {Type: domain.DataSourcePolarDBX}} {
-		if got := svc.chooseRollbackCDCEngine(&domain.MigrationTask{CDCEngine: "flink-cdc", RollbackCDCEngine: "seatunnel"}, ds); got != "qmigration" {
+		if got := svc.chooseRollbackCDCEngine(&domain.MigrationTask{CDCEngine: "flink-cdc", RollbackCDCEngine: "seatunnel"}, ds); got != "dts" {
 			t.Fatalf("rollback must normalize to unified engine, got %q", got)
 		}
 	}
@@ -2078,7 +2078,7 @@ func TestReadyForCutoverRequiresFreshPostgresSequenceSync(t *testing.T) {
 }
 
 func TestReadyForCutoverRejectsStaleSequenceSync(t *testing.T) {
-	t.Setenv("QMIGRATION_SEQUENCE_SYNC_MAX_AGE_SECONDS", "1")
+	t.Setenv("DTS_SEQUENCE_SYNC_MAX_AGE_SECONDS", "1")
 	ctx := context.Background()
 	repo := memory.New()
 	fixture := schemaObjectFactory{fixtures: map[string]*schemaObjectFixture{
@@ -2510,7 +2510,7 @@ func TestNativeUsesUniqueNotNullMigrationKeyAndCreatesTargetUnique(t *testing.T)
 	now := time.Now()
 	_ = repo.CreateDataSource(ctx, &domain.DataSource{ID: "uk-s", Type: domain.DataSourceMySQL, Host: "source", Database: "app", CreatedAt: now})
 	_ = repo.CreateDataSource(ctx, &domain.DataSource{ID: "uk-t", Type: domain.DataSourcePolarDBX, Host: "target", Database: "app", CreatedAt: now})
-	_ = repo.UpsertWorker(ctx, &domain.Worker{ID: "uk-w", Capabilities: []string{"qmigration"}, LastHeartbeat: now})
+	_ = repo.UpsertWorker(ctx, &domain.Worker{ID: "uk-w", Capabilities: []string{"dts"}, LastHeartbeat: now})
 	svc := NewService(repo, reg)
 	m := domain.MigrationTask{Name: "unique-key", SourceID: "uk-s", TargetID: "uk-t", Mode: domain.ModeFull, FullEngine: "native", AutoCreateTable: true, ValidationEnabled: true}
 	if err := svc.Create(ctx, &m); err != nil {
@@ -2689,7 +2689,7 @@ func TestRenewChunkPersistsBackpressureTelemetry(t *testing.T) {
 	if err := repo.CreateChunks(ctx, []domain.MigrationChunk{{ID: "bp-chunk", TaskID: task.ID, TableID: "bp-table", ChunkNo: 1, SplitType: "PRIMARY_KEY_RANGE", PrimaryKey: "id", Start: 1, End: 10, Status: domain.ChunkPending}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.UpsertWorker(ctx, &domain.Worker{ID: "bp-worker", Hostname: "w", Status: "ONLINE", Capabilities: []string{"qmigration"}, LastHeartbeat: now}); err != nil {
+	if err := repo.UpsertWorker(ctx, &domain.Worker{ID: "bp-worker", Hostname: "w", Status: "ONLINE", Capabilities: []string{"dts"}, LastHeartbeat: now}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := repo.ClaimChunk(ctx, "bp-worker", time.Minute, []string{"native"}); err != nil {
@@ -2795,7 +2795,7 @@ func TestValidationBarrierRequiresQuietCDCWindowAndDetectsDrift(t *testing.T) {
 	if err := repo.CreateCDCPosition(ctx, fresh); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("QMIGRATION_VALIDATION_STABLE_WINDOW_SECONDS", "60")
+	t.Setenv("DTS_VALIDATION_STABLE_WINDOW_SECONDS", "60")
 	if err := svc.captureValidationBarrier(ctx, &task); err == nil || !strings.Contains(err.Error(), "not stable yet") {
 		t.Fatalf("expected quiet-window rejection, got %v", err)
 	}
@@ -2895,11 +2895,11 @@ func TestValidationFreezesTargetApplyButKeepsCaptureActive(t *testing.T) {
 }
 
 func TestValidationRequireExactWatermarkFlag(t *testing.T) {
-	t.Setenv("QMIGRATION_VALIDATION_REQUIRE_EXACT_WATERMARK", "true")
+	t.Setenv("DTS_VALIDATION_REQUIRE_EXACT_WATERMARK", "true")
 	if !validationRequireExactWatermark() {
 		t.Fatal("exact watermark requirement must enable for true")
 	}
-	t.Setenv("QMIGRATION_VALIDATION_REQUIRE_EXACT_WATERMARK", "0")
+	t.Setenv("DTS_VALIDATION_REQUIRE_EXACT_WATERMARK", "0")
 	if validationRequireExactWatermark() {
 		t.Fatal("exact watermark requirement must disable for 0")
 	}
@@ -2917,9 +2917,9 @@ func TestTaskFlowControlUsesCDCSpoolBacklogPressure(t *testing.T) {
 	if err := repo.CreateCDCSpool(ctx, &domain.CDCSpoolRecord{ID: "spool-flow-1", TaskID: task.ID, Direction: "forward", Sequence: 1, PositionValue: "p1", EventCount: 1, PayloadBytes: 500, Status: domain.CDCSpoolPending, CreatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("QMIGRATION_CDC_SPOOL_MAX_PENDING_BYTES", "1000")
-	t.Setenv("QMIGRATION_CDC_SPOOL_BACKLOG_WARN_BYTES", "400")
-	t.Setenv("QMIGRATION_CDC_SPOOL_BACKLOG_CRITICAL_BYTES", "800")
+	t.Setenv("DTS_CDC_SPOOL_MAX_PENDING_BYTES", "1000")
+	t.Setenv("DTS_CDC_SPOOL_BACKLOG_WARN_BYTES", "400")
+	t.Setenv("DTS_CDC_SPOOL_BACKLOG_CRITICAL_BYTES", "800")
 	level, reason := svc.reconcileTaskFlowControl(ctx, &task, "NORMAL", "")
 	if level != "WARN" || task.EffectiveParallelism != 7 || !strings.Contains(reason, "spool backlog warning") {
 		t.Fatalf("unexpected spool flow control level=%s reason=%q task=%+v", level, reason, task)
@@ -2938,11 +2938,11 @@ func TestTaskFlowControlPredictsCDCSpoolExhaustion(t *testing.T) {
 	if err := repo.CreateCDCSpool(ctx, &domain.CDCSpoolRecord{ID: "spool-predict-1", TaskID: task.ID, Direction: "forward", Sequence: 1, PositionValue: "p1", EventCount: 1, PayloadBytes: 300, Status: domain.CDCSpoolPending, CreatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("QMIGRATION_CDC_SPOOL_MAX_PENDING_BYTES", "1000")
-	t.Setenv("QMIGRATION_CDC_SPOOL_BACKLOG_WARN_BYTES", "600")
-	t.Setenv("QMIGRATION_CDC_SPOOL_BACKLOG_CRITICAL_BYTES", "800")
-	t.Setenv("QMIGRATION_CDC_SPOOL_PREDICT_CRITICAL_SECONDS", "30")
-	t.Setenv("QMIGRATION_CDC_SPOOL_PREDICT_WARN_SECONDS", "90")
+	t.Setenv("DTS_CDC_SPOOL_MAX_PENDING_BYTES", "1000")
+	t.Setenv("DTS_CDC_SPOOL_BACKLOG_WARN_BYTES", "600")
+	t.Setenv("DTS_CDC_SPOOL_BACKLOG_CRITICAL_BYTES", "800")
+	t.Setenv("DTS_CDC_SPOOL_PREDICT_CRITICAL_SECONDS", "30")
+	t.Setenv("DTS_CDC_SPOOL_PREDICT_WARN_SECONDS", "90")
 	svc.pressure[task.ID] = taskPressureSample{At: time.Now().Add(-10 * time.Second), Level: "NORMAL", SpoolPendingBytes: 100}
 	level, reason := svc.reconcileTaskFlowControl(ctx, &task, "NORMAL", "")
 	if level != "CRITICAL" || task.EffectiveParallelism != 4 || !strings.Contains(reason, "projected critical headroom") {
@@ -2961,9 +2961,9 @@ func TestTaskFlowControlPredictsCDCSpoolExhaustion(t *testing.T) {
 }
 
 func TestAdaptiveBatchTargetUsesBoundedAIMD(t *testing.T) {
-	t.Setenv("QMIGRATION_ADAPTIVE_BATCH_TARGET_MS", "1000")
-	t.Setenv("QMIGRATION_ADAPTIVE_BATCH_MIN_ROWS", "50")
-	t.Setenv("QMIGRATION_ADAPTIVE_BATCH_MAX_ROWS", "5000")
+	t.Setenv("DTS_ADAPTIVE_BATCH_TARGET_MS", "1000")
+	t.Setenv("DTS_ADAPTIVE_BATCH_MIN_ROWS", "50")
+	t.Setenv("DTS_ADAPTIVE_BATCH_MAX_ROWS", "5000")
 	if got := adaptiveBatchTarget(domain.ChunkProgress{LastBatchRows: 1000, LastReadMS: 200, LastWriteMS: 300}); got != 1250 {
 		t.Fatalf("fast batch target=%d want 1250", got)
 	}
@@ -2987,7 +2987,7 @@ func TestTaskTargetBytesPerWorker(t *testing.T) {
 }
 
 func TestEWMARateStabilizesChunkSpeed(t *testing.T) {
-	t.Setenv("QMIGRATION_SPEED_EWMA_ALPHA_PCT", "25")
+	t.Setenv("DTS_SPEED_EWMA_ALPHA_PCT", "25")
 	if got := ewmaRate(100, 200); got != 125 {
 		t.Fatalf("ewma=%d want 125", got)
 	}
@@ -3284,12 +3284,12 @@ func TestRC33IdleWorkerMarksRemotePlacementAsWorkSteal(t *testing.T) {
 	now := time.Now()
 	_ = repo.CreateDataSource(ctx, &domain.DataSource{ID: "rc33-steal-src", Type: domain.DataSourceMySQL, CreatedAt: now})
 	_ = repo.CreateDataSource(ctx, &domain.DataSource{ID: "rc33-steal-dst", Type: domain.DataSourceMySQL, CreatedAt: now})
-	task := domain.MigrationTask{ID: "rc33-steal-task", SourceID: "rc33-steal-src", TargetID: "rc33-steal-dst", Status: domain.StatusFullMigrating, Mode: domain.ModeFull, FullEngine: "qmigration", Parallelism: 2, EffectiveParallelism: 2, BatchRows: 100, CreatedAt: now, UpdatedAt: now}
+	task := domain.MigrationTask{ID: "rc33-steal-task", SourceID: "rc33-steal-src", TargetID: "rc33-steal-dst", Status: domain.StatusFullMigrating, Mode: domain.ModeFull, FullEngine: "dts", Parallelism: 2, EffectiveParallelism: 2, BatchRows: 100, CreatedAt: now, UpdatedAt: now}
 	_ = repo.CreateMigration(ctx, &task)
-	table := domain.MigrationTable{ID: "rc33-steal-table", TaskID: task.ID, Engine: "qmigration", SourceSchema: "app", SourceTable: "orders", TargetSchema: "app", TargetTable: "orders", Status: "READY"}
+	table := domain.MigrationTable{ID: "rc33-steal-table", TaskID: task.ID, Engine: "dts", SourceSchema: "app", SourceTable: "orders", TargetSchema: "app", TargetTable: "orders", Status: "READY"}
 	_ = repo.CreateMigrationTable(ctx, &table)
 	_ = repo.CreateChunks(ctx, []domain.MigrationChunk{{ID: "rc33-steal-chunk", TaskID: task.ID, TableID: table.ID, ChunkNo: 1, SplitType: "PK_RANGE", Status: domain.ChunkPending, PlacementHint: map[string]string{"zone": "a"}, TopologyID: "dn-a"}})
-	_ = repo.UpsertWorker(ctx, &domain.Worker{ID: "w-b", Hostname: "wb", CPU: 8, Status: "ONLINE", Capabilities: []string{"qmigration"}, Labels: map[string]string{"zone": "b"}, LastHeartbeat: now})
+	_ = repo.UpsertWorker(ctx, &domain.Worker{ID: "w-b", Hostname: "wb", CPU: 8, Status: "ONLINE", Capabilities: []string{"dts"}, Labels: map[string]string{"zone": "b"}, LastHeartbeat: now})
 	job, err := svc.ClaimChunk(ctx, "w-b")
 	if err != nil {
 		t.Fatal(err)
@@ -3300,21 +3300,21 @@ func TestRC33IdleWorkerMarksRemotePlacementAsWorkSteal(t *testing.T) {
 }
 
 func TestRC35CircuitAutomaticallyEntersHalfOpenProbe(t *testing.T) {
-	t.Setenv("QMIGRATION_TOPOLOGY_HALF_OPEN_AFTER_SECONDS", "1")
+	t.Setenv("DTS_TOPOLOGY_HALF_OPEN_AFTER_SECONDS", "1")
 	ctx := context.Background()
 	repo := memory.New()
 	svc := NewService(repo, nil)
 	now := time.Now()
 	_ = repo.CreateDataSource(ctx, &domain.DataSource{ID: "rc35-src", Type: domain.DataSourceMySQL, CreatedAt: now})
 	_ = repo.CreateDataSource(ctx, &domain.DataSource{ID: "rc35-dst", Type: domain.DataSourceMySQL, CreatedAt: now})
-	task := domain.MigrationTask{ID: "rc35-half-task", SourceID: "rc35-src", TargetID: "rc35-dst", Status: domain.StatusFullMigrating, Mode: domain.ModeFull, FullEngine: "qmigration", Parallelism: 2, EffectiveParallelism: 2, BatchRows: 100, CreatedAt: now, UpdatedAt: now}
+	task := domain.MigrationTask{ID: "rc35-half-task", SourceID: "rc35-src", TargetID: "rc35-dst", Status: domain.StatusFullMigrating, Mode: domain.ModeFull, FullEngine: "dts", Parallelism: 2, EffectiveParallelism: 2, BatchRows: 100, CreatedAt: now, UpdatedAt: now}
 	_ = repo.CreateMigration(ctx, &task)
-	table := domain.MigrationTable{ID: "rc35-half-table", TaskID: task.ID, Engine: "qmigration", SourceSchema: "app", SourceTable: "orders", TargetSchema: "app", TargetTable: "orders", Status: "READY", TopologyPerformance: map[string]domain.TableTopologyPerformance{
+	table := domain.MigrationTable{ID: "rc35-half-table", TaskID: task.ID, Engine: "dts", SourceSchema: "app", SourceTable: "orders", TargetSchema: "app", TargetTable: "orders", Status: "READY", TopologyPerformance: map[string]domain.TableTopologyPerformance{
 		"dn-bad": {Health: "CIRCUIT_OPEN", SlowStreak: 5, Samples: 10, HealthChangedAt: now.Add(-2 * time.Second)},
 	}}
 	_ = repo.CreateMigrationTable(ctx, &table)
 	_ = repo.CreateChunks(ctx, []domain.MigrationChunk{{ID: "rc35-half-chunk", TaskID: task.ID, TableID: table.ID, ChunkNo: 1, SplitType: "PK_RANGE", Status: domain.ChunkPending, TopologyID: "dn-bad"}})
-	_ = repo.UpsertWorker(ctx, &domain.Worker{ID: "rc35-worker", Hostname: "w", CPU: 8, Status: "ONLINE", Capabilities: []string{"qmigration"}, LastHeartbeat: now})
+	_ = repo.UpsertWorker(ctx, &domain.Worker{ID: "rc35-worker", Hostname: "w", CPU: 8, Status: "ONLINE", Capabilities: []string{"dts"}, LastHeartbeat: now})
 	job, err := svc.ClaimChunk(ctx, "rc35-worker")
 	if err != nil {
 		t.Fatal(err)
@@ -3385,14 +3385,14 @@ func TestRC36CircuitOpenRunningChunkDrainsAtDurableBatchBoundary(t *testing.T) {
 	now := time.Now()
 	_ = repo.CreateDataSource(ctx, &domain.DataSource{ID: "rc36-src", Type: domain.DataSourceMySQL, CreatedAt: now})
 	_ = repo.CreateDataSource(ctx, &domain.DataSource{ID: "rc36-dst", Type: domain.DataSourceMySQL, CreatedAt: now})
-	task := domain.MigrationTask{ID: "rc36-drain-task", SourceID: "rc36-src", TargetID: "rc36-dst", Status: domain.StatusFullMigrating, Mode: domain.ModeFull, FullEngine: "qmigration", Parallelism: 1, EffectiveParallelism: 1, BatchRows: 100, CreatedAt: now, UpdatedAt: now}
+	task := domain.MigrationTask{ID: "rc36-drain-task", SourceID: "rc36-src", TargetID: "rc36-dst", Status: domain.StatusFullMigrating, Mode: domain.ModeFull, FullEngine: "dts", Parallelism: 1, EffectiveParallelism: 1, BatchRows: 100, CreatedAt: now, UpdatedAt: now}
 	_ = repo.CreateMigration(ctx, &task)
-	table := domain.MigrationTable{ID: "rc36-drain-table", TaskID: task.ID, Engine: "qmigration", SourceSchema: "app", SourceTable: "orders", TargetSchema: "app", TargetTable: "orders", Status: "READY", TopologyPerformance: map[string]domain.TableTopologyPerformance{
+	table := domain.MigrationTable{ID: "rc36-drain-table", TaskID: task.ID, Engine: "dts", SourceSchema: "app", SourceTable: "orders", TargetSchema: "app", TargetTable: "orders", Status: "READY", TopologyPerformance: map[string]domain.TableTopologyPerformance{
 		"dn-a": {Health: "HEALTHY", Samples: 10},
 	}}
 	_ = repo.CreateMigrationTable(ctx, &table)
 	_ = repo.CreateChunks(ctx, []domain.MigrationChunk{{ID: "rc36-drain-chunk", TaskID: task.ID, TableID: table.ID, ChunkNo: 1, SplitType: "PK_RANGE", Start: 1, End: 1000, Status: domain.ChunkPending, TopologyID: "dn-a"}})
-	_ = repo.UpsertWorker(ctx, &domain.Worker{ID: "rc36-worker", Hostname: "w", CPU: 8, Status: "ONLINE", Capabilities: []string{"qmigration"}, LastHeartbeat: now})
+	_ = repo.UpsertWorker(ctx, &domain.Worker{ID: "rc36-worker", Hostname: "w", CPU: 8, Status: "ONLINE", Capabilities: []string{"dts"}, LastHeartbeat: now})
 	job, err := svc.ClaimChunk(ctx, "rc36-worker")
 	if err != nil {
 		t.Fatal(err)
@@ -3457,19 +3457,19 @@ func TestRC36CircuitDrainRefusesUnsafeUnsplittableChunk(t *testing.T) {
 }
 
 func TestRC37DegradedTopologyThrottlesRunningChunk(t *testing.T) {
-	t.Setenv("QMIGRATION_TOPOLOGY_DEGRADED_BATCH_PCT", "40")
-	t.Setenv("QMIGRATION_TOPOLOGY_DEGRADED_PAUSE_MS", "333")
+	t.Setenv("DTS_TOPOLOGY_DEGRADED_BATCH_PCT", "40")
+	t.Setenv("DTS_TOPOLOGY_DEGRADED_PAUSE_MS", "333")
 	ctx := context.Background()
 	repo := memory.New()
 	svc := NewService(repo, nil)
 	now := time.Now()
-	task := domain.MigrationTask{ID: "rc37-throttle-task", Status: domain.StatusFullMigrating, FullEngine: "qmigration", Parallelism: 1, EffectiveParallelism: 1, BatchRows: 1000, ReadLimitMBps: 10, WriteLimitMBps: 20, TargetThroughputMBps: 30, CreatedAt: now, UpdatedAt: now}
+	task := domain.MigrationTask{ID: "rc37-throttle-task", Status: domain.StatusFullMigrating, FullEngine: "dts", Parallelism: 1, EffectiveParallelism: 1, BatchRows: 1000, ReadLimitMBps: 10, WriteLimitMBps: 20, TargetThroughputMBps: 30, CreatedAt: now, UpdatedAt: now}
 	_ = repo.CreateMigration(ctx, &task)
-	table := domain.MigrationTable{ID: "rc37-throttle-table", TaskID: task.ID, Engine: "qmigration", TopologyPerformance: map[string]domain.TableTopologyPerformance{"dn-a": {Health: "DEGRADED", Samples: 10}}}
+	table := domain.MigrationTable{ID: "rc37-throttle-table", TaskID: task.ID, Engine: "dts", TopologyPerformance: map[string]domain.TableTopologyPerformance{"dn-a": {Health: "DEGRADED", Samples: 10}}}
 	_ = repo.CreateMigrationTable(ctx, &table)
 	chunk := domain.MigrationChunk{ID: "rc37-throttle-chunk", TaskID: task.ID, TableID: table.ID, ChunkNo: 1, SplitType: "PK_RANGE", Start: 1, End: 1000, Status: domain.ChunkRunning, WorkerID: "rc37-worker", TopologyID: "dn-a", StartedAt: now.Add(-time.Minute)}
 	_ = repo.CreateChunks(ctx, []domain.MigrationChunk{chunk})
-	_ = repo.UpsertWorker(ctx, &domain.Worker{ID: "rc37-worker", Hostname: "w", CPU: 8, Status: "ONLINE", Capabilities: []string{"qmigration"}, LastHeartbeat: now})
+	_ = repo.UpsertWorker(ctx, &domain.Worker{ID: "rc37-worker", Hostname: "w", CPU: 8, Status: "ONLINE", Capabilities: []string{"dts"}, LastHeartbeat: now})
 
 	control, err := svc.RenewChunk(ctx, "rc37-worker", chunk.ID, domain.ChunkProgress{CursorJSON: `{"after_pk":100}`, RowsRead: 100, RowsWritten: 100, BytesRead: 1024, BytesWritten: 1024, LastBatchRows: 1000})
 	if err != nil {
@@ -3490,22 +3490,22 @@ func TestRC37DegradedTopologyThrottlesRunningChunk(t *testing.T) {
 }
 
 func TestRC37DegradedTopologyConvergesAlreadyRunningConcurrency(t *testing.T) {
-	t.Setenv("QMIGRATION_TOPOLOGY_DEGRADED_MAX_CONCURRENCY", "1")
+	t.Setenv("DTS_TOPOLOGY_DEGRADED_MAX_CONCURRENCY", "1")
 	ctx := context.Background()
 	repo := memory.New()
 	svc := NewService(repo, nil)
 	now := time.Now()
-	task := domain.MigrationTask{ID: "rc37-shed-task", Status: domain.StatusFullMigrating, FullEngine: "qmigration", Parallelism: 2, EffectiveParallelism: 2, BatchRows: 100, CreatedAt: now, UpdatedAt: now}
+	task := domain.MigrationTask{ID: "rc37-shed-task", Status: domain.StatusFullMigrating, FullEngine: "dts", Parallelism: 2, EffectiveParallelism: 2, BatchRows: 100, CreatedAt: now, UpdatedAt: now}
 	_ = repo.CreateMigration(ctx, &task)
-	table := domain.MigrationTable{ID: "rc37-shed-table", TaskID: task.ID, Engine: "qmigration", TopologyPerformance: map[string]domain.TableTopologyPerformance{"dn-a": {Health: "DEGRADED", Samples: 10}}}
+	table := domain.MigrationTable{ID: "rc37-shed-table", TaskID: task.ID, Engine: "dts", TopologyPerformance: map[string]domain.TableTopologyPerformance{"dn-a": {Health: "DEGRADED", Samples: 10}}}
 	_ = repo.CreateMigrationTable(ctx, &table)
 	chunks := []domain.MigrationChunk{
 		{ID: "rc37-keep", TaskID: task.ID, TableID: table.ID, ChunkNo: 1, SplitType: "PK_RANGE", Start: 1, End: 1000, Status: domain.ChunkRunning, WorkerID: "rc37-w1", TopologyID: "dn-a", StartedAt: now.Add(-2 * time.Minute)},
 		{ID: "rc37-yield", TaskID: task.ID, TableID: table.ID, ChunkNo: 2, SplitType: "PK_RANGE", Start: 1001, End: 2000, Status: domain.ChunkRunning, WorkerID: "rc37-w2", TopologyID: "dn-a", StartedAt: now.Add(-time.Minute)},
 	}
 	_ = repo.CreateChunks(ctx, chunks)
-	_ = repo.UpsertWorker(ctx, &domain.Worker{ID: "rc37-w1", Hostname: "w1", CPU: 8, Status: "ONLINE", Capabilities: []string{"qmigration"}, LastHeartbeat: now})
-	_ = repo.UpsertWorker(ctx, &domain.Worker{ID: "rc37-w2", Hostname: "w2", CPU: 8, Status: "ONLINE", Capabilities: []string{"qmigration"}, LastHeartbeat: now})
+	_ = repo.UpsertWorker(ctx, &domain.Worker{ID: "rc37-w1", Hostname: "w1", CPU: 8, Status: "ONLINE", Capabilities: []string{"dts"}, LastHeartbeat: now})
+	_ = repo.UpsertWorker(ctx, &domain.Worker{ID: "rc37-w2", Hostname: "w2", CPU: 8, Status: "ONLINE", Capabilities: []string{"dts"}, LastHeartbeat: now})
 
 	keep, err := svc.RenewChunk(ctx, "rc37-w1", "rc37-keep", domain.ChunkProgress{CursorJSON: `{"after_pk":100}`, RowsWritten: 100, BytesWritten: 1024, LastBatchRows: 100})
 	if err != nil {
@@ -3550,11 +3550,11 @@ func TestRC37DegradedTopologyConvergesAlreadyRunningConcurrency(t *testing.T) {
 }
 
 func TestRC38DegradedRecoveryUsesHysteresisAndRampsConcurrency(t *testing.T) {
-	t.Setenv("QMIGRATION_TOPOLOGY_DEGRADED_MAX_CONCURRENCY", "1")
-	t.Setenv("QMIGRATION_TOPOLOGY_RECOVERY_MAX_CONCURRENCY", "3")
-	t.Setenv("QMIGRATION_TOPOLOGY_RECOVERY_MIN_DEGRADED_SECONDS", "0")
-	t.Setenv("QMIGRATION_TOPOLOGY_RECOVERY_STEP_GOOD_SAMPLES", "2")
-	t.Setenv("QMIGRATION_TOPOLOGY_RECOVERY_HEALTHY_GOOD_SAMPLES", "6")
+	t.Setenv("DTS_TOPOLOGY_DEGRADED_MAX_CONCURRENCY", "1")
+	t.Setenv("DTS_TOPOLOGY_RECOVERY_MAX_CONCURRENCY", "3")
+	t.Setenv("DTS_TOPOLOGY_RECOVERY_MIN_DEGRADED_SECONDS", "0")
+	t.Setenv("DTS_TOPOLOGY_RECOVERY_STEP_GOOD_SAMPLES", "2")
+	t.Setenv("DTS_TOPOLOGY_RECOVERY_HEALTHY_GOOD_SAMPLES", "6")
 	ctx := context.Background()
 	repo := memory.New()
 	svc := NewService(repo, nil)
@@ -3615,9 +3615,9 @@ func TestRC38DegradedRecoveryUsesHysteresisAndRampsConcurrency(t *testing.T) {
 }
 
 func TestRC38BadSampleResetsRecoveryRamp(t *testing.T) {
-	t.Setenv("QMIGRATION_TOPOLOGY_DEGRADED_MAX_CONCURRENCY", "1")
-	t.Setenv("QMIGRATION_TOPOLOGY_RECOVERY_MAX_CONCURRENCY", "4")
-	t.Setenv("QMIGRATION_TOPOLOGY_RECOVERY_MIN_DEGRADED_SECONDS", "0")
+	t.Setenv("DTS_TOPOLOGY_DEGRADED_MAX_CONCURRENCY", "1")
+	t.Setenv("DTS_TOPOLOGY_RECOVERY_MAX_CONCURRENCY", "4")
+	t.Setenv("DTS_TOPOLOGY_RECOVERY_MIN_DEGRADED_SECONDS", "0")
 	ctx := context.Background()
 	repo := memory.New()
 	svc := NewService(repo, nil)
@@ -3662,9 +3662,9 @@ func TestRC38HalfOpenRecoveryIgnoresHistoricalTailAfterGoodProbe(t *testing.T) {
 }
 
 func TestRC39FaultDomainPeerRiskThrottlesHealthyRunningChunk(t *testing.T) {
-	t.Setenv("QMIGRATION_TOPOLOGY_FAULT_DOMAIN_PROTECTION", "true")
-	t.Setenv("QMIGRATION_TOPOLOGY_FAULT_DOMAIN_CRITICAL_BATCH_PCT", "40")
-	t.Setenv("QMIGRATION_TOPOLOGY_FAULT_DOMAIN_CRITICAL_PAUSE_MS", "300")
+	t.Setenv("DTS_TOPOLOGY_FAULT_DOMAIN_PROTECTION", "true")
+	t.Setenv("DTS_TOPOLOGY_FAULT_DOMAIN_CRITICAL_BATCH_PCT", "40")
+	t.Setenv("DTS_TOPOLOGY_FAULT_DOMAIN_CRITICAL_PAUSE_MS", "300")
 	ctx := context.Background()
 	repo := memory.New()
 	svc := NewService(repo, connector.NewRegistry())
@@ -3693,19 +3693,19 @@ func TestRC39FaultDomainPeerRiskThrottlesHealthyRunningChunk(t *testing.T) {
 }
 
 func TestRC40FaultDomainConvergesAlreadyRunningConcurrencyAndPreservesDomain(t *testing.T) {
-	t.Setenv("QMIGRATION_TOPOLOGY_FAULT_DOMAIN_PROTECTION", "true")
-	t.Setenv("QMIGRATION_TOPOLOGY_FAULT_DOMAIN_RUNNING_SHED", "true")
-	t.Setenv("QMIGRATION_TOPOLOGY_FAULT_DOMAIN_CRITICAL_MAX_CONCURRENCY", "1")
+	t.Setenv("DTS_TOPOLOGY_FAULT_DOMAIN_PROTECTION", "true")
+	t.Setenv("DTS_TOPOLOGY_FAULT_DOMAIN_RUNNING_SHED", "true")
+	t.Setenv("DTS_TOPOLOGY_FAULT_DOMAIN_CRITICAL_MAX_CONCURRENCY", "1")
 	ctx := context.Background()
 	repo := memory.New()
 	svc := NewService(repo, nil)
 	now := time.Now()
-	task := domain.MigrationTask{ID: "rc40-domain-task", Status: domain.StatusFullMigrating, FullEngine: "qmigration", Parallelism: 4, EffectiveParallelism: 4, BatchRows: 100, CreatedAt: now, UpdatedAt: now}
+	task := domain.MigrationTask{ID: "rc40-domain-task", Status: domain.StatusFullMigrating, FullEngine: "dts", Parallelism: 4, EffectiveParallelism: 4, BatchRows: 100, CreatedAt: now, UpdatedAt: now}
 	if err := repo.CreateMigration(ctx, &task); err != nil {
 		t.Fatal(err)
 	}
 	table := domain.MigrationTable{
-		ID: "rc40-domain-table", TaskID: task.ID, Engine: "qmigration",
+		ID: "rc40-domain-table", TaskID: task.ID, Engine: "dts",
 		Topology: []domain.TopologyPlacement{
 			{ID: "dn-a", Labels: map[string]string{"region": "sg", "zone": "az-1", "rack": "r1"}},
 			{ID: "dn-b", Labels: map[string]string{"region": "sg", "zone": "az-1", "rack": "r2"}},
@@ -3728,8 +3728,8 @@ func TestRC40FaultDomainConvergesAlreadyRunningConcurrencyAndPreservesDomain(t *
 	if err := repo.CreateChunks(ctx, chunks); err != nil {
 		t.Fatal(err)
 	}
-	_ = repo.UpsertWorker(ctx, &domain.Worker{ID: "rc40-w1", Hostname: "w1", CPU: 8, Status: "ONLINE", Capabilities: []string{"qmigration"}, LastHeartbeat: now})
-	_ = repo.UpsertWorker(ctx, &domain.Worker{ID: "rc40-w2", Hostname: "w2", CPU: 8, Status: "ONLINE", Capabilities: []string{"qmigration"}, LastHeartbeat: now})
+	_ = repo.UpsertWorker(ctx, &domain.Worker{ID: "rc40-w1", Hostname: "w1", CPU: 8, Status: "ONLINE", Capabilities: []string{"dts"}, LastHeartbeat: now})
+	_ = repo.UpsertWorker(ctx, &domain.Worker{ID: "rc40-w2", Hostname: "w2", CPU: 8, Status: "ONLINE", Capabilities: []string{"dts"}, LastHeartbeat: now})
 
 	keep, err := svc.RenewChunk(ctx, "rc40-w1", "rc40-keep", domain.ChunkProgress{CursorJSON: `{"after_pk":100}`, RowsWritten: 100, BytesWritten: 1024, LastBatchRows: 100})
 	if err != nil {
@@ -3768,7 +3768,7 @@ func TestRC40FaultDomainConvergesAlreadyRunningConcurrencyAndPreservesDomain(t *
 	if running != 1 || pending == 0 {
 		t.Fatalf("expected one running survivor plus pending remainder: %+v", all)
 	}
-	if _, err := repo.ClaimChunk(ctx, "rc40-w2", chunkLease, []string{"qmigration"}); !errors.Is(err, repository.ErrNoChunk) {
+	if _, err := repo.ClaimChunk(ctx, "rc40-w2", chunkLease, []string{"dts"}); !errors.Is(err, repository.ErrNoChunk) {
 		t.Fatalf("pending domain remainder must remain blocked while critical cap occupied: %v", err)
 	}
 }
@@ -3818,7 +3818,7 @@ func TestRC44ComplexValidationStreamsChunkDescriptorsByPage(t *testing.T) {
 }
 
 func TestRC49RoutingTransparentYieldRelocation(t *testing.T) {
-	t.Setenv("QMIGRATION_RUNNING_CHUNK_RELOCATION", "1")
+	t.Setenv("DTS_RUNNING_CHUNK_RELOCATION", "1")
 	ctx := context.Background()
 	repo := memory.New()
 	src := domain.DataSource{ID: "rc49-src", Type: domain.DataSourceTiDB, Database: "app", CreatedAt: time.Now()}

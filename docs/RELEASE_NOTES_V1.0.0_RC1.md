@@ -1,4 +1,4 @@
-# QMigration V1.0.0 RC1 Release Notes
+# DTS V1.0.0 RC1 Release Notes
 
 V1.0.0 RC1 consolidates the V0.1–V0.14 development line into the first feature-complete release candidate of the Go + Vue heterogeneous database migration platform.
 
@@ -6,7 +6,7 @@ V1.0.0 RC1 consolidates the V0.1–V0.14 development line into the first feature
 
 `Discover -> Assess -> Schema -> Full Load -> CDC -> Validate -> Catch-up -> Cutover -> Reverse CDC -> Rollback`
 
-The release keeps QMigration as the control plane. DataX, SeaTunnel, Flink CDC, Debezium and Canal remain pluggable execution engines rather than becoming the product state model.
+The release keeps DTS as the control plane. DataX, SeaTunnel, Flink CDC, Debezium and Canal remain pluggable execution engines rather than becoming the product state model.
 
 ## Full-load planning and recovery
 
@@ -58,10 +58,10 @@ The release keeps QMigration as the control plane. DataX, SeaTunnel, Flink CDC, 
 - Prometheus `/metrics` and alert rules.
 - WebSocket task/CDC/Worker live events.
 - Task logs, platform alerts and audit events.
-- `qmigrationctl` operations CLI.
+- `dtsctl` operations CLI.
 - Docker and Kubernetes deployment manifests, Worker HPA, control-plane PDB.
 - Metadata backup/restore scripts with SHA-256 verification.
 
 ## Release-candidate boundary
 
-V1.0 RC1 is feature complete at the QMigration product/control-plane level. Vendor-specific procedural SQL conversion and databases that only have an External JDBC adapter continue to rely on the selected external migration/CDC engine; QMigration intentionally does not pretend those vendor log formats are natively implemented when they are not.
+V1.0 RC1 is feature complete at the DTS product/control-plane level. Vendor-specific procedural SQL conversion and databases that only have an External JDBC adapter continue to rely on the selected external migration/CDC engine; DTS intentionally does not pretend those vendor log formats are natively implemented when they are not.

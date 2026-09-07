@@ -1,5 +1,5 @@
 {
-  "name": "qmigration-web",
+  "name": "dts-web",
   "private": true,
   "version": "0.15.0-rc49",
   "type": "module",

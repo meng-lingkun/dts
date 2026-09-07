@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	cdcruntime "qmigration/backend/internal/cdc/runtime"
-	damengconnector "qmigration/backend/internal/connector/dameng"
-	"qmigration/backend/internal/domain"
+	cdcruntime "dts/backend/internal/cdc/runtime"
+	damengconnector "dts/backend/internal/connector/dameng"
+	"dts/backend/internal/domain"
 )
 
 type Source interface {

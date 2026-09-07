@@ -6,8 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"qmigration/backend/internal/cdc/mysqlbinlog"
-	"qmigration/backend/internal/connector"
+	"dts/backend/internal/cdc/mysqlbinlog"
+	"dts/backend/internal/connector"
 )
 
 const (

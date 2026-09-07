@@ -10,19 +10,19 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"qmigration/backend/internal/connector"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/connector"
+	"dts/backend/internal/domain"
 )
 
 func TestOracleNativeCapabilityGates(t *testing.T) {
-	t.Setenv("QMIGRATION_EXPERIMENTAL_ORACLE_NATIVE", "")
-	t.Setenv("QMIGRATION_EXPERIMENTAL_ORACLE_LOGMINER_CDC", "")
+	t.Setenv("DTS_EXPERIMENTAL_ORACLE_NATIVE", "")
+	t.Setenv("DTS_EXPERIMENTAL_ORACLE_LOGMINER_CDC", "")
 	d := NewFactory().Capabilities(domain.DataSourceOracle)
 	if len(d.Capabilities) != 1 || !d.Has(connector.CapabilityProtocolProbe) {
 		t.Fatalf("default Oracle capabilities leaked: %+v", d.Capabilities)
 	}
 
-	t.Setenv("QMIGRATION_EXPERIMENTAL_ORACLE_NATIVE", "1")
+	t.Setenv("DTS_EXPERIMENTAL_ORACLE_NATIVE", "1")
 	d = NewFactory().Capabilities(domain.DataSourceOracle)
 	for _, want := range []connector.Capability{connector.CapabilityMetadata, connector.CapabilityFullRead, connector.CapabilityKeysetBoundary, connector.CapabilityPartition, connector.CapabilityRuntimeLoad, connector.CapabilitySchemaObjects, connector.CapabilityPointLookup, connector.CapabilityMigrationPrecheck} {
 		if !d.Has(want) {
@@ -35,7 +35,7 @@ func TestOracleNativeCapabilityGates(t *testing.T) {
 		}
 	}
 
-	t.Setenv("QMIGRATION_EXPERIMENTAL_ORACLE_LOGMINER_CDC", "1")
+	t.Setenv("DTS_EXPERIMENTAL_ORACLE_LOGMINER_CDC", "1")
 	d = NewFactory().Capabilities(domain.DataSourceOracle)
 	if !d.Has(connector.CapabilityCDCRead) || !d.Has(connector.CapabilityCDCPosition) || !d.Has(connector.CapabilityValidationSnapshot) {
 		t.Fatalf("LogMiner CDC/exact validation capabilities missing: %+v", d.Capabilities)
@@ -46,8 +46,8 @@ func TestOracleNativeCapabilityGates(t *testing.T) {
 }
 
 func TestOracleValidationSnapshotSCNContract(t *testing.T) {
-	t.Setenv("QMIGRATION_EXPERIMENTAL_ORACLE_NATIVE", "1")
-	t.Setenv("QMIGRATION_EXPERIMENTAL_ORACLE_LOGMINER_CDC", "1")
+	t.Setenv("DTS_EXPERIMENTAL_ORACLE_NATIVE", "1")
+	t.Setenv("DTS_EXPERIMENTAL_ORACLE_LOGMINER_CDC", "1")
 	c := &Connector{ds: domain.DataSource{Type: domain.DataSourceOracle, Host: "oracle", Port: 1521, Database: "ORCL"}}
 	if _, err := c.OpenValidationSnapshot(context.Background(), domain.CDCPosition{PositionType: "GTID", PositionValue: "1"}); err == nil {
 		t.Fatal("non-SCN validation position accepted")
@@ -118,8 +118,8 @@ func TestOracleIdentifierAndHashPredicateShape(t *testing.T) {
 }
 
 func TestOracleTargetCapabilityGate(t *testing.T) {
-	t.Setenv("QMIGRATION_EXPERIMENTAL_ORACLE_NATIVE", "1")
-	t.Setenv("QMIGRATION_EXPERIMENTAL_ORACLE_TARGET", "1")
+	t.Setenv("DTS_EXPERIMENTAL_ORACLE_NATIVE", "1")
+	t.Setenv("DTS_EXPERIMENTAL_ORACLE_TARGET", "1")
 	d := NewFactory().Capabilities(domain.DataSourceOracle)
 	for _, want := range []connector.Capability{
 		connector.CapabilityFullWrite,
@@ -182,8 +182,8 @@ func TestOracleKeylessLargeLOBUsesTemporaryLOBBlock(t *testing.T) {
 }
 
 func TestOracleWriteBatchArrayBindAndPreparedReexecute(t *testing.T) {
-	t.Setenv("QMIGRATION_EXPERIMENTAL_ORACLE_NATIVE", "1")
-	t.Setenv("QMIGRATION_EXPERIMENTAL_ORACLE_TARGET", "1")
+	t.Setenv("DTS_EXPERIMENTAL_ORACLE_NATIVE", "1")
+	t.Setenv("DTS_EXPERIMENTAL_ORACLE_TARGET", "1")
 	client, server := net.Pipe()
 	defer client.Close()
 	defer server.Close()
@@ -265,8 +265,8 @@ func TestOracleWriteBatchArrayBindAndPreparedReexecute(t *testing.T) {
 }
 
 func TestOracleKeylessLargeLOBWriteSpansTNSDataPackets(t *testing.T) {
-	t.Setenv("QMIGRATION_EXPERIMENTAL_ORACLE_NATIVE", "1")
-	t.Setenv("QMIGRATION_EXPERIMENTAL_ORACLE_TARGET", "1")
+	t.Setenv("DTS_EXPERIMENTAL_ORACLE_NATIVE", "1")
+	t.Setenv("DTS_EXPERIMENTAL_ORACLE_TARGET", "1")
 	client, server := net.Pipe()
 	defer client.Close()
 	defer server.Close()

@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"qmigration/backend/internal/connector"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/connector"
+	"dts/backend/internal/domain"
 )
 
 func oracleString(v string) string { return "'" + strings.ReplaceAll(v, "'", "''") + "'" }
@@ -589,7 +589,7 @@ func minInt(a, b int) int {
 
 func requireOracleTargetEnabled() error {
 	if !experimentalOracleTargetEnabled() {
-		return errors.New("Oracle target operations require QMIGRATION_EXPERIMENTAL_ORACLE_TARGET=1 together with QMIGRATION_EXPERIMENTAL_ORACLE_NATIVE=1")
+		return errors.New("Oracle target operations require DTS_EXPERIMENTAL_ORACLE_TARGET=1 together with DTS_EXPERIMENTAL_ORACLE_NATIVE=1")
 	}
 	return nil
 }

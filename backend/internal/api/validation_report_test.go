@@ -15,22 +15,22 @@ import (
 	"testing"
 	"time"
 
-	"qmigration/backend/internal/connector"
-	"qmigration/backend/internal/domain"
-	"qmigration/backend/internal/engine"
-	"qmigration/backend/internal/repository/memory"
-	"qmigration/backend/internal/validationreport"
+	"dts/backend/internal/connector"
+	"dts/backend/internal/domain"
+	"dts/backend/internal/engine"
+	"dts/backend/internal/repository/memory"
+	"dts/backend/internal/validationreport"
 )
 
 func newValidationReportTestServer(t *testing.T) *Server {
 	t.Helper()
-	t.Setenv("QMIGRATION_AUTH_REQUIRED", "false")
-	t.Setenv("QMIGRATION_RBAC_TOKENS", "")
-	t.Setenv("QMIGRATION_API_TOKEN", "")
-	t.Setenv("QMIGRATION_VALIDATION_REPORT_HMAC_KEY", "0123456789abcdef0123456789abcdef")
-	t.Setenv("QMIGRATION_VALIDATION_REPORT_HMAC_KEY_ID", "test-key")
-	t.Setenv("QMIGRATION_VALIDATION_REPORT_ED25519_PRIVATE_KEY", base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{5}, ed25519.SeedSize)))
-	t.Setenv("QMIGRATION_VALIDATION_REPORT_ED25519_KEY_ID", "public-test-key")
+	t.Setenv("DTS_AUTH_REQUIRED", "false")
+	t.Setenv("DTS_RBAC_TOKENS", "")
+	t.Setenv("DTS_API_TOKEN", "")
+	t.Setenv("DTS_VALIDATION_REPORT_HMAC_KEY", "0123456789abcdef0123456789abcdef")
+	t.Setenv("DTS_VALIDATION_REPORT_HMAC_KEY_ID", "test-key")
+	t.Setenv("DTS_VALIDATION_REPORT_ED25519_PRIVATE_KEY", base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{5}, ed25519.SeedSize)))
+	t.Setenv("DTS_VALIDATION_REPORT_ED25519_KEY_ID", "public-test-key")
 	repo := memory.New()
 	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
 	task := &domain.MigrationTask{ID: "m-report", Name: "acceptance", Mode: domain.ModeFullAndIncremental, Status: domain.StatusFinished, SourceID: "src", TargetID: "dst", RowsMigrated: 10, BytesMigrated: 100, CreatedAt: now.Add(-time.Hour), UpdatedAt: now}
@@ -65,13 +65,13 @@ func TestValidationReportEndpoints(t *testing.T) {
 		if !strings.HasPrefix(rr.Body.String(), tc.prefix) {
 			t.Fatalf("%s prefix=%q", tc.path, rr.Body.String()[:minInt(len(rr.Body.String()), 20)])
 		}
-		if rr.Header().Get("X-QMigration-Content-SHA256") == "" {
+		if rr.Header().Get("X-DTS-Content-SHA256") == "" {
 			t.Fatalf("%s missing SHA header", tc.path)
 		}
 	}
 	rr := httptest.NewRecorder()
 	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/metrics", nil))
-	if !strings.Contains(rr.Body.String(), "qmigration_validation_report_exports_total 4") {
+	if !strings.Contains(rr.Body.String(), "dts_validation_report_exports_total 4") {
 		t.Fatalf("missing report export metric: %s", rr.Body.String())
 	}
 }
@@ -88,20 +88,20 @@ func TestRC47ValidationReportPublicKeyEndpoint(t *testing.T) {
 			t.Fatalf("public key response missing %q: %s", required, rr.Body.String())
 		}
 	}
-	if rr.Header().Get("X-QMigration-Public-Key-Fingerprint-SHA256") == "" {
+	if rr.Header().Get("X-DTS-Public-Key-Fingerprint-SHA256") == "" {
 		t.Fatal("missing public key fingerprint header")
 	}
 
 	rr = httptest.NewRecorder()
 	s.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/v1/migrations/m-report/validation-report?format=json", nil))
-	if rr.Header().Get("X-QMigration-Content-SHA256") == "" {
+	if rr.Header().Get("X-DTS-Content-SHA256") == "" {
 		t.Fatal("missing content sha")
 	}
 }
 
 func TestValidationReportArchiveRequiresConfiguredS3(t *testing.T) {
-	t.Setenv("QMIGRATION_VALIDATION_REPORT_S3_ENDPOINT", "")
-	t.Setenv("QMIGRATION_VALIDATION_REPORT_S3_BUCKET", "")
+	t.Setenv("DTS_VALIDATION_REPORT_S3_ENDPOINT", "")
+	t.Setenv("DTS_VALIDATION_REPORT_S3_BUCKET", "")
 	s := newValidationReportTestServer(t)
 	rr := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/v1/migrations/m-report/validation-report/archive", nil))
@@ -162,14 +162,14 @@ func TestRC47ValidationReportArchiveRegistersImmutableExternalProof(t *testing.T
 	fake := &rc47APIFakeS3{data: map[string][]byte{}, headers: map[string]http.Header{}}
 	ts := httptest.NewServer(fake)
 	defer ts.Close()
-	t.Setenv("QMIGRATION_VALIDATION_REPORT_S3_ENDPOINT", ts.URL)
-	t.Setenv("QMIGRATION_VALIDATION_REPORT_S3_BUCKET", "reports")
-	t.Setenv("QMIGRATION_VALIDATION_REPORT_S3_PREFIX", "acceptance")
-	t.Setenv("QMIGRATION_VALIDATION_REPORT_S3_REGION", "us-east-1")
-	t.Setenv("QMIGRATION_VALIDATION_REPORT_S3_ACCESS_KEY", "ak")
-	t.Setenv("QMIGRATION_VALIDATION_REPORT_S3_SECRET_KEY", "sk")
-	t.Setenv("QMIGRATION_VALIDATION_REPORT_S3_PATH_STYLE", "true")
-	t.Setenv("QMIGRATION_VALIDATION_REPORT_OBJECT_LOCK_MODE", "OFF")
+	t.Setenv("DTS_VALIDATION_REPORT_S3_ENDPOINT", ts.URL)
+	t.Setenv("DTS_VALIDATION_REPORT_S3_BUCKET", "reports")
+	t.Setenv("DTS_VALIDATION_REPORT_S3_PREFIX", "acceptance")
+	t.Setenv("DTS_VALIDATION_REPORT_S3_REGION", "us-east-1")
+	t.Setenv("DTS_VALIDATION_REPORT_S3_ACCESS_KEY", "ak")
+	t.Setenv("DTS_VALIDATION_REPORT_S3_SECRET_KEY", "sk")
+	t.Setenv("DTS_VALIDATION_REPORT_S3_PATH_STYLE", "true")
+	t.Setenv("DTS_VALIDATION_REPORT_OBJECT_LOCK_MODE", "OFF")
 	srv := newValidationReportTestServer(t)
 	h := srv.Handler()
 	for i := 0; i < 2; i++ {

@@ -1,5 +1,5 @@
-#ifndef QMIGRATION_GBASE8S_CDC_PROVIDER_H
-#define QMIGRATION_GBASE8S_CDC_PROVIDER_H
+#ifndef DTS_GBASE8S_CDC_PROVIDER_H
+#define DTS_GBASE8S_CDC_PROVIDER_H
 
 #include <stdint.h>
 
@@ -10,7 +10,7 @@ extern "C" {
 #define QM_GBASE8S_CDC_ABI_VERSION 4u
 
 /*
- * Stable C ABI used by qmigration-gbase8s-cdc-agent.
+ * Stable C ABI used by dts-gbase8s-cdc-agent.
  *
  * All returned char* values (successful JSON responses and error_text) must be
  * heap objects owned by the provider and released by qm_gbase8s_cdc_free().
@@ -19,7 +19,7 @@ extern "C" {
  *
  * The provider is datasource-local. It owns GBase Client-SDK credentials and
  * cdc_opensess/cdc_startcapture/cdc_activatesess/ifx_lo_read calls. It must not
- * expect QMigration to send database credentials in checkpoint/read requests.
+ * expect DTS to send database credentials in checkpoint/read requests.
  */
 uint32_t qm_gbase8s_cdc_abi_version(void);
 

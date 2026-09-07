@@ -1,4 +1,4 @@
-# QMigration V0.9.0 Release Notes
+# DTS V0.9.0 Release Notes
 
 ## Theme
 
@@ -13,7 +13,7 @@ V0.9 focuses on correctness of non-table schema object migration. It adds View d
 - Dependency cycles or unavailable dependency metadata become `MANUAL`.
 - Existing target Views are skipped only when definitions are provably equivalent.
 - PostgreSQL Sequence discovery distinguishes standalone, SERIAL/`OWNED BY`, and IDENTITY-backed sequences.
-- SERIAL sequence binding is mapped through QMigration Table/Column Mapping and restored with `OWNED BY` plus column `DEFAULT nextval(...)`.
+- SERIAL sequence binding is mapped through DTS Table/Column Mapping and restored with `OWNED BY` plus column `DEFAULT nextval(...)`.
 - IDENTITY-backed source sequences are never converted to plain sequences automatically.
 - Sequence binding metadata discovery failure is fail-safe and disables automatic Apply.
 - Compatibility assessment and Vue Schema Object tab expose dependencies and binding semantics.

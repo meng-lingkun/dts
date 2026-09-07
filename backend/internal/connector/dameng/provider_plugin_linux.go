@@ -16,7 +16,7 @@ var damengPluginState struct {
 
 // loadDriverPlugin loads an optional Go plugin whose init functions register
 // the vendor-provided DM database/sql driver. This keeps the proprietary DM
-// driver outside QMigration's source archive while allowing the stock Linux
+// driver outside DTS's source archive while allowing the stock Linux
 // Server/Worker binaries to activate it at runtime.
 func loadDriverPlugin(path string) error {
 	path = strings.TrimSpace(path)

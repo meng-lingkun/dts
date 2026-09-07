@@ -1,4 +1,4 @@
-# QMigration V0.5.0 Release Notes
+# DTS V0.5.0 Release Notes
 
 ## Release focus
 
@@ -15,18 +15,18 @@ V0.5.0 introduces the first built-in CDC data plane while retaining SeaTunnel, D
 - Schema object discovery, index/foreign-key assessment and deferred post-load DDL.
 - AUTO per-table full-load routing between Native and external engines.
 - Adaptive batch sizing, slow-range splitting and Worker resource-aware scheduling.
-- Native CDC executable discovery from PATH, sibling binary directory or `QMIGRATION_BIN_DIR`.
+- Native CDC executable discovery from PATH, sibling binary directory or `DTS_BIN_DIR`.
 - Backend container now packages all six Go executables.
 
 ## Shipped executables
 
 ```text
-qmigration-server
-qmigration-worker
-qmigration-cdc-bridge
-qmigration-binlog-inspect
-qmigration-mysql-cdc
-qmigration-postgres-cdc
+dts-server
+dts-worker
+dts-cdc-bridge
+dts-binlog-inspect
+dts-mysql-cdc
+dts-postgres-cdc
 ```
 
 ## Native MySQL CDC requirements
@@ -46,7 +46,7 @@ Unsupported MySQL DDL, partial JSON row updates and unknown binary JSON OPAQUE e
 - replication privilege
 - tables included in the managed publication
 
-QMigration ACKs LSN only after the target transaction and QMigration checkpoint succeed.
+DTS ACKs LSN only after the target transaction and DTS checkpoint succeed.
 
 ## Verification performed
 

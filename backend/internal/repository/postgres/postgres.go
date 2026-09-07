@@ -6,9 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"qmigration/backend/internal/connector/postgres"
-	"qmigration/backend/internal/domain"
-	"qmigration/backend/internal/repository"
+	"dts/backend/internal/connector/postgres"
+	"dts/backend/internal/domain"
+	"dts/backend/internal/repository"
 	"sort"
 	"strconv"
 	"strings"
@@ -297,7 +297,7 @@ func (s *Store) ReleaseControlOperation(ctx context.Context, taskID, operation, 
 }
 
 func tableCols() string {
-	return "id,task_id,COALESCE(NULLIF(engine,''),'qmigration'),source_schema,source_table,target_schema,target_table,primary_key,COALESCE(target_primary_key,''),primary_key_type,columns_json::text,target_columns_json::text,estimated_rows,data_length,COALESCE(min_pk,0),COALESCE(max_pk,0),total_chunks,finished_chunks,rows_migrated,bytes_migrated,status,indexes_json::text,foreign_keys_json::text,COALESCE(topology_json,'[]'::jsonb)::text,COALESCE(partitions_json,'[]'::jsonb)::text,COALESCE(split_strategy,'AUTO'),COALESCE(custom_where,''),COALESCE(hash_buckets,0),COALESCE(profile_bytes_per_sec,0),COALESCE(profile_rows_per_sec,0),COALESCE(recommended_chunk_rows,0),COALESCE(performance_samples,0),COALESCE(topology_performance_json,'{}'::jsonb)::text"
+	return "id,task_id,COALESCE(NULLIF(engine,''),'dts'),source_schema,source_table,target_schema,target_table,primary_key,COALESCE(target_primary_key,''),primary_key_type,columns_json::text,target_columns_json::text,estimated_rows,data_length,COALESCE(min_pk,0),COALESCE(max_pk,0),total_chunks,finished_chunks,rows_migrated,bytes_migrated,status,indexes_json::text,foreign_keys_json::text,COALESCE(topology_json,'[]'::jsonb)::text,COALESCE(partitions_json,'[]'::jsonb)::text,COALESCE(split_strategy,'AUTO'),COALESCE(custom_where,''),COALESCE(hash_buckets,0),COALESCE(profile_bytes_per_sec,0),COALESCE(profile_rows_per_sec,0),COALESCE(recommended_chunk_rows,0),COALESCE(performance_samples,0),COALESCE(topology_performance_json,'{}'::jsonb)::text"
 }
 func parseTable(r [][]byte) domain.MigrationTable {
 	v := domain.MigrationTable{ID: sv(r, 0), TaskID: sv(r, 1), Engine: sv(r, 2), SourceSchema: sv(r, 3), SourceTable: sv(r, 4), TargetSchema: sv(r, 5), TargetTable: sv(r, 6), PrimaryKey: sv(r, 7), TargetPrimaryKey: sv(r, 8), PrimaryKeyType: sv(r, 9), EstimatedRows: iv(r, 12), DataLength: iv(r, 13), MinPK: iv(r, 14), MaxPK: iv(r, 15), TotalChunks: int(iv(r, 16)), FinishedChunks: int(iv(r, 17)), RowsMigrated: iv(r, 18), BytesMigrated: iv(r, 19), Status: sv(r, 20)}
@@ -519,9 +519,9 @@ func (s *Store) ClaimChunk(ctx context.Context, worker string, lease time.Durati
 		}
 	}
 	if hasLegacyNative {
-		quoted = append(quoted, qs("qmigration"))
+		quoted = append(quoted, qs("dts"))
 	}
-	engineFilter := "COALESCE(NULLIF(t.engine,''),NULLIF(m.full_engine,''),'qmigration') IN (" + strings.Join(quoted, ",") + ")"
+	engineFilter := "COALESCE(NULLIF(t.engine,''),NULLIF(m.full_engine,''),'dts') IN (" + strings.Join(quoted, ",") + ")"
 	selector := "COALESCE(m.worker_selector_json,'{}'::jsonb)"
 	workerLabels := "COALESCE(w.labels,'{}'::jsonb)"
 	labelMatch := workerLabels + " @> " + selector
@@ -670,7 +670,7 @@ func (s *Store) ClaimEngineJob(ctx context.Context, worker string, lease time.Du
 		}
 	}
 	if legacyUnified {
-		quoted = append(quoted, qs("qmigration"))
+		quoted = append(quoted, qs("dts"))
 	}
 	sec := int(lease.Seconds())
 	if sec < 1 {

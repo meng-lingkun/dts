@@ -1,4 +1,4 @@
-# QMigration V0.15.0-rc23 Support Matrix
+# DTS V0.15.0-rc23 Support Matrix
 
 | Database | Metadata | Full Read | Full Write / CDC Apply | Source CDC | Schema / DDL | Status |
 |---|---:|---:|---:|---|---:|---|
@@ -9,7 +9,7 @@
 | openGauss / Kingbase | Yes | Yes | Yes | Not advertised | Yes | NATIVE_FULL_ONLY |
 | Oracle | Yes | Yes | Yes | LogMiner / SCN | Yes | EXPERIMENTAL |
 | SQL Server | Yes | Yes | Yes | SQL Server CDC / LSN | Yes | EXPERIMENTAL |
-| DB2 LUW | Yes | Yes | Yes | QMigration Log Agent + IBM db2ReadLog | Yes | EXPERIMENTAL |
+| DB2 LUW | Yes | Yes | Yes | DTS Log Agent + IBM db2ReadLog | Yes | EXPERIMENTAL |
 | Dameng / DM8 | Yes | Yes | Yes | Not advertised | Table/PK/index/FK target | EXPERIMENTAL |
 | GaussDB | Yes | Yes | Yes | mppdb_decoding binary DML + optional DDL-only classification / GAUSSDB_LSN | Target yes; selected-table DDL-only same-family replay | EXPERIMENTAL |
 | GBase 8a MPP Cluster | Yes | Yes | Full Write only; validated HASH staging+MERGE; no CDC apply | Not advertised | Table/PK create only | EXPERIMENTAL / FULL_ONLY |
@@ -17,14 +17,14 @@
 
 ## GBase 8s RC23 scope
 
-Behind `QMIGRATION_EXPERIMENTAL_GBASE8S_NATIVE=1` and
-`QMIGRATION_EXPERIMENTAL_GBASE8S_CDC=1`:
+Behind `DTS_EXPERIMENTAL_GBASE8S_NATIVE=1` and
+`DTS_EXPERIMENTAL_GBASE8S_CDC=1`:
 
 - RC19 CSDK/ODBC Full + target data plane remains unchanged;
 - RC20 transaction-aware source CDC remains apply-before-ACK with
   `restart=<earliest-open-BEGIN>;commit=<last-applied-COMMIT>`;
 - RC23 requires a Linux native C ABI v2 `.so` (or updated legacy provider) loaded by
-  `qmigration-gbase8s-cdc-agent`;
+  `dts-gbase8s-cdc-agent`;
 - legacy Go provider plugin remains compatibility-only;
 - optional SHA-256 pinning protects the native provider artifact;
 - provider calls are serialized and remote agent traffic requires TLS + token;
@@ -40,7 +40,7 @@ Fail-closed/not advertised:
 - production maturity without retained real GBase 8s/CSDK/syscdcv1 evidence;
 - smart BLOB/CLOB source values and unsupported complex/opaque/collection types;
 - keyless CDC tables;
-- QMigration SQL TLS `PREFERRED/REQUIRED` until CSDK SQL SSL mapping is qualified;
+- DTS SQL TLS `PREFERRED/REQUIRED` until CSDK SQL SSL mapping is qualified;
 - quoted/case-sensitive identifier behavior outside the safe subset.
 
 ## Remaining highest-priority gaps

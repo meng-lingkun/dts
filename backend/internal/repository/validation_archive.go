@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/domain"
 )
 
 var ErrValidationArchiveNotTerminal = errors.New("validation archive requires terminal migration state")

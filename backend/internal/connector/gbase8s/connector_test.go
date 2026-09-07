@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"qmigration/backend/internal/connector"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/connector"
+	"dts/backend/internal/domain"
 )
 
 type fakeRunner struct {
@@ -68,12 +68,12 @@ func v(s string) connector.Value { return connector.Value{Raw: []byte(s)} }
 func nullv() connector.Value     { return connector.Value{Null: true} }
 
 func TestDescriptorGateSeparatesGBase8sFrom8aAndSourceCDC(t *testing.T) {
-	t.Setenv("QMIGRATION_EXPERIMENTAL_GBASE8S_NATIVE", "")
+	t.Setenv("DTS_EXPERIMENTAL_GBASE8S_NATIVE", "")
 	d := NewFactory().Capabilities(domain.DataSourceGBase8s)
 	if d.Protocol != "gbase8s-odbc" || d.Has(connector.CapabilityFullRead) || d.Has(connector.CapabilityCDCRead) {
 		t.Fatalf("unexpected ungated descriptor: %+v", d)
 	}
-	t.Setenv("QMIGRATION_EXPERIMENTAL_GBASE8S_NATIVE", "1")
+	t.Setenv("DTS_EXPERIMENTAL_GBASE8S_NATIVE", "1")
 	d = NewFactory().Capabilities(domain.DataSourceGBase8s)
 	for _, cap := range []connector.Capability{
 		connector.CapabilityMetadata,
@@ -300,7 +300,7 @@ func TestTargetCDCTransactionAndBinaryDelete(t *testing.T) {
 }
 
 func TestPrecheckRejectsSourceCDC(t *testing.T) {
-	t.Setenv("QMIGRATION_EXPERIMENTAL_GBASE8S_NATIVE", "1")
+	t.Setenv("DTS_EXPERIMENTAL_GBASE8S_NATIVE", "1")
 	fr := &fakeRunner{}
 	fr.queryFn = func(q string, _ []any) ([][]connector.Value, error) {
 		if strings.Contains(q, "DBINFO") {
@@ -332,7 +332,7 @@ func TestValidateTransportSettingsFailsClosedOnTLS(t *testing.T) {
 		t.Fatal("expected required TLS to fail closed until CSDK SSL mapping is qualified")
 	}
 	// avoid accidental dependency on developer environment
-	_ = os.Unsetenv("QMIGRATION_GBASE8S_DRIVER_PLUGIN")
+	_ = os.Unsetenv("DTS_GBASE8S_DRIVER_PLUGIN")
 }
 
 func TestNullValueHelper(t *testing.T) {

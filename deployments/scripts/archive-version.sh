@@ -11,11 +11,11 @@ Usage:
     --out /path/to/output [--preverified-go|--no-go-verify]
 
 Produces and verifies:
-  qmigration-<version>.zip
-  qmigration-<previous-version>-to-<version>.patch
-  qmigration-<version>.patch              # formal baseline -> current
-  qmigration-<version>.sha256
-  qmigration-<version>.manifest.json
+  dts-<version>.zip
+  dts-<previous-version>-to-<version>.patch
+  dts-<version>.patch              # formal baseline -> current
+  dts-<version>.sha256
+  dts-<version>.manifest.json
 
 The source archive excludes build/runtime artifacts (.git, bin, data,
 node_modules, dist). Patches are generated from a temporary Git index so new,
@@ -59,13 +59,13 @@ PREVIOUS_VERSION=$(tr -d '[:space:]' < "$PREVIOUS/VERSION")
 
 TAG="v${VERSION}"
 PREVIOUS_TAG="v${PREVIOUS_VERSION}"
-ARCHIVE="qmigration-${TAG}.zip"
-INCREMENTAL="qmigration-${PREVIOUS_TAG}-to-${TAG}.patch"
-CUMULATIVE="qmigration-${TAG}.patch"
-SHA="qmigration-${TAG}.sha256"
-MANIFEST="qmigration-${TAG}.manifest.json"
+ARCHIVE="dts-${TAG}.zip"
+INCREMENTAL="dts-${PREVIOUS_TAG}-to-${TAG}.patch"
+CUMULATIVE="dts-${TAG}.patch"
+SHA="dts-${TAG}.sha256"
+MANIFEST="dts-${TAG}.manifest.json"
 
-TMP=$(mktemp -d "${TMPDIR:-/tmp}/qmigration-archive.XXXXXX")
+TMP=$(mktemp -d "${TMPDIR:-/tmp}/dts-archive.XXXXXX")
 cleanup() { rm -rf "$TMP"; }
 trap cleanup EXIT
 
@@ -93,8 +93,8 @@ make_patch() {
   (
     cd "$repo"
     git init -q
-    git config user.name QMigration-Archive
-    git config user.email archive@qmigration.local
+    git config user.name DTS-Archive
+    git config user.email archive@dts.local
     git add -A
     git commit -qm baseline
     rsync -a --delete "${RSYNC_EXCLUDES[@]}" "$SOURCE/" "$repo/"
@@ -128,11 +128,11 @@ verify_patch() {
 }
 
 # Normalize into a versioned top-level directory for a predictable ZIP layout.
-STAGE="$TMP/qmigration-${TAG}"
+STAGE="$TMP/dts-${TAG}"
 normalize_tree "$SOURCE" "$STAGE"
 (
   cd "$TMP"
-  zip -qr "$OUT/$ARCHIVE" "qmigration-${TAG}"
+  zip -qr "$OUT/$ARCHIVE" "dts-${TAG}"
 )
 
 make_patch "$PREVIOUS" "$OUT/$INCREMENTAL"
@@ -163,7 +163,7 @@ elif preverified_go == "1":
 else:
     go_ok, go_mode = False, "not-run"
 obj={
-    "product":"QMigration",
+    "product":"DTS",
     "version":version,
     "previous_version":previous,
     "created_at_utc":datetime.datetime.now(datetime.timezone.utc).isoformat(),

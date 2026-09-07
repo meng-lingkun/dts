@@ -9,9 +9,9 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"qmigration/backend/internal/domain"
-	"qmigration/backend/internal/faultinject"
-	"qmigration/backend/internal/repository"
+	"dts/backend/internal/domain"
+	"dts/backend/internal/faultinject"
+	"dts/backend/internal/repository"
 	"strconv"
 	"strings"
 	"sync"
@@ -103,10 +103,10 @@ var _ repository.ValidationReportArchiveProvider = (*Store)(nil)
 
 func ConfigFromEnv() Config {
 	cfg := Config{
-		Root:             filepath.Clean(env("QMIGRATION_CDC_SPOOL_DIR", filepath.Join("data", "cdc-spool"))),
-		WarnUsedPct:      floatEnv("QMIGRATION_CDC_SPOOL_DISK_WARN_PCT", 80),
-		CriticalUsedPct:  floatEnv("QMIGRATION_CDC_SPOOL_DISK_CRITICAL_PCT", 90),
-		AppliedRetention: time.Duration(intEnv("QMIGRATION_CDC_SPOOL_APPLIED_FILE_RETENTION_HOURS", 24)) * time.Hour,
+		Root:             filepath.Clean(env("DTS_CDC_SPOOL_DIR", filepath.Join("data", "cdc-spool"))),
+		WarnUsedPct:      floatEnv("DTS_CDC_SPOOL_DISK_WARN_PCT", 80),
+		CriticalUsedPct:  floatEnv("DTS_CDC_SPOOL_DISK_CRITICAL_PCT", 90),
+		AppliedRetention: time.Duration(intEnv("DTS_CDC_SPOOL_APPLIED_FILE_RETENTION_HOURS", 24)) * time.Hour,
 	}
 	return cfg
 }
@@ -281,7 +281,7 @@ func (s *Store) storageStats() (domain.CDCSpoolStats, error) {
 		return domain.CDCSpoolStats{}, err
 	}
 	if s.cfg.CapacityBytesOverride > 0 && s.cfg.CapacityBytesOverride < capacity {
-		// Treat current QMigration spool bytes as the used portion of an explicit quota.
+		// Treat current DTS spool bytes as the used portion of an explicit quota.
 		used, err := dirBytes(s.cfg.Root)
 		if err != nil {
 			return domain.CDCSpoolStats{}, err

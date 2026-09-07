@@ -17,7 +17,7 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/domain"
 	"strconv"
 	"strings"
 	"time"
@@ -163,7 +163,7 @@ func (c *pgClient) startupWithParams(ctx context.Context, user, password, databa
 	body.Write(cstr("client_encoding"))
 	body.Write(cstr("UTF8"))
 	body.Write(cstr("application_name"))
-	body.Write(cstr("qmigration"))
+	body.Write(cstr("dts"))
 	for key, value := range extra {
 		body.Write(cstr(key))
 		body.Write(cstr(value))

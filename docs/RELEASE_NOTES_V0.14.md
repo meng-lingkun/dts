@@ -1,4 +1,4 @@
-# QMigration V0.14 Release Notes (Draft)
+# DTS V0.14 Release Notes (Draft)
 
 ## Native Datasource TLS
 
@@ -36,7 +36,7 @@ V0.14 also absorbs the useful split-planning ideas from DataX/SeaTunnel into the
 
 ### Compatibility / Fallback
 
-Boundary discovery is an optimization, not a correctness dependency. If the source database/version cannot execute the window-function boundary query, QMigration falls back to one durable keyset stream. Actual migration reads never use OFFSET-based checkpoints.
+Boundary discovery is an optimization, not a correctness dependency. If the source database/version cannot execute the window-function boundary query, DTS falls back to one durable keyset stream. Actual migration reads never use OFFSET-based checkpoints.
 
 ## Adaptive Chunk Refinement
 
@@ -61,7 +61,7 @@ Worker lease renewal is now also a control loop, not only a liveness heartbeat.
 - Automatic batch shrink under database/worker pressure and gradual recovery when pressure clears.
 - Metadata migration `012_v14_backpressure.sql`.
 
-Default thresholds are configurable through `QMIGRATION_BACKPRESSURE_*` environment variables. The current loop intentionally reacts to observed migration-path latency before introducing vendor-specific monitoring dependencies.
+Default thresholds are configurable through `DTS_BACKPRESSURE_*` environment variables. The current loop intentionally reacts to observed migration-path latency before introducing vendor-specific monitoring dependencies.
 
 ## Worker Topology Affinity
 
@@ -69,7 +69,7 @@ V0.14 adds a generic placement layer that can later consume PolarDB-X DN, TiDB R
 
 ### Added
 
-- Worker labels from `QMIGRATION_WORKER_LABELS` (CSV `key=value` or JSON object).
+- Worker labels from `DTS_WORKER_LABELS` (CSV `key=value` or JSON object).
 - Task-level `worker_selector` and `worker_affinity` (`PREFERRED` / `REQUIRED`).
 - Affinity-aware in-memory and PostgreSQL Claim scheduling.
 - Per-table running-chunk balancing as a secondary rank to reduce hotspot concentration.
@@ -95,7 +95,7 @@ V0.14 dev4 connects the generic label scheduler to live database topology while 
 
 ### Safety
 
-Topology placement is deliberately soft. A logical keyset/range does not always map exactly to one PolarDB-X DN, TiDB Region, or OceanBase Tablet. QMigration therefore uses topology only to rank eligible workers and falls back safely when labels do not match. Exact physical partition routing will only be enabled for database/version combinations where the mapping can be proven.
+Topology placement is deliberately soft. A logical keyset/range does not always map exactly to one PolarDB-X DN, TiDB Region, or OceanBase Tablet. DTS therefore uses topology only to rank eligible workers and falls back safely when labels do not match. Exact physical partition routing will only be enabled for database/version combinations where the mapping can be proven.
 
 ### Remaining
 

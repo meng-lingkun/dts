@@ -19,10 +19,10 @@ import (
 	"strings"
 	"time"
 
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/domain"
 )
 
-// QMigration's DRDA implementation is intentionally self-contained.  The
+// DTS's DRDA implementation is intentionally self-contained.  The
 // command/code-point sequence follows the public DRDA/DDM protocol: EXCSAT ->
 // ACCSEC -> SECCHK -> ACCRDB, then PRPSQLSTT/OPNQRY for queries and
 // EXCSQLIMM for dynamic SQL.  No IBM CLI/JDBC runtime is loaded.
@@ -232,10 +232,10 @@ func packEXCSAT() ([]byte, error) {
 		binary.BigEndian.PutUint16(b[:], v)
 		mb = append(mb, b[:]...)
 	}
-	ex, _ := packCP500(cpEXTNAM, "QMigration")
-	sn, _ := packCP500(cpSRVNAM, "QMigration")
+	ex, _ := packCP500(cpEXTNAM, "DTS")
+	sn, _ := packCP500(cpSRVNAM, "DTS")
 	rl, _ := packCP500(cpSRVRLSLV, "0.15")
-	sc, _ := packCP500(cpSRVCLSNM, "QMigration")
+	sc, _ := packCP500(cpSRVCLSNM, "DTS")
 	return packDDM(cpEXCSAT, join(ex, sn, rl, packParam(cpMGRLVLLS, mb), sc)), nil
 }
 func packACCSEC(database string, secmec uint16, token []byte) ([]byte, error) {

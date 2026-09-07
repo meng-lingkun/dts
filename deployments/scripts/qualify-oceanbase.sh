@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-BIN="${QMIGRATION_BIN_DIR:-$ROOT/bin}/qmigration-oceanbase-qualify"
+BIN="${DTS_BIN_DIR:-$ROOT/bin}/dts-oceanbase-qualify"
 if [[ ! -x "$BIN" ]]; then
   echo "ERROR: $BIN not found; run 'make backend-build' first" >&2
   exit 1

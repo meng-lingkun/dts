@@ -1,4 +1,4 @@
-# QMigration V0.15.0-rc20 Support Matrix
+# DTS V0.15.0-rc20 Support Matrix
 
 | Database | Metadata | Full Read | Full Write / CDC Apply | Source CDC | Schema / DDL | Status |
 |---|---:|---:|---:|---|---:|---|
@@ -9,7 +9,7 @@
 | openGauss / Kingbase | Yes | Yes | Yes | Not advertised | Yes | NATIVE_FULL_ONLY |
 | Oracle | Yes | Yes | Yes | LogMiner / SCN | Yes | EXPERIMENTAL |
 | SQL Server | Yes | Yes | Yes | SQL Server CDC / LSN | Yes | EXPERIMENTAL |
-| DB2 LUW | Yes | Yes | Yes | QMigration Log Agent + IBM db2ReadLog | Yes | EXPERIMENTAL |
+| DB2 LUW | Yes | Yes | Yes | DTS Log Agent + IBM db2ReadLog | Yes | EXPERIMENTAL |
 | Dameng / DM8 | Yes | Yes | Yes | Not advertised | Table/PK/index/FK target | EXPERIMENTAL |
 | GaussDB | Yes | Yes | Yes | mppdb_decoding binary DML + optional DDL-only classification / GAUSSDB_LSN | Target yes; selected-table DDL-only same-family replay | EXPERIMENTAL |
 | GBase 8a MPP Cluster | Yes | Yes | Full Write only; validated HASH staging+MERGE; no CDC apply | Not advertised | Table/PK create only | EXPERIMENTAL / FULL_ONLY |
@@ -17,12 +17,12 @@
 
 ## GBase 8s RC20 scope
 
-Behind `QMIGRATION_EXPERIMENTAL_GBASE8S_NATIVE=1`; source CDC additionally requires `QMIGRATION_EXPERIMENTAL_GBASE8S_CDC=1`:
+Behind `DTS_EXPERIMENTAL_GBASE8S_NATIVE=1`; source CDC additionally requires `DTS_EXPERIMENTAL_GBASE8S_CDC=1`:
 
 - distinct `gbase8s` datasource/Connector family; it is not routed through GBase
   8a;
 - vendor GBase Client-SDK ODBC is only the SQL transport provider;
-- QMigration-owned catalog Metadata and numeric/composite keyset Full Read;
+- DTS-owned catalog Metadata and numeric/composite keyset Full Read;
 - optional ordered `NTILE` boundary planning;
 - conservative GBase 8s target type conversion;
 - pre-existing target owner + table/PK/index/FK creation;
@@ -33,7 +33,7 @@ Behind `QMIGRATION_EXPERIMENTAL_GBASE8S_NATIVE=1`; source CDC additionally requi
 - qualification/precheck tooling;
 - source CDC through a datasource-local CSDK smart-LOB provider;
 - durable `GBASE8S_CDC_SEQ` restart/commit watermarks with long-transaction rewind;
-- apply-before-ACK through the shared QMigration CDC runtime.
+- apply-before-ACK through the shared DTS CDC runtime.
 
 Fail-closed/not advertised:
 
@@ -42,7 +42,7 @@ Fail-closed/not advertised:
 - keyless target Full Write;
 - implicit target user/owner creation;
 - quoted/case-sensitive identifiers outside the RC20 safe identifier subset;
-- QMigration TLS `PREFERRED/REQUIRED` until CSDK SSL parameters are retained-qualified;
+- DTS TLS `PREFERRED/REQUIRED` until CSDK SSL parameters are retained-qualified;
 - production maturity without retained GBase 8s V8.8/CSDK/unixODBC/topology/
   charset/failover reports.
 

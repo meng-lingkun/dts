@@ -1,4 +1,4 @@
--- QMigration V0.15.0-rc49 software gap-closure marker.
+-- DTS V0.15.0-rc49 software gap-closure marker.
 -- This release primarily adds protocol/provider/runtime capabilities and does
 -- not persist private HSM/KMS/TSA material in metadata.
 INSERT INTO metadata_schema_state(id, schema_version, updated_at)

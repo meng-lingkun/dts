@@ -29,7 +29,7 @@ func fakeTTCProtocolResponse() []byte {
 }
 
 func TestTTCProtocolCodec(t *testing.T) {
-	req := buildTTCProtocolRequest("QMigration")
+	req := buildTTCProtocolRequest("DTS")
 	if len(req) < 5 || req[0] != 1 || req[1] != 6 || req[len(req)-1] != 0 {
 		t.Fatalf("bad request %x", req)
 	}

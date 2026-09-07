@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"qmigration/backend/internal/connector"
-	oracleconnector "qmigration/backend/internal/connector/oracle"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/connector"
+	oracleconnector "dts/backend/internal/connector/oracle"
+	"dts/backend/internal/domain"
 )
 
 const toolVersion = "0.15.0-rc49"
@@ -132,12 +132,12 @@ func main() {
 	fatalIf(err)
 
 	// Qualification intentionally enables only this process's experimental gates.
-	_ = os.Setenv("QMIGRATION_EXPERIMENTAL_ORACLE_NATIVE", "1")
+	_ = os.Setenv("DTS_EXPERIMENTAL_ORACLE_NATIVE", "1")
 	if *cdc {
-		_ = os.Setenv("QMIGRATION_EXPERIMENTAL_ORACLE_LOGMINER_CDC", "1")
+		_ = os.Setenv("DTS_EXPERIMENTAL_ORACLE_LOGMINER_CDC", "1")
 	}
 	if *targetWrite {
-		_ = os.Setenv("QMIGRATION_EXPERIMENTAL_ORACLE_TARGET", "1")
+		_ = os.Setenv("DTS_EXPERIMENTAL_ORACLE_TARGET", "1")
 	}
 
 	ds := domain.DataSource{
@@ -330,7 +330,7 @@ func runTargetWriteQualification(r *runner, base connector.Connector, schema str
 			return "create qualification table", map[string]any{"table": schema + "." + table}, err
 		}
 		defer cleanup()
-		largeText := strings.Repeat("QMigration-Oracle-LOB-你", 1800)
+		largeText := strings.Repeat("DTS-Oracle-LOB-你", 1800)
 		largeBlob := make([]byte, 48<<10)
 		for i := range largeBlob {
 			largeBlob[i] = byte(i % 251)

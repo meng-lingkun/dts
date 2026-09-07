@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"qmigration/backend/internal/version"
+	"dts/backend/internal/version"
 )
 
 type evidenceFlags []string
@@ -106,7 +106,7 @@ func main() {
 	flag.Var(&software, "software", "required software evidence name=path; repeatable")
 	flag.Var(&external, "external", "production qualification evidence name=path; repeatable")
 	flag.Parse()
-	m := manifest{Product: "QMigration", Version: version.Version, GeneratedAtUTC: time.Now().UTC().Format(time.RFC3339Nano), SoftwareComplete: true, ProductionQualified: len(external) > 0, Boundary: "Software completeness and production qualification are separate. Missing real vendor/HSM/TSA/WORM/large-soak evidence never becomes PASS by implication."}
+	m := manifest{Product: "DTS", Version: version.Version, GeneratedAtUTC: time.Now().UTC().Format(time.RFC3339Nano), SoftwareComplete: true, ProductionQualified: len(external) > 0, Boundary: "Software completeness and production qualification are separate. Missing real vendor/HSM/TSA/WORM/large-soak evidence never becomes PASS by implication."}
 	for _, raw := range software {
 		n, p, err := parseSpec(raw)
 		if err != nil {

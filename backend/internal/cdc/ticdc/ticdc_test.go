@@ -19,7 +19,7 @@ import (
 	"testing"
 	"time"
 
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/domain"
 )
 
 func TestPositionRoundTrip(t *testing.T) {
@@ -288,7 +288,7 @@ func TestReaderSuppressesAlreadyDurableTransactionAfterRestart(t *testing.T) {
 		{Offset: 20, Value: []byte(`{"database":"app","table":"t","isDdl":false,"type":"INSERT","mysqlType":{"id":"int"},"data":[{"id":"1"}],"_tidb":{"commitTs":2000}}`)},
 		{Offset: 21, Value: []byte(`{"database":"","table":"","isDdl":false,"type":"TIDB_WATERMARK","_tidb":{"watermarkTs":2001}}`)},
 	}}
-	// Simulate a restart where QMigration already durably applied TSO 2000 but
+	// Simulate a restart where DTS already durably applied TSO 2000 but
 	// Kafka resumes at the last stored offset. The replayed row must become only
 	// a checkpoint transaction, never a second DML apply.
 	r, err := NewReader(f, "topic", "cf", Position{TSO: 2000, Offset: 20}, nil)

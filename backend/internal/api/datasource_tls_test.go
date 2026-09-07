@@ -3,7 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/domain"
 	"testing"
 )
 

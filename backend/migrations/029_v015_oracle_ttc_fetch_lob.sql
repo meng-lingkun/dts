@@ -1,4 +1,4 @@
--- V0.15 unified-dev13 hardens the experimental QMigration-owned Oracle TTC
+-- V0.15 unified-dev13 hardens the experimental DTS-owned Oracle TTC
 -- SQL path with coalesced-message decoding, OER/Summary cursor state, fetch
 -- continuation, ROWID decoding and bounded LOB locator/chunk primitives.
 -- Production Oracle metadata/full-read/full-write/CDC capabilities remain

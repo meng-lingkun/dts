@@ -1,10 +1,10 @@
-# QMigration V0.15.0-rc14 Support Matrix
+# DTS V0.15.0-rc14 Support Matrix
 
-This matrix describes QMigration-owned migration/runtime support. SQL-wire
+This matrix describes DTS-owned migration/runtime support. SQL-wire
 compatibility or a protocol probe alone does not imply source CDC support.
 Vendor client libraries may be required only where the database exposes a
 vendor API rather than a SQL/wire log API. RC14 uses this model for Db2
-`db2ReadLog` and uses DM's `database/sql` Go driver strictly as the Dameng SQL transport; QMigration still owns migration semantics.
+`db2ReadLog` and uses DM's `database/sql` Go driver strictly as the Dameng SQL transport; DTS still owns migration semantics.
 
 | Database | Metadata | Full Read | Full Write / CDC Apply | Source CDC | Schema / DDL | Status |
 |---|---:|---:|---:|---|---:|---|
@@ -20,41 +20,41 @@ vendor API rather than a SQL/wire log API. RC14 uses this model for Db2
 | Kingbase | Yes | Yes | Yes | Not advertised | Yes | NATIVE_FULL_ONLY |
 | Oracle | Yes | Yes | Yes | LogMiner / SCN | Yes | EXPERIMENTAL; qualification required |
 | SQL Server | Yes | Yes | Yes | SQL Server CDC / LSN | Yes | EXPERIMENTAL; qualification required |
-| **DB2 LUW** | **Yes** | **Yes, EXTDTA LOB + VECTOR_SERIALIZE source** | **Yes, Prepared SQLDTA/EXTDTA + VECTOR target** | **QMigration Log Agent + IBM db2ReadLog / DB2_LRI** | **Yes** | **EXPERIMENTAL; qualification required** |
+| **DB2 LUW** | **Yes** | **Yes, EXTDTA LOB + VECTOR_SERIALIZE source** | **Yes, Prepared SQLDTA/EXTDTA + VECTOR target** | **DTS Log Agent + IBM db2ReadLog / DB2_LRI** | **Yes** | **EXPERIMENTAL; qualification required** |
 | **Dameng / DM** | **Yes** | **Yes** | **Yes, prepared INSERT/MERGE + transactional CDC Apply** | **Not advertised** | **Table/PK/index/FK** | **EXPERIMENTAL; qualification required** |
 | **GaussDB** | **Yes** | **Yes** | **Yes** | **SQL logical decoding / mppdb_decoding / GAUSSDB_LSN** | **Yes** | **EXPERIMENTAL; qualification required** |
 | GBase | No | No | No | No | No | PROBE_ONLY |
 
 ## GaussDB RC14 scope
 
-Implemented behind `QMIGRATION_EXPERIMENTAL_GAUSSDB_NATIVE=1`:
+Implemented behind `DTS_EXPERIMENTAL_GAUSSDB_NATIVE=1`:
 
-- QMigration PostgreSQL-wire metadata, Full Read/Write, keyset/boundary, schema and target transactional apply;
-- source CDC behind the additional `QMIGRATION_EXPERIMENTAL_GAUSSDB_LOGICAL_CDC=1`;
+- DTS PostgreSQL-wire metadata, Full Read/Write, keyset/boundary, schema and target transactional apply;
+- source CDC behind the additional `DTS_EXPERIMENTAL_GAUSSDB_LOGICAL_CDC=1`;
 - current source LSN via `pg_current_xlog_location()` and durable `GAUSSDB_LSN`;
 - explicit LSN-ordered `mppdb_decoding` replication slot (`output_order=0`);
 - `pg_logical_slot_peek_changes` complete-transaction capture with BEGIN/COMMIT/XID validation;
 - documented JSON INSERT/UPDATE/DELETE envelope;
-- target Apply + durable QMigration checkpoint before `pg_logical_slot_get_changes` advances the source slot;
+- target Apply + durable DTS checkpoint before `pg_logical_slot_get_changes` advances the source slot;
 - `white-table-list`, primary-key selection validation and transaction event/byte safety bounds;
-- QMigration TLS/CA/ServerName/mTLS propagation;
-- `qmigration-gaussdb-qualify` and one-command wrapper.
+- DTS TLS/CA/ServerName/mTLS propagation;
+- `dts-gaussdb-qualify` and one-command wrapper.
 
 Fail-closed/not advertised in RC14: binary/NUL-sensitive JSON CDC families, source DDL decoding/replay, multi-primary logical decoding, and production maturity without retained centralized/distributed real-instance reports.
 
 ## Dameng RC13 scope
 
-Implemented behind `QMIGRATION_EXPERIMENTAL_DAMENG_NATIVE=1`:
+Implemented behind `DTS_EXPERIMENTAL_DAMENG_NATIVE=1`:
 
-- QMigration-owned catalog, Full Load, schema and target-apply logic;
+- DTS-owned catalog, Full Load, schema and target-apply logic;
 - DM `database/sql` driver is a replaceable SQL transport provider, not a migration runtime;
-- Linux runtime provider plugin loading through `QMIGRATION_DAMENG_DRIVER_PLUGIN`;
+- Linux runtime provider plugin loading through `DTS_DAMENG_DRIVER_PLUGIN`;
 - schema/table/column/PK/index/FK metadata;
 - numeric/composite keyset Full Read and NTILE boundaries;
 - prepared keyless INSERT / keyed MERGE, BLOB/binary parameters, point lookup/delete;
 - explicit target transactions for CDC Apply;
 - fail-closed TLS handling until provider TLS settings are qualified;
-- `qmigration-dameng-qualify` + one-command wrapper.
+- `dts-dameng-qualify` + one-command wrapper.
 
 Not advertised: Dameng source CDC. A supported and retained-qualified source-log API is required before that capability is exposed.
 
@@ -62,8 +62,8 @@ Not advertised: Dameng source CDC. A supported and retained-qualified source-log
 
 Implemented:
 
-- QMigration-owned `qmigration-db2-log-agent` on the source-side host;
-- a small QMigration C provider calling IBM's supported `db2ReadLog` API;
+- DTS-owned `dts-db2-log-agent` on the source-side host;
+- a small DTS C provider calling IBM's supported `db2ReadLog` API;
 - `DB2READLOG_FILTER_ON`, so only documented propagatable records are consumed;
 - durable `DB2_LRI` capture/resume using `nextStartLRI`;
 - `DATA CAPTURE CHANGES` and primary-key prechecks;
@@ -104,7 +104,7 @@ Fail-closed boundaries in RC12:
 
 Operational dependency: the Go Server/Worker does **not** link IBM libraries. The
 source-side DB2 Log Agent host needs IBM Data Server Client/Runtime headers and
-`libdb2` to build/run `qmigration-db2-readlog-provider`.
+`libdb2` to build/run `dts-db2-readlog-provider`.
 
 ## Remaining highest-priority gaps
 

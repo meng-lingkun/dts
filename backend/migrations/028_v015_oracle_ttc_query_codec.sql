@@ -1,4 +1,4 @@
--- V0.15 unified-dev12 adds the QMigration-owned experimental Oracle TTC
+-- V0.15 unified-dev12 adds the DTS-owned experimental Oracle TTC
 -- bind-free SELECT/OALL8 request, describe metadata and scalar row codecs behind
 -- an explicit query deep-probe gate. Production metadata/full-read/full-write
 -- and Redo CDC capabilities remain disabled until real-Oracle qualification.

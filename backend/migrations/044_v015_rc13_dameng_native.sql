@@ -1,4 +1,4 @@
--- V0.15.0 RC13 adds the qualification-gated QMigration Dameng data plane:
+-- V0.15.0 RC13 adds the qualification-gated DTS Dameng data plane:
 -- metadata/full read, schema/full write and transactional target apply through
 -- a vendor database/sql provider. No new persistent columns are required.
 INSERT INTO metadata_schema_state(id, schema_version, updated_at)

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-BIN=${QMIGRATION_GBASE8S_QUALIFY_BIN:-"$ROOT/bin/qmigration-gbase8s-qualify"}
+BIN=${DTS_GBASE8S_QUALIFY_BIN:-"$ROOT/bin/dts-gbase8s-qualify"}
 if [[ ! -x "$BIN" ]]; then
-  echo "building qmigration-gbase8s-qualify" >&2
+  echo "building dts-gbase8s-qualify" >&2
   (cd "$ROOT/backend" && go build -o "$BIN" ./cmd/gbase8s-qualify)
 fi
 : "${GBASE8S_HOST:?set GBASE8S_HOST}"

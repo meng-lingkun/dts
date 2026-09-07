@@ -1,4 +1,4 @@
-# QMigration V0.15.0-rc9 Release Notes
+# DTS V0.15.0-rc9 Release Notes
 
 RC9 continues the DB2 LUW source-CDC correctness work. It removes the blanket
 fail-closed boundary for documented inline multi-insert and the common row-level
@@ -11,7 +11,7 @@ qualification exists.
 - Decode DMS function 167 (Insert Multiple Records) using the documented row-count,
   row-length and variable-description structure.
 - Preserve each 6-byte RID and expand one physical multi-insert log record into one
-  ordered QMigration CDC INSERT event per logical row.
+  ordered DTS CDC INSERT event per logical row.
 - Validate bounded row counts, row-length sums, description boundaries and row images.
 - Decode DMS function 168 rollback descriptions and cancel the matching buffered
   multi-insert rows before target apply.

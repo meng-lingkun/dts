@@ -1,4 +1,4 @@
--- QMigration V0.15.0-rc38: topology recovery hysteresis/staged concurrency.
+-- DTS V0.15.0-rc38: topology recovery hysteresis/staged concurrency.
 -- good_streak and recovery_concurrency_cap live inside the existing
 -- migration_tables.topology_performance_json document, so no new physical
 -- column is required. This marker advances the metadata schema version.

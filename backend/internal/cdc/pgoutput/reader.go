@@ -3,13 +3,13 @@ package pgoutput
 import (
 	"context"
 	"fmt"
-	cdcruntime "qmigration/backend/internal/cdc/runtime"
-	"qmigration/backend/internal/connector"
-	"qmigration/backend/internal/domain"
+	cdcruntime "dts/backend/internal/cdc/runtime"
+	"dts/backend/internal/connector"
+	"dts/backend/internal/domain"
 	"time"
 )
 
-// Reader adapts a PostgreSQL logical replication stream to QMigration's
+// Reader adapts a PostgreSQL logical replication stream to DTS's
 // protocol-independent Native CDC Reader SPI.
 type Reader struct {
 	stream       connector.PostgreSQLLogicalStream

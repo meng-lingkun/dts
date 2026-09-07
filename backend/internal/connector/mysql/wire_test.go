@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"qmigration/backend/internal/cdc/mysqlbinlog"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/cdc/mysqlbinlog"
+	"dts/backend/internal/domain"
 	"strings"
 	"testing"
 	"time"
@@ -36,7 +36,7 @@ func testHandshakePayload() []byte {
 	caps := clientLongPassword | clientLongFlag | clientConnectWithDB | clientProtocol41 | clientTransactions | clientSecureConnection | clientMultiResults | clientPluginAuth
 	var b bytes.Buffer
 	b.WriteByte(0x0a)
-	b.WriteString("8.0.99-qmigration-test")
+	b.WriteString("8.0.99-dts-test")
 	b.WriteByte(0)
 	_ = binary.Write(&b, binary.LittleEndian, uint32(123))
 	b.WriteString("12345678")
@@ -122,7 +122,7 @@ func runFakeMySQL(t *testing.T) (host string, port int, stop func()) {
 			case q == "SELECT 1":
 				err = serveOneColumn(c, "1")
 			case q == "SELECT VERSION()":
-				err = serveOneColumn(c, "8.0.99-qmigration-test")
+				err = serveOneColumn(c, "8.0.99-dts-test")
 			default:
 				err = fmt.Errorf("unexpected query %s", q)
 			}
@@ -151,7 +151,7 @@ func TestConnectorWireAuthenticationAndQuery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v != "8.0.99-qmigration-test" {
+	if v != "8.0.99-dts-test" {
 		t.Fatalf("unexpected version %q", v)
 	}
 }

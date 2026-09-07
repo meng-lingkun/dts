@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"qmigration/backend/internal/connector"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/connector"
+	"dts/backend/internal/domain"
 )
 
 func serveTwoColumns(c net.Conn, left, right string) error {

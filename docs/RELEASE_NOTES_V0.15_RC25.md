@@ -1,4 +1,4 @@
-# QMigration V0.15.0-rc25 Release Notes
+# DTS V0.15.0-rc25 Release Notes
 
 ## Scope
 
@@ -17,7 +17,7 @@ auditing RC24. No external migration runtime is introduced.
 - RC3 single-partition checkpoints remain readable. A non-zero single-partition
   checkpoint fails closed if the topic later expands because offsets for new
   partitions cannot be inferred safely.
-- TiCDC Resolved TS is the global merge fence. QMigration emits a candidate
+- TiCDC Resolved TS is the global merge fence. DTS emits a candidate
   commitTs only after every active partition has observed a Resolved TS strictly
   greater than that commitTs.
 - Prefetched future records keep their earliest unprocessed offset in the
@@ -25,7 +25,7 @@ auditing RC24. No external migration runtime is introduced.
 
 ## Kafka security
 
-The QMigration native Kafka client now supports:
+The DTS native Kafka client now supports:
 
 - TLS 1.2+;
 - system or custom CA trust;
@@ -51,7 +51,7 @@ mechanisms fail before migration.
 - TiDB implements it by opening a fresh SQL session, setting
   `SESSION tidb_snapshot='<barrier TSO>'`, verifying the session value, and using
   that connection for every validation read.
-- `QMIGRATION_VALIDATION_REQUIRE_EXACT_WATERMARK=1` can make exact snapshots a
+- `DTS_VALIDATION_REQUIRE_EXACT_WATERMARK=1` can make exact snapshots a
   mandatory policy for a task environment.
 
 This removes the RC24 TiDB validation race with concurrent source writes. RC25
@@ -70,7 +70,7 @@ vendor-specific historical snapshot is implemented.
 
 ## Dameng / DM8 archived-log source CDC
 
-RC25 adds a separate `QMIGRATION_EXPERIMENTAL_DAMENG_LOG_CDC=1` gate on top of
+RC25 adds a separate `DTS_EXPERIMENTAL_DAMENG_LOG_CDC=1` gate on top of
 the existing native DM data plane. The software path is intentionally retained
 as EXPERIMENTAL until real DM8 qualification evidence exists.
 
@@ -79,15 +79,15 @@ as EXPERIMENTAL until real DM8 qualification evidence exists.
 - transaction identity/order: LogMiner `XID` + `COMMIT_SCN`;
 - row identity: LogMiner `ROW_ID`;
 - full row reconstruction: `AS OF SCN commitLSN-1` / `AS OF SCN commitLSN`;
-- apply ordering: target transaction + durable QMigration checkpoint before the
+- apply ordering: target transaction + durable DTS checkpoint before the
   reader acknowledges the next DM_LSN;
 - intra-transaction repeated updates are coalesced to their net row effect;
 - INSERT->DELETE in one transaction becomes a checkpoint-only net no-op;
 - long transactions use COMMIT/XA_COMMIT `START_SCN` to rewind the mining window before row decode;
 - archive gaps, missing ROW_ID, selected-table DDL/BATCH_UPDATE/UNSUPPORTED,
   missing PK and flashback-history failures stop before checkpoint advancement;
-- `qmigration-dameng-cdc` is wired into the Unified Engine;
-- `qmigration-dameng-qualify --cdc` validates prerequisites, an archived DM_LSN,
+- `dts-dameng-cdc` is wired into the Unified Engine;
+- `dts-dameng-qualify --cdc` validates prerequisites, an archived DM_LSN,
   selected-table PKs and an exact flashback snapshot.
 
 The RC25 contract requires local archived redo, `ARCH_INI=1`,
@@ -113,4 +113,4 @@ gates rather than production claims.
   complex LOB historical images, DB2 pureScale edge cases and GaussDB
   multi-primary/hybrid DDL+DML boundaries.
 
-- Transactions that share one `COMMIT_SCN` are aggregated across XIDs into one QMigration target transaction so the durable numeric `DM_LSN` cannot suppress a sibling source transaction.
+- Transactions that share one `COMMIT_SCN` are aggregated across XIDs into one DTS target transaction so the durable numeric `DM_LSN` cannot suppress a sibling source transaction.

@@ -1,5 +1,5 @@
 ALTER TABLE datasources ADD COLUMN IF NOT EXISTS schema_name text;
--- QMigration V0.3 metadata additions for deployments that choose PostgreSQL
+-- DTS V0.3 metadata additions for deployments that choose PostgreSQL
 -- as the control-plane repository in a later adapter.
 ALTER TABLE migration_tasks ADD COLUMN IF NOT EXISTS auto_create_table boolean NOT NULL DEFAULT false;
 ALTER TABLE migration_tasks ADD COLUMN IF NOT EXISTS validation_enabled boolean NOT NULL DEFAULT false;

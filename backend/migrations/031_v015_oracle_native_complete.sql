@@ -1,4 +1,4 @@
--- V0.15 unified-dev15-complete closes the QMigration-owned Oracle Native
+-- V0.15 unified-dev15-complete closes the DTS-owned Oracle Native
 -- software data plane: stream-aware TTC SQL, input/array binds, prepared DML,
 -- Full Writer including large BLOB/CLOB, schema/post-load DDL and transactional
 -- CDC apply. Real Oracle version/charset E2E qualification remains explicit and

@@ -1,6 +1,6 @@
-# QMigration RC28 CDC Chaos Qualification
+# DTS RC28 CDC Chaos Qualification
 
-Run `bin/qmigration-chaos-qualify` or `deployments/scripts/qualify-chaos.sh`. Fault injection remains disabled by default in normal runtime.
+Run `bin/dts-chaos-qualify` or `deployments/scripts/qualify-chaos.sh`. Fault injection remains disabled by default in normal runtime.
 
 The RC28 self-test covers eight deterministic windows:
 

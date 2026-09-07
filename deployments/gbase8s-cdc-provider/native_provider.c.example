@@ -2,9 +2,9 @@
  * Compile this skeleton with the locally installed GBase 8s Client-SDK/ESQL-C
  * and replace the stub bodies with cdc_opensess/cdc_startcapture/
  * cdc_activatesess + ifx_lo_read logic. No GBase headers/libraries are shipped
- * by QMigration.
+ * by DTS.
  */
-#include "qmigration_gbase8s_cdc_provider.h"
+#include "dts_gbase8s_cdc_provider.h"
 #include <stdlib.h>
 #include <string.h>
 

@@ -1,4 +1,4 @@
-// Package faultinject provides deterministic, opt-in failpoints for QMigration
+// Package faultinject provides deterministic, opt-in failpoints for DTS
 // qualification and chaos testing. Production behavior is unchanged unless the
 // operator explicitly enables fault injection.
 package faultinject
@@ -14,8 +14,8 @@ import (
 )
 
 const (
-	EnvEnable = "QMIGRATION_ENABLE_FAULT_INJECTION"
-	EnvPlan   = "QMIGRATION_FAULT_PLAN"
+	EnvEnable = "DTS_ENABLE_FAULT_INJECTION"
+	EnvPlan   = "DTS_FAULT_PLAN"
 )
 
 type trigger struct {
@@ -116,21 +116,21 @@ func Check(name string) error {
 		return nil
 	}
 	if spec.Action == "ENOSPC" {
-		return fmt.Errorf("injected QMigration ENOSPC at %s occurrence %d: %w", name, spec.Occurrence, syscall.ENOSPC)
+		return fmt.Errorf("injected DTS ENOSPC at %s occurrence %d: %w", name, spec.Occurrence, syscall.ENOSPC)
 	}
 	if spec.Action == "SIGKILL" {
 		p, e := os.FindProcess(os.Getpid())
 		if e != nil {
-			return fmt.Errorf("injected QMigration SIGKILL at %s occurrence %d: find process: %w", name, spec.Occurrence, e)
+			return fmt.Errorf("injected DTS SIGKILL at %s occurrence %d: find process: %w", name, spec.Occurrence, e)
 		}
 		if e := p.Kill(); e != nil {
-			return fmt.Errorf("injected QMigration SIGKILL at %s occurrence %d: %w", name, spec.Occurrence, e)
+			return fmt.Errorf("injected DTS SIGKILL at %s occurrence %d: %w", name, spec.Occurrence, e)
 		}
 		// Kill should not return control to this process. Keep a fail-closed
 		// fallback for unusual platforms/runtime behavior.
-		return fmt.Errorf("injected QMigration SIGKILL at %s occurrence %d returned unexpectedly", name, spec.Occurrence)
+		return fmt.Errorf("injected DTS SIGKILL at %s occurrence %d returned unexpectedly", name, spec.Occurrence)
 	}
-	return fmt.Errorf("injected QMigration fault at %s occurrence %d", name, spec.Occurrence)
+	return fmt.Errorf("injected DTS fault at %s occurrence %d", name, spec.Occurrence)
 }
 
 // Validate is used by readiness/qualification code to reject malformed plans
@@ -140,7 +140,7 @@ func Validate() error {
 		return nil
 	}
 	if strings.TrimSpace(os.Getenv(EnvPlan)) == "" {
-		return errors.New("fault injection is enabled but QMIGRATION_FAULT_PLAN is empty")
+		return errors.New("fault injection is enabled but DTS_FAULT_PLAN is empty")
 	}
 	_, err := parsePlan(os.Getenv(EnvPlan))
 	return err

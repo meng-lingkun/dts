@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"qmigration/backend/internal/connector"
-	"qmigration/backend/internal/domain"
-	"qmigration/backend/internal/faultinject"
-	"qmigration/backend/internal/migration"
-	"qmigration/backend/internal/repository/memory"
+	"dts/backend/internal/connector"
+	"dts/backend/internal/domain"
+	"dts/backend/internal/faultinject"
+	"dts/backend/internal/migration"
+	"dts/backend/internal/repository/memory"
 )
 
 const toolVersion = "0.15.0-rc49"

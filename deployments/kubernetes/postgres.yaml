@@ -2,31 +2,31 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: postgres
-  namespace: qmigration
+  namespace: dts
 spec:
   serviceName: postgres
   replicas: 1
   selector:
-    matchLabels: {app: qmigration-postgres}
+    matchLabels: {app: dts-postgres}
   template:
     metadata:
-      labels: {app: qmigration-postgres}
+      labels: {app: dts-postgres}
     spec:
       automountServiceAccountToken: false
       securityContext:
         seccompProfile: {type: RuntimeDefault}
       containers:
       - name: postgres
-        image: qmigration/postgres:17
+        image: dts/postgres:17
         imagePullPolicy: Never
         env:
-        - {name: POSTGRES_USER, value: qmigration}
-        - {name: POSTGRES_DB, value: qmigration}
+        - {name: POSTGRES_USER, value: dts}
+        - {name: POSTGRES_DB, value: dts}
         - name: POSTGRES_PASSWORD
-          valueFrom: {secretKeyRef: {name: qmigration-secrets, key: metadata-password}}
+          valueFrom: {secretKeyRef: {name: dts-secrets, key: metadata-password}}
         ports: [{containerPort: 5432, name: postgres}]
         readinessProbe:
-          exec: {command: ["pg_isready","-U","qmigration","-d","qmigration"]}
+          exec: {command: ["pg_isready","-U","dts","-d","dts"]}
           initialDelaySeconds: 5
           periodSeconds: 5
         resources:
@@ -46,7 +46,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: postgres
-  namespace: qmigration
+  namespace: dts
 spec:
-  selector: {app: qmigration-postgres}
+  selector: {app: dts-postgres}
   ports: [{port: 5432, targetPort: postgres}]

@@ -13,7 +13,7 @@ import (
 	"fmt"
 	"math/big"
 	"net"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/domain"
 	"strings"
 	"testing"
 	"time"
@@ -23,7 +23,7 @@ func testTLSHandshakePayload() []byte {
 	caps := clientLongPassword | clientLongFlag | clientConnectWithDB | clientProtocol41 | clientSSL | clientTransactions | clientSecureConnection | clientMultiResults | clientPluginAuth
 	var b bytes.Buffer
 	b.WriteByte(0x0a)
-	b.WriteString("8.0.99-qmigration-tls-test")
+	b.WriteString("8.0.99-dts-tls-test")
 	b.WriteByte(0)
 	_ = binary.Write(&b, binary.LittleEndian, uint32(123))
 	b.WriteString("12345678")
@@ -50,7 +50,7 @@ func testServerCertificate(t *testing.T) (tls.Certificate, string) {
 	}
 	caTmpl := &x509.Certificate{
 		SerialNumber:          big.NewInt(1),
-		Subject:               pkix.Name{CommonName: "QMigration Test CA"},
+		Subject:               pkix.Name{CommonName: "DTS Test CA"},
 		NotBefore:             now.Add(-time.Minute),
 		NotAfter:              now.Add(time.Hour),
 		IsCA:                  true,
@@ -163,7 +163,7 @@ func runFakeTLSMySQL(t *testing.T) (host string, port int, caPEM string, stop fu
 			case q == "SELECT 1":
 				err = serveOneColumn(tlsConn, "1")
 			case q == "SELECT VERSION()":
-				err = serveOneColumn(tlsConn, "8.0.99-qmigration-tls-test")
+				err = serveOneColumn(tlsConn, "8.0.99-dts-tls-test")
 			default:
 				err = fmt.Errorf("unexpected query %s", q)
 			}
@@ -204,7 +204,7 @@ func TestConnectorTLSRequiredWithCustomCA(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v != "8.0.99-qmigration-tls-test" {
+	if v != "8.0.99-dts-tls-test" {
 		t.Fatalf("unexpected version %q", v)
 	}
 }

@@ -3,7 +3,7 @@ package compat
 import (
 	"testing"
 
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/domain"
 )
 
 func TestNormalizeDebeziumMySQLUpdate(t *testing.T) {

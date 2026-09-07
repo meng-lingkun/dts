@@ -1,13 +1,13 @@
-# QMigration V0.15.0-rc19 Release Notes
+# DTS V0.15.0-rc19 Release Notes
 
-RC19 adds the first qualification-gated QMigration migration data plane for
+RC19 adds the first qualification-gated DTS migration data plane for
 **GBase 8s V8.8**. This is a separate product family from the existing GBase 8a
 MPP connector: RC19 does not reuse the 8a/MySQL-compatible packet path and does
 not imply GBase 8a/8c protocol compatibility.
 
 ## GBase 8s connector architecture
 
-QMigration owns:
+DTS owns:
 
 - system-catalog metadata discovery;
 - migration-key selection inputs and bounded keyset reads;
@@ -19,14 +19,14 @@ QMigration owns:
 - migration prechecks and qualification.
 
 The SQL transport is supplied by the matching GBase Client-SDK ODBC driver,
-exposed to Go through a `database/sql` ODBC provider. QMigration does not bundle
+exposed to Go through a `database/sql` ODBC provider. DTS does not bundle
 or redistribute the vendor CSDK and does not launch JDBC/DataX/SeaTunnel/Flink
 as a migration runtime.
 
 The feature is behind:
 
 ```bash
-QMIGRATION_EXPERIMENTAL_GBASE8S_NATIVE=1
+DTS_EXPERIMENTAL_GBASE8S_NATIVE=1
 ```
 
 and remains `EXPERIMENTAL / QualificationRequired` until retained real-instance
@@ -42,20 +42,20 @@ odbc:GBASE8S_APP
 DSN=GBASE8S_APP
 ```
 
-`UID=`, `USER=`, `PWD=` and `PASSWORD=` are rejected in that field. QMigration
+`UID=`, `USER=`, `PWD=` and `PASSWORD=` are rejected in that field. DTS
 keeps username/password in the normal encrypted datasource credential path and
 injects them only into the in-memory ODBC connection string at runtime.
 
 Linux Server/Worker processes can load a database/sql ODBC provider plugin with:
 
 ```bash
-QMIGRATION_GBASE8S_DRIVER_PLUGIN=/opt/qmigration/qmigration-gbase8s-driver.so
+DTS_GBASE8S_DRIVER_PLUGIN=/opt/dts/dts-gbase8s-driver.so
 ```
 
 `deployments/scripts/build-gbase8s-driver-plugin.sh` builds that plugin from a
 locally supplied Go ODBC wrapper source tree. Runtime nodes still require the
 matching GBase Client-SDK/unixODBC libraries. No vendor driver source is included
-in the QMigration archive.
+in the DTS archive.
 
 ## Metadata and Full Read
 
@@ -86,11 +86,11 @@ FLOAT/SMALLFLOAT, DATE/DATETIME, BOOLEAN, VARCHAR/LVARCHAR, BLOB/CLOB and UUID
 families. DECIMAL precision is capped at the connector's RC19 qualified software
 boundary of 32; wider source declarations are converted conservatively.
 
-QMigration does not implicitly create a GBase 8s database user/owner. The target
+DTS does not implicitly create a GBase 8s database user/owner. The target
 owner must already exist.
 
 Target Full Write requires a stable migration key. Each batch runs in a local
-transaction unless it is already inside a QMigration CDC apply transaction. For
+transaction unless it is already inside a DTS CDC apply transaction. For
 each logical row it performs:
 
 1. prepared `UPDATE ... WHERE <migration-key>` of non-key columns;
@@ -113,7 +113,7 @@ that proves all of the following together:
 - durable restart position;
 - complete transaction boundary/order;
 - row before/after image semantics for the supported type matrix;
-- an explicit source advancement/ACK contract compatible with QMigration's
+- an explicit source advancement/ACK contract compatible with DTS's
   apply-before-ACK runtime.
 
 Therefore `CapabilityCDCRead`, `CapabilityCDCPosition` and
@@ -125,7 +125,7 @@ runtime.
 
 RC19 adds:
 
-- `qmigration-gbase8s-qualify`;
+- `dts-gbase8s-qualify`;
 - `deployments/scripts/qualify-gbase8s.sh`;
 - `deployments/scripts/build-gbase8s-driver-plugin.sh`;
 - `docs/GBASE8S_NATIVE_QUALIFICATION.md`.
@@ -138,7 +138,7 @@ transactional delete -> drop on a temporary table.
 Not promoted as production support:
 
 - GBase 8s source CDC;
-- automatic CSDK TLS/SSL option mapping (non-DISABLE QMigration TLS modes fail
+- automatic CSDK TLS/SSL option mapping (non-DISABLE DTS TLS modes fail
   closed in RC19);
 - quoted/case-sensitive identifier semantics;
 - source foreign-key catalog reconstruction across every 8s catalog/version

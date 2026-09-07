@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/domain"
 )
 
 var testCaptureLineage = strings.Repeat("a", CaptureLineageHexLength)

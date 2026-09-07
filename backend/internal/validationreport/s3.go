@@ -79,16 +79,16 @@ func envInt(k string, d int) int {
 
 func S3ConfigFromEnv() S3Config {
 	return S3Config{
-		Endpoint:  strings.TrimRight(strings.TrimSpace(os.Getenv("QMIGRATION_VALIDATION_REPORT_S3_ENDPOINT")), "/"),
-		Bucket:    strings.TrimSpace(os.Getenv("QMIGRATION_VALIDATION_REPORT_S3_BUCKET")),
-		Prefix:    strings.Trim(strings.TrimSpace(envString("QMIGRATION_VALIDATION_REPORT_S3_PREFIX", "qmigration/validation-reports")), "/"),
-		Region:    strings.TrimSpace(envString("QMIGRATION_VALIDATION_REPORT_S3_REGION", "us-east-1")),
-		AccessKey: os.Getenv("QMIGRATION_VALIDATION_REPORT_S3_ACCESS_KEY"), SecretKey: os.Getenv("QMIGRATION_VALIDATION_REPORT_S3_SECRET_KEY"), SessionToken: os.Getenv("QMIGRATION_VALIDATION_REPORT_S3_SESSION_TOKEN"),
-		PathStyle: envBool("QMIGRATION_VALIDATION_REPORT_S3_PATH_STYLE", true),
-		CACert:    os.Getenv("QMIGRATION_VALIDATION_REPORT_S3_CA_CERT"), TLSServerName: strings.TrimSpace(os.Getenv("QMIGRATION_VALIDATION_REPORT_S3_TLS_SERVER_NAME")), TLSClientCert: os.Getenv("QMIGRATION_VALIDATION_REPORT_S3_TLS_CLIENT_CERT"), TLSClientKey: os.Getenv("QMIGRATION_VALIDATION_REPORT_S3_TLS_CLIENT_KEY"),
-		ObjectLockMode: strings.ToUpper(strings.TrimSpace(envString("QMIGRATION_VALIDATION_REPORT_OBJECT_LOCK_MODE", "OFF"))),
-		RetentionDays:  envInt("QMIGRATION_VALIDATION_REPORT_OBJECT_LOCK_RETENTION_DAYS", 365),
-		LegalHold:      envBool("QMIGRATION_VALIDATION_REPORT_OBJECT_LOCK_LEGAL_HOLD", false),
+		Endpoint:  strings.TrimRight(strings.TrimSpace(os.Getenv("DTS_VALIDATION_REPORT_S3_ENDPOINT")), "/"),
+		Bucket:    strings.TrimSpace(os.Getenv("DTS_VALIDATION_REPORT_S3_BUCKET")),
+		Prefix:    strings.Trim(strings.TrimSpace(envString("DTS_VALIDATION_REPORT_S3_PREFIX", "dts/validation-reports")), "/"),
+		Region:    strings.TrimSpace(envString("DTS_VALIDATION_REPORT_S3_REGION", "us-east-1")),
+		AccessKey: os.Getenv("DTS_VALIDATION_REPORT_S3_ACCESS_KEY"), SecretKey: os.Getenv("DTS_VALIDATION_REPORT_S3_SECRET_KEY"), SessionToken: os.Getenv("DTS_VALIDATION_REPORT_S3_SESSION_TOKEN"),
+		PathStyle: envBool("DTS_VALIDATION_REPORT_S3_PATH_STYLE", true),
+		CACert:    os.Getenv("DTS_VALIDATION_REPORT_S3_CA_CERT"), TLSServerName: strings.TrimSpace(os.Getenv("DTS_VALIDATION_REPORT_S3_TLS_SERVER_NAME")), TLSClientCert: os.Getenv("DTS_VALIDATION_REPORT_S3_TLS_CLIENT_CERT"), TLSClientKey: os.Getenv("DTS_VALIDATION_REPORT_S3_TLS_CLIENT_KEY"),
+		ObjectLockMode: strings.ToUpper(strings.TrimSpace(envString("DTS_VALIDATION_REPORT_OBJECT_LOCK_MODE", "OFF"))),
+		RetentionDays:  envInt("DTS_VALIDATION_REPORT_OBJECT_LOCK_RETENTION_DAYS", 365),
+		LegalHold:      envBool("DTS_VALIDATION_REPORT_OBJECT_LOCK_LEGAL_HOLD", false),
 	}
 }
 func envString(k, d string) string {

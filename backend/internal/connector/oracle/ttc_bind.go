@@ -9,7 +9,7 @@ import (
 )
 
 // oracleTTCBind is the minimal input-bind descriptor required by the OALL8
-// request shape used by QMigration. It intentionally models only scalar input
+// request shape used by DTS. It intentionally models only scalar input
 // binds used by migration DML; output/REF CURSOR bindings are outside the data
 // migration contract.
 const oracleMaxTTCRequestBytes = 256 << 20

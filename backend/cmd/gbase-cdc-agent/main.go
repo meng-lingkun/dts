@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"qmigration/backend/internal/cdc/gbase8acdc"
+	"dts/backend/internal/cdc/gbase8acdc"
 )
 
 func env(k, d string) string {
@@ -25,8 +25,8 @@ func env(k, d string) string {
 	return d
 }
 func providerConfig() (string, error) {
-	direct := strings.TrimSpace(os.Getenv("QMIGRATION_GBASE8A_CDC_PROVIDER_CONFIG_JSON"))
-	path := strings.TrimSpace(os.Getenv("QMIGRATION_GBASE8A_CDC_PROVIDER_CONFIG_FILE"))
+	direct := strings.TrimSpace(os.Getenv("DTS_GBASE8A_CDC_PROVIDER_CONFIG_JSON"))
+	path := strings.TrimSpace(os.Getenv("DTS_GBASE8A_CDC_PROVIDER_CONFIG_FILE"))
 	if direct != "" && path != "" {
 		return "", errors.New("set only one GBase 8a provider config source")
 	}
@@ -58,8 +58,8 @@ func providerConfig() (string, error) {
 	return string(b), nil
 }
 func loadProvider() (gbase8acdc.Agent, error) {
-	library := strings.TrimSpace(os.Getenv("QMIGRATION_GBASE8A_CDC_PROVIDER_LIBRARY"))
-	goPlugin := strings.TrimSpace(os.Getenv("QMIGRATION_GBASE8A_CDC_PROVIDER_PLUGIN"))
+	library := strings.TrimSpace(os.Getenv("DTS_GBASE8A_CDC_PROVIDER_LIBRARY"))
+	goPlugin := strings.TrimSpace(os.Getenv("DTS_GBASE8A_CDC_PROVIDER_PLUGIN"))
 	if library != "" && goPlugin != "" {
 		return nil, errors.New("configure only one GBase 8a CDC provider")
 	}
@@ -68,10 +68,10 @@ func loadProvider() (gbase8acdc.Agent, error) {
 		if err != nil {
 			return nil, err
 		}
-		return gbase8acdc.OpenNativeProvider(library, os.Getenv("QMIGRATION_GBASE8A_CDC_PROVIDER_SHA256"), cfg)
+		return gbase8acdc.OpenNativeProvider(library, os.Getenv("DTS_GBASE8A_CDC_PROVIDER_SHA256"), cfg)
 	}
 	if goPlugin == "" {
-		return nil, errors.New("set QMIGRATION_GBASE8A_CDC_PROVIDER_LIBRARY or legacy QMIGRATION_GBASE8A_CDC_PROVIDER_PLUGIN")
+		return nil, errors.New("set DTS_GBASE8A_CDC_PROVIDER_LIBRARY or legacy DTS_GBASE8A_CDC_PROVIDER_PLUGIN")
 	}
 	p, err := plugin.Open(goPlugin)
 	if err != nil {
@@ -220,9 +220,9 @@ func main() {
 	if c, ok := p.(interface{ Close() error }); ok {
 		defer c.Close()
 	}
-	addr := env("QMIGRATION_GBASE8A_CDC_AGENT_LISTEN", "127.0.0.1:9189")
-	token := env("QMIGRATION_GBASE8A_CDC_AGENT_TOKEN", "")
-	cert, key := env("QMIGRATION_GBASE8A_CDC_AGENT_TLS_CERT_FILE", ""), env("QMIGRATION_GBASE8A_CDC_AGENT_TLS_KEY_FILE", "")
+	addr := env("DTS_GBASE8A_CDC_AGENT_LISTEN", "127.0.0.1:9189")
+	token := env("DTS_GBASE8A_CDC_AGENT_TOKEN", "")
+	cert, key := env("DTS_GBASE8A_CDC_AGENT_TLS_CERT_FILE", ""), env("DTS_GBASE8A_CDC_AGENT_TLS_KEY_FILE", "")
 	if (cert == "") != (key == "") {
 		log.Fatal("both TLS cert/key are required")
 	}

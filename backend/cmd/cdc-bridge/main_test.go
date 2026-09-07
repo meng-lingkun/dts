@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/domain"
 	"testing"
 )
 

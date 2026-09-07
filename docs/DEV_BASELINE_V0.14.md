@@ -1,4 +1,4 @@
-# QMigration V0.14 Development Baseline
+# DTS V0.14 Development Baseline
 
 - Development version: `0.14.0-dev`
 - Formal base release: `v0.13.0`

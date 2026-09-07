@@ -10,9 +10,9 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"qmigration/backend/internal/cdc/ddlsidecar"
-	postgresconnector "qmigration/backend/internal/connector/postgres"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/cdc/ddlsidecar"
+	postgresconnector "dts/backend/internal/connector/postgres"
+	"dts/backend/internal/domain"
 	"strconv"
 	"strings"
 	"time"
@@ -50,8 +50,8 @@ func waitCDCReady(ctx context.Context, client *http.Client, endpoint, token stri
 		if token != "" {
 			req.Header.Set("Authorization", "Bearer "+token)
 		}
-		if wt := strings.TrimSpace(os.Getenv("QMIGRATION_WORKER_TOKEN")); wt != "" {
-			req.Header.Set("X-QMigration-Worker-Token", wt)
+		if wt := strings.TrimSpace(os.Getenv("DTS_WORKER_TOKEN")); wt != "" {
+			req.Header.Set("X-DTS-Worker-Token", wt)
 		}
 		resp, err := client.Do(req)
 		if err == nil {
@@ -93,8 +93,8 @@ func postTransaction(ctx context.Context, client *http.Client, endpoint, token, 
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	if wt := strings.TrimSpace(os.Getenv("QMIGRATION_WORKER_TOKEN")); wt != "" {
-		req.Header.Set("X-QMigration-Worker-Token", wt)
+	if wt := strings.TrimSpace(os.Getenv("DTS_WORKER_TOKEN")); wt != "" {
+		req.Header.Set("X-DTS-Worker-Token", wt)
 	}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -103,7 +103,7 @@ func postTransaction(ctx context.Context, client *http.Client, endpoint, token, 
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("QMigration returned %s: %s", resp.Status, strings.TrimSpace(string(data)))
+		return nil, fmt.Errorf("DTS returned %s: %s", resp.Status, strings.TrimSpace(string(data)))
 	}
 	var out domain.CDCApplyResult
 	if len(data) > 0 {
@@ -133,34 +133,34 @@ func parseTables(raw string) ([]string, error) {
 		}
 	}
 	if len(out) == 0 {
-		return nil, errors.New("QMIGRATION_OPENGAUSS_TABLES is required")
+		return nil, errors.New("DTS_OPENGAUSS_TABLES is required")
 	}
 	return out, nil
 }
 
 func run(ctx context.Context) error {
-	if !envEnabled("QMIGRATION_EXPERIMENTAL_OPENGAUSS_LOGICAL_CDC") {
-		return errors.New("openGauss CDC requires QMIGRATION_EXPERIMENTAL_OPENGAUSS_LOGICAL_CDC=1")
+	if !envEnabled("DTS_EXPERIMENTAL_OPENGAUSS_LOGICAL_CDC") {
+		return errors.New("openGauss CDC requires DTS_EXPERIMENTAL_OPENGAUSS_LOGICAL_CDC=1")
 	}
-	host, user, slot := env("QMIGRATION_OPENGAUSS_HOST", ""), env("QMIGRATION_OPENGAUSS_USER", ""), env("QMIGRATION_OPENGAUSS_SLOT", "")
+	host, user, slot := env("DTS_OPENGAUSS_HOST", ""), env("DTS_OPENGAUSS_USER", ""), env("DTS_OPENGAUSS_SLOT", "")
 	if host == "" || user == "" || slot == "" {
-		return errors.New("QMIGRATION_OPENGAUSS_HOST, USER and SLOT are required")
+		return errors.New("DTS_OPENGAUSS_HOST, USER and SLOT are required")
 	}
-	port, _ := strconv.Atoi(env("QMIGRATION_OPENGAUSS_PORT", "5432"))
+	port, _ := strconv.Atoi(env("DTS_OPENGAUSS_PORT", "5432"))
 	if port <= 0 {
 		port = 5432
 	}
-	tables, err := parseTables(env("QMIGRATION_OPENGAUSS_TABLES", ""))
+	tables, err := parseTables(env("DTS_OPENGAUSS_TABLES", ""))
 	if err != nil {
 		return err
 	}
 	ds := domain.DataSource{
 		Type: domain.DataSourceOpenGauss, Host: host, Port: port, Username: user,
-		Password: os.Getenv(env("QMIGRATION_OPENGAUSS_PASSWORD_ENV", "OPENGAUSS_PASSWORD")), Database: env("QMIGRATION_OPENGAUSS_DATABASE", user),
-		TLSMode: domain.TLSMode(env("QMIGRATION_OPENGAUSS_TLS_MODE", "REQUIRED")), TLSServerName: env("QMIGRATION_OPENGAUSS_TLS_SERVER_NAME", ""),
-		TLSCACert:     os.Getenv(env("QMIGRATION_OPENGAUSS_TLS_CA_ENV", "QMIGRATION_OPENGAUSS_TLS_CA")),
-		TLSClientCert: os.Getenv(env("QMIGRATION_OPENGAUSS_TLS_CLIENT_CERT_ENV", "QMIGRATION_OPENGAUSS_TLS_CLIENT_CERT")),
-		TLSClientKey:  os.Getenv(env("QMIGRATION_OPENGAUSS_TLS_CLIENT_KEY_ENV", "QMIGRATION_OPENGAUSS_TLS_CLIENT_KEY")),
+		Password: os.Getenv(env("DTS_OPENGAUSS_PASSWORD_ENV", "OPENGAUSS_PASSWORD")), Database: env("DTS_OPENGAUSS_DATABASE", user),
+		TLSMode: domain.TLSMode(env("DTS_OPENGAUSS_TLS_MODE", "REQUIRED")), TLSServerName: env("DTS_OPENGAUSS_TLS_SERVER_NAME", ""),
+		TLSCACert:     os.Getenv(env("DTS_OPENGAUSS_TLS_CA_ENV", "DTS_OPENGAUSS_TLS_CA")),
+		TLSClientCert: os.Getenv(env("DTS_OPENGAUSS_TLS_CLIENT_CERT_ENV", "DTS_OPENGAUSS_TLS_CLIENT_CERT")),
+		TLSClientKey:  os.Getenv(env("DTS_OPENGAUSS_TLS_CLIENT_KEY_ENV", "DTS_OPENGAUSS_TLS_CLIENT_KEY")),
 	}
 	raw, err := postgresconnector.NewFactory().New(ds)
 	if err != nil {
@@ -172,25 +172,25 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("openGauss connection: %w", err)
 	}
 
-	server := strings.TrimRight(env("QMIGRATION_SERVER", "http://127.0.0.1:8080"), "/")
-	taskID := env("QMIGRATION_TASK_ID", "")
+	server := strings.TrimRight(env("DTS_SERVER", "http://127.0.0.1:8080"), "/")
+	taskID := env("DTS_TASK_ID", "")
 	if taskID == "" {
-		return errors.New("QMIGRATION_TASK_ID is required")
+		return errors.New("DTS_TASK_ID is required")
 	}
-	direction := strings.ToLower(env("QMIGRATION_CDC_DIRECTION", "forward"))
+	direction := strings.ToLower(env("DTS_CDC_DIRECTION", "forward"))
 	if direction != "forward" && direction != "reverse" {
 		return errors.New("invalid CDC direction")
 	}
-	endpoint := env("QMIGRATION_CDC_ENDPOINT", server+"/api/v1/migrations/"+taskID+"/cdc/events")
-	ready, token := env("QMIGRATION_CDC_READY_ENDPOINT", ""), env("QMIGRATION_API_TOKEN", "")
+	endpoint := env("DTS_CDC_ENDPOINT", server+"/api/v1/migrations/"+taskID+"/cdc/events")
+	ready, token := env("DTS_CDC_READY_ENDPOINT", ""), env("DTS_API_TOKEN", "")
 	client := &http.Client{Timeout: 90 * time.Second}
 	var ddlClient *ddlsidecar.Client
-	if envEnabled("QMIGRATION_EXPERIMENTAL_OPENGAUSS_DDL_CDC") {
-		url := env("QMIGRATION_OPENGAUSS_DDL_SIDECAR_URL", "")
+	if envEnabled("DTS_EXPERIMENTAL_OPENGAUSS_DDL_CDC") {
+		url := env("DTS_OPENGAUSS_DDL_SIDECAR_URL", "")
 		if url == "" {
-			return errors.New("openGauss DDL CDC requires QMIGRATION_OPENGAUSS_DDL_SIDECAR_URL")
+			return errors.New("openGauss DDL CDC requires DTS_OPENGAUSS_DDL_SIDECAR_URL")
 		}
-		ddlClient, err = ddlsidecar.New(url, env("QMIGRATION_OPENGAUSS_DDL_SIDECAR_TOKEN", ""), env("QMIGRATION_OPENGAUSS_DDL_SIDECAR_SERVER_NAME", ""), os.Getenv(env("QMIGRATION_OPENGAUSS_DDL_SIDECAR_CA_ENV", "QMIGRATION_OPENGAUSS_DDL_SIDECAR_CA")))
+		ddlClient, err = ddlsidecar.New(url, env("DTS_OPENGAUSS_DDL_SIDECAR_TOKEN", ""), env("DTS_OPENGAUSS_DDL_SIDECAR_SERVER_NAME", ""), os.Getenv(env("DTS_OPENGAUSS_DDL_SIDECAR_CA_ENV", "DTS_OPENGAUSS_DDL_SIDECAR_CA")))
 		if err != nil {
 			return err
 		}
@@ -199,11 +199,11 @@ func run(ctx context.Context) error {
 		return err
 	}
 
-	maxChanges, _ := strconv.Atoi(env("QMIGRATION_OPENGAUSS_CDC_MAX_CHANGES", "4096"))
+	maxChanges, _ := strconv.Atoi(env("DTS_OPENGAUSS_CDC_MAX_CHANGES", "4096"))
 	if maxChanges <= 0 {
 		maxChanges = 4096
 	}
-	poll, err := time.ParseDuration(env("QMIGRATION_OPENGAUSS_CDC_POLL_INTERVAL", "1s"))
+	poll, err := time.ParseDuration(env("DTS_OPENGAUSS_CDC_POLL_INTERVAL", "1s"))
 	if err != nil || poll <= 0 {
 		poll = time.Second
 	}

@@ -15,7 +15,7 @@ import (
 	"fmt"
 	"math/big"
 	"net"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/domain"
 	"strings"
 	"testing"
 	"time"
@@ -130,7 +130,7 @@ func testOracleTLSCertificate(t *testing.T) (tls.Certificate, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	caTmpl := &x509.Certificate{SerialNumber: big.NewInt(201), Subject: pkix.Name{CommonName: "QMigration Oracle Test CA"}, NotBefore: now.Add(-time.Minute), NotAfter: now.Add(time.Hour), IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature}
+	caTmpl := &x509.Certificate{SerialNumber: big.NewInt(201), Subject: pkix.Name{CommonName: "DTS Oracle Test CA"}, NotBefore: now.Add(-time.Minute), NotAfter: now.Add(time.Hour), IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature}
 	caDER, err := x509.CreateCertificate(rand.Reader, caTmpl, caTmpl, &caKey.PublicKey, caKey)
 	if err != nil {
 		t.Fatal(err)
@@ -335,7 +335,7 @@ func TestOpenAcceptedSessionKeepsTransportForTTCLayer(t *testing.T) {
 }
 
 func TestNativeOracleDeepProbeNegotiatesTTCProtocol(t *testing.T) {
-	t.Setenv("QMIGRATION_EXPERIMENTAL_ORACLE_TTC_NEGOTIATION", "1")
+	t.Setenv("DTS_EXPERIMENTAL_ORACLE_TTC_NEGOTIATION", "1")
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -401,7 +401,7 @@ func TestNativeOracleDeepProbeNegotiatesTTCProtocol(t *testing.T) {
 }
 
 func TestNativeOracleExperimentalTTCAuthTranscript(t *testing.T) {
-	t.Setenv("QMIGRATION_EXPERIMENTAL_ORACLE_TTC_AUTH", "1")
+	t.Setenv("DTS_EXPERIMENTAL_ORACLE_TTC_AUTH", "1")
 	const password = "Secret123!"
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

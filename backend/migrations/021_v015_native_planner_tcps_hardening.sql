@@ -1,4 +1,4 @@
--- QMigration V0.15.0-unified-dev5
+-- DTS V0.15.0-unified-dev5
 -- Native SQL Server planner/CDC hardening + Oracle TCPS/TNS DATA transport release marker.
 -- No new durable columns are required by this release; advancing the metadata
 -- schema marker keeps /readyz and controlled upgrades version-safe.

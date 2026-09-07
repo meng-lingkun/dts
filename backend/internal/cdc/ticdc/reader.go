@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	cdcruntime "qmigration/backend/internal/cdc/runtime"
-	"qmigration/backend/internal/domain"
+	cdcruntime "dts/backend/internal/cdc/runtime"
+	"dts/backend/internal/domain"
 )
 
 const (
@@ -486,7 +486,7 @@ func (r *Reader) multiPosition(tso uint64) Position {
 
 func validateTransactionBounds(tso uint64, eventCount, byteCount int) error {
 	if eventCount > ticdcMaxTransactionEvents || byteCount > ticdcMaxTransactionBytes {
-		return fmt.Errorf("TiCDC transaction TSO %d exceeds QMigration bounds: events=%d bytes=%d", tso, eventCount, byteCount)
+		return fmt.Errorf("TiCDC transaction TSO %d exceeds DTS bounds: events=%d bytes=%d", tso, eventCount, byteCount)
 	}
 	return nil
 }

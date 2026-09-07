@@ -10,8 +10,8 @@ import (
 	"log"
 	"net/http"
 	"os"
-	postgresconnector "qmigration/backend/internal/connector/postgres"
-	"qmigration/backend/internal/domain"
+	postgresconnector "dts/backend/internal/connector/postgres"
+	"dts/backend/internal/domain"
 	"strconv"
 	"strings"
 	"time"
@@ -50,8 +50,8 @@ func waitCDCReady(ctx context.Context, client *http.Client, endpoint, token stri
 		if token != "" {
 			req.Header.Set("Authorization", "Bearer "+token)
 		}
-		if wt := strings.TrimSpace(os.Getenv("QMIGRATION_WORKER_TOKEN")); wt != "" {
-			req.Header.Set("X-QMigration-Worker-Token", wt)
+		if wt := strings.TrimSpace(os.Getenv("DTS_WORKER_TOKEN")); wt != "" {
+			req.Header.Set("X-DTS-Worker-Token", wt)
 		}
 		resp, err := client.Do(req)
 		if err == nil {
@@ -93,8 +93,8 @@ func postTransaction(ctx context.Context, client *http.Client, endpoint, token, 
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	if wt := strings.TrimSpace(os.Getenv("QMIGRATION_WORKER_TOKEN")); wt != "" {
-		req.Header.Set("X-QMigration-Worker-Token", wt)
+	if wt := strings.TrimSpace(os.Getenv("DTS_WORKER_TOKEN")); wt != "" {
+		req.Header.Set("X-DTS-Worker-Token", wt)
 	}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -103,7 +103,7 @@ func postTransaction(ctx context.Context, client *http.Client, endpoint, token, 
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("QMigration returned %s: %s", resp.Status, strings.TrimSpace(string(data)))
+		return nil, fmt.Errorf("DTS returned %s: %s", resp.Status, strings.TrimSpace(string(data)))
 	}
 	var out domain.CDCApplyResult
 	if len(data) > 0 {
@@ -133,41 +133,41 @@ func parseTables(raw string) ([]string, error) {
 		}
 	}
 	if len(out) == 0 {
-		return nil, errors.New("QMIGRATION_GAUSSDB_TABLES is required")
+		return nil, errors.New("DTS_GAUSSDB_TABLES is required")
 	}
 	return out, nil
 }
 
 func run(ctx context.Context) error {
-	if !envEnabled("QMIGRATION_EXPERIMENTAL_GAUSSDB_NATIVE") || !envEnabled("QMIGRATION_EXPERIMENTAL_GAUSSDB_LOGICAL_CDC") {
-		return errors.New("GaussDB CDC requires QMIGRATION_EXPERIMENTAL_GAUSSDB_NATIVE=1 and QMIGRATION_EXPERIMENTAL_GAUSSDB_LOGICAL_CDC=1")
+	if !envEnabled("DTS_EXPERIMENTAL_GAUSSDB_NATIVE") || !envEnabled("DTS_EXPERIMENTAL_GAUSSDB_LOGICAL_CDC") {
+		return errors.New("GaussDB CDC requires DTS_EXPERIMENTAL_GAUSSDB_NATIVE=1 and DTS_EXPERIMENTAL_GAUSSDB_LOGICAL_CDC=1")
 	}
-	if rawMulti := strings.TrimSpace(os.Getenv("QMIGRATION_GAUSSDB_PRIMARIES_JSON")); rawMulti != "" {
+	if rawMulti := strings.TrimSpace(os.Getenv("DTS_GAUSSDB_PRIMARIES_JSON")); rawMulti != "" {
 		return runMultiPrimary(ctx, rawMulti)
 	}
-	host := env("QMIGRATION_GAUSSDB_HOST", "")
-	user := env("QMIGRATION_GAUSSDB_USER", "")
-	slot := env("QMIGRATION_GAUSSDB_SLOT", "")
+	host := env("DTS_GAUSSDB_HOST", "")
+	user := env("DTS_GAUSSDB_USER", "")
+	slot := env("DTS_GAUSSDB_SLOT", "")
 	if host == "" || user == "" || slot == "" {
-		return errors.New("QMIGRATION_GAUSSDB_HOST, USER and SLOT are required")
+		return errors.New("DTS_GAUSSDB_HOST, USER and SLOT are required")
 	}
-	port, _ := strconv.Atoi(env("QMIGRATION_GAUSSDB_PORT", "8000"))
+	port, _ := strconv.Atoi(env("DTS_GAUSSDB_PORT", "8000"))
 	if port <= 0 {
 		port = 8000
 	}
-	tables, err := parseTables(env("QMIGRATION_GAUSSDB_TABLES", ""))
+	tables, err := parseTables(env("DTS_GAUSSDB_TABLES", ""))
 	if err != nil {
 		return err
 	}
 	ds := domain.DataSource{
 		Type: domain.DataSourceGaussDB, Host: host, Port: port, Username: user,
-		Password:      os.Getenv(env("QMIGRATION_GAUSSDB_PASSWORD_ENV", "GAUSSDB_PASSWORD")),
-		Database:      env("QMIGRATION_GAUSSDB_DATABASE", user),
-		TLSMode:       domain.TLSMode(env("QMIGRATION_GAUSSDB_TLS_MODE", "DISABLE")),
-		TLSServerName: env("QMIGRATION_GAUSSDB_TLS_SERVER_NAME", ""),
-		TLSCACert:     os.Getenv(env("QMIGRATION_GAUSSDB_TLS_CA_ENV", "QMIGRATION_GAUSSDB_TLS_CA")),
-		TLSClientCert: os.Getenv(env("QMIGRATION_GAUSSDB_TLS_CLIENT_CERT_ENV", "QMIGRATION_GAUSSDB_TLS_CLIENT_CERT")),
-		TLSClientKey:  os.Getenv(env("QMIGRATION_GAUSSDB_TLS_CLIENT_KEY_ENV", "QMIGRATION_GAUSSDB_TLS_CLIENT_KEY")),
+		Password:      os.Getenv(env("DTS_GAUSSDB_PASSWORD_ENV", "GAUSSDB_PASSWORD")),
+		Database:      env("DTS_GAUSSDB_DATABASE", user),
+		TLSMode:       domain.TLSMode(env("DTS_GAUSSDB_TLS_MODE", "DISABLE")),
+		TLSServerName: env("DTS_GAUSSDB_TLS_SERVER_NAME", ""),
+		TLSCACert:     os.Getenv(env("DTS_GAUSSDB_TLS_CA_ENV", "DTS_GAUSSDB_TLS_CA")),
+		TLSClientCert: os.Getenv(env("DTS_GAUSSDB_TLS_CLIENT_CERT_ENV", "DTS_GAUSSDB_TLS_CLIENT_CERT")),
+		TLSClientKey:  os.Getenv(env("DTS_GAUSSDB_TLS_CLIENT_KEY_ENV", "DTS_GAUSSDB_TLS_CLIENT_KEY")),
 	}
 	raw, err := postgresconnector.NewFactory().New(ds)
 	if err != nil {
@@ -179,24 +179,24 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("GaussDB connection: %w", err)
 	}
 
-	server := strings.TrimRight(env("QMIGRATION_SERVER", "http://127.0.0.1:8080"), "/")
-	taskID := env("QMIGRATION_TASK_ID", "")
+	server := strings.TrimRight(env("DTS_SERVER", "http://127.0.0.1:8080"), "/")
+	taskID := env("DTS_TASK_ID", "")
 	if taskID == "" {
-		return errors.New("QMIGRATION_TASK_ID is required")
+		return errors.New("DTS_TASK_ID is required")
 	}
-	direction := strings.ToLower(env("QMIGRATION_CDC_DIRECTION", "forward"))
+	direction := strings.ToLower(env("DTS_CDC_DIRECTION", "forward"))
 	if direction != "forward" && direction != "reverse" {
 		return errors.New("invalid CDC direction")
 	}
-	endpoint := env("QMIGRATION_CDC_ENDPOINT", server+"/api/v1/migrations/"+taskID+"/cdc/events")
-	ready := env("QMIGRATION_CDC_READY_ENDPOINT", "")
-	token := env("QMIGRATION_API_TOKEN", "")
+	endpoint := env("DTS_CDC_ENDPOINT", server+"/api/v1/migrations/"+taskID+"/cdc/events")
+	ready := env("DTS_CDC_READY_ENDPOINT", "")
+	token := env("DTS_API_TOKEN", "")
 	client := &http.Client{Timeout: 90 * time.Second}
 	if err := waitCDCReady(ctx, client, ready, token); err != nil {
 		return err
 	}
 
-	ddlReplay := envEnabled("QMIGRATION_GAUSSDB_DDL_REPLAY")
+	ddlReplay := envEnabled("DTS_GAUSSDB_DDL_REPLAY")
 	// RC49 supports selected-table hybrid DDL+DML by using the text decoding
 	// pass only as an ordered DDL/DML template and filling every DML placeholder
 	// from the byte-safe binary pass. Cardinality/order disagreement fails closed.
@@ -214,11 +214,11 @@ func run(ctx context.Context) error {
 		}
 	}
 
-	maxChanges, _ := strconv.Atoi(env("QMIGRATION_GAUSSDB_CDC_MAX_CHANGES", "4096"))
+	maxChanges, _ := strconv.Atoi(env("DTS_GAUSSDB_CDC_MAX_CHANGES", "4096"))
 	if maxChanges <= 0 {
 		maxChanges = 4096
 	}
-	poll, err := time.ParseDuration(env("QMIGRATION_GAUSSDB_CDC_POLL_INTERVAL", "1s"))
+	poll, err := time.ParseDuration(env("DTS_GAUSSDB_CDC_POLL_INTERVAL", "1s"))
 	if err != nil || poll <= 0 {
 		poll = time.Second
 	}

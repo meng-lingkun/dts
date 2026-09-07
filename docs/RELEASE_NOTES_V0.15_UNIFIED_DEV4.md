@@ -1,8 +1,8 @@
-# QMigration V0.15.0-unified-dev4 Release Notes
+# DTS V0.15.0-unified-dev4 Release Notes
 
 ## Focus
 
-Dev4 continues the single QMigration Unified Engine direction. No DataX,
+Dev4 continues the single DTS Unified Engine direction. No DataX,
 SeaTunnel, Flink CDC, Debezium or Canal runtime is reintroduced.
 
 ## SQL Server Native TDS/TLS
@@ -20,10 +20,10 @@ SeaTunnel, Flink CDC, Debezium or Canal runtime is reintroduced.
 Enable with:
 
 ```bash
-QMIGRATION_EXPERIMENTAL_SQLSERVER_CDC=1
+DTS_EXPERIMENTAL_SQLSERVER_CDC=1
 ```
 
-Implemented inside QMigration:
+Implemented inside DTS:
 
 - captures `sys.fn_cdc_get_max_lsn()` before Full Load;
 - discovers `cdc.change_tables` capture instances for selected tables;
@@ -34,20 +34,20 @@ Implemented inside QMigration:
 - groups changes by `__$start_lsn` as the SQL Server transaction checkpoint;
 - preserves binary values using base64 CDC fields;
 - validates minimum retained LSN to detect CDC retention gaps early;
-- feeds the shared QMigration `cdc/runtime.Runner`;
-- source cursor advances only after target Apply + durable QMigration checkpoint.
+- feeds the shared DTS `cdc/runtime.Runner`;
+- source cursor advances only after target Apply + durable DTS checkpoint.
 
 Added built-in binary:
 
 ```text
-qmigration-sqlserver-cdc
+dts-sqlserver-cdc
 ```
 
 No Debezium, SSIS or external migration runtime is required.
 
 ## Worker / managed CDC fix
 
-Managed CDC subprocesses now receive `QMIGRATION_TASK_ID`. This fixes a latent
+Managed CDC subprocesses now receive `DTS_TASK_ID`. This fixes a latent
 issue where the existing MySQL/PostgreSQL managed CDC binaries could be claimed
 by a Worker but fail immediately because the task ID was not injected.
 

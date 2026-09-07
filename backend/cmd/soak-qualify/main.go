@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"math"
 	"os"
-	"qmigration/backend/internal/perfmodel"
+	"dts/backend/internal/perfmodel"
 )
 
 type scenario struct {
@@ -62,7 +62,7 @@ func main() {
 	if *samples < 100 {
 		*samples = 100
 	}
-	r := report{Version: "0.15.0-rc49", Kind: "qmigration-synthetic-soak", Synthetic: true}
+	r := report{Version: "0.15.0-rc49", Kind: "dts-synthetic-soak", Synthetic: true}
 	r.Scenarios = []scenario{
 		run("10TB-balanced", 10, 8, *samples, 70000),
 		run("40TB-distributed", 40, 20, *samples, 55000),

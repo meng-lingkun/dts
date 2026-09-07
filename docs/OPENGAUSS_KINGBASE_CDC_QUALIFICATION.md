@@ -1,14 +1,14 @@
 # openGauss / KingbaseES Source CDC Qualification
 
 RC26 adds software paths but keeps both product CDC claims qualification-gated.
-A retained report must be produced for every server release/topology QMigration
+A retained report must be produced for every server release/topology DTS
 claims.
 
 ## openGauss
 
 ```bash
 export OPENGAUSS_PASSWORD='***'
-./bin/qmigration-opengauss-qualify \
+./bin/dts-opengauss-qualify \
   --host 10.0.0.10 --port 5432 --user repl --database app \
   --schema public --table orders --cdc --tls-mode REQUIRED \
   --output opengauss-rc26.json
@@ -26,7 +26,7 @@ same durable slot without gaps.
 
 ```bash
 export KINGBASE_PASSWORD='***'
-./bin/qmigration-kingbase-qualify \
+./bin/dts-kingbase-qualify \
   --host 10.0.0.20 --port 54321 --user repl --database app \
   --schema public --table orders --cdc --tls-mode REQUIRED \
   --output kingbase-rc26.json
@@ -38,7 +38,7 @@ replication privilege, selected-table PK, `KINGBASE_LSN`, a temporary
 only qualifier-owned objects.
 
 A real CDC qualification must additionally retain the actual `kboutput` stream
-trace and prove that every message used by QMigration conforms to the strict
+trace and prove that every message used by DTS conforms to the strict
 RC26 decoder. A slot whose plugin is not `kboutput` is rejected before stream
 startup. Unknown/incompatible wire records must fail closed.
 

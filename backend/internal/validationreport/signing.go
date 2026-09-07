@@ -76,10 +76,10 @@ func parseEd25519PrivateKey(raw []byte) (ed25519.PrivateKey, error) {
 }
 
 func ed25519PrivateKeyFromEnv() (ed25519.PrivateKey, string, error) {
-	value := strings.TrimSpace(os.Getenv("QMIGRATION_VALIDATION_REPORT_ED25519_PRIVATE_KEY"))
-	if file := strings.TrimSpace(os.Getenv("QMIGRATION_VALIDATION_REPORT_ED25519_PRIVATE_KEY_FILE")); file != "" {
+	value := strings.TrimSpace(os.Getenv("DTS_VALIDATION_REPORT_ED25519_PRIVATE_KEY"))
+	if file := strings.TrimSpace(os.Getenv("DTS_VALIDATION_REPORT_ED25519_PRIVATE_KEY_FILE")); file != "" {
 		if value != "" {
-			return nil, "", errors.New("set only one of QMIGRATION_VALIDATION_REPORT_ED25519_PRIVATE_KEY or QMIGRATION_VALIDATION_REPORT_ED25519_PRIVATE_KEY_FILE")
+			return nil, "", errors.New("set only one of DTS_VALIDATION_REPORT_ED25519_PRIVATE_KEY or DTS_VALIDATION_REPORT_ED25519_PRIVATE_KEY_FILE")
 		}
 		b, err := os.ReadFile(file)
 		if err != nil {
@@ -95,7 +95,7 @@ func ed25519PrivateKeyFromEnv() (ed25519.PrivateKey, string, error) {
 		return nil, "", err
 	}
 	pub := priv.Public().(ed25519.PublicKey)
-	keyID := strings.TrimSpace(os.Getenv("QMIGRATION_VALIDATION_REPORT_ED25519_KEY_ID"))
+	keyID := strings.TrimSpace(os.Getenv("DTS_VALIDATION_REPORT_ED25519_KEY_ID"))
 	if keyID == "" {
 		keyID = defaultEd25519KeyID(pub)
 	}
@@ -173,9 +173,9 @@ type externalSignResponse struct {
 }
 
 func newExternalSignerFromEnv() (*externalSignerClient, error) {
-	raw := strings.TrimSpace(os.Getenv("QMIGRATION_VALIDATION_REPORT_ED25519_SIGNER_ENDPOINTS"))
+	raw := strings.TrimSpace(os.Getenv("DTS_VALIDATION_REPORT_ED25519_SIGNER_ENDPOINTS"))
 	if raw == "" {
-		raw = strings.TrimSpace(os.Getenv("QMIGRATION_VALIDATION_REPORT_ED25519_SIGNER_ENDPOINT"))
+		raw = strings.TrimSpace(os.Getenv("DTS_VALIDATION_REPORT_ED25519_SIGNER_ENDPOINT"))
 	}
 	if raw == "" {
 		return nil, nil
@@ -191,8 +191,8 @@ func newExternalSignerFromEnv() (*externalSignerClient, error) {
 		return nil, errors.New("external Ed25519 signer has no endpoint")
 	}
 	tr := http.DefaultTransport.(*http.Transport).Clone()
-	tc := &tls.Config{MinVersion: tls.VersionTLS12, ServerName: strings.TrimSpace(os.Getenv("QMIGRATION_VALIDATION_REPORT_ED25519_SIGNER_SERVER_NAME"))}
-	if ca := strings.TrimSpace(os.Getenv("QMIGRATION_VALIDATION_REPORT_ED25519_SIGNER_CA")); ca != "" {
+	tc := &tls.Config{MinVersion: tls.VersionTLS12, ServerName: strings.TrimSpace(os.Getenv("DTS_VALIDATION_REPORT_ED25519_SIGNER_SERVER_NAME"))}
+	if ca := strings.TrimSpace(os.Getenv("DTS_VALIDATION_REPORT_ED25519_SIGNER_CA")); ca != "" {
 		pool, _ := x509.SystemCertPool()
 		if pool == nil {
 			pool = x509.NewCertPool()
@@ -207,7 +207,7 @@ func newExternalSignerFromEnv() (*externalSignerClient, error) {
 	var first *PublicKeyDocument
 	for _, ep := range eps {
 		req, _ := http.NewRequest(http.MethodGet, ep+"/v1/public-key", nil)
-		if tok := strings.TrimSpace(os.Getenv("QMIGRATION_VALIDATION_REPORT_ED25519_SIGNER_TOKEN")); tok != "" {
+		if tok := strings.TrimSpace(os.Getenv("DTS_VALIDATION_REPORT_ED25519_SIGNER_TOKEN")); tok != "" {
 			req.Header.Set("Authorization", "Bearer "+tok)
 		}
 		resp, err := c.client.Do(req)
@@ -247,7 +247,7 @@ func (c *externalSignerClient) sign(data []byte) ([]byte, error) {
 	for _, ep := range c.endpoints {
 		req, _ := http.NewRequest(http.MethodPost, ep+"/v1/sign", bytes.NewReader(payload))
 		req.Header.Set("Content-Type", "application/json")
-		if tok := strings.TrimSpace(os.Getenv("QMIGRATION_VALIDATION_REPORT_ED25519_SIGNER_TOKEN")); tok != "" {
+		if tok := strings.TrimSpace(os.Getenv("DTS_VALIDATION_REPORT_ED25519_SIGNER_TOKEN")); tok != "" {
 			req.Header.Set("Authorization", "Bearer "+tok)
 		}
 		resp, err := c.client.Do(req)

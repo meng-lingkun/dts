@@ -7,8 +7,8 @@ import (
 	"strings"
 	"sync"
 
-	cdcruntime "qmigration/backend/internal/cdc/runtime"
-	"qmigration/backend/internal/domain"
+	cdcruntime "dts/backend/internal/cdc/runtime"
+	"dts/backend/internal/domain"
 )
 
 type Reader struct {

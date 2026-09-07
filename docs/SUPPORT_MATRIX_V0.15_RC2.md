@@ -1,13 +1,13 @@
-# QMigration V0.15.0-rc2 Support Matrix
+# DTS V0.15.0-rc2 Support Matrix
 
-This matrix describes **QMigration-owned runtime support**, not generic SQL/protocol
-compatibility. A connector is marked source-CDC capable only when QMigration can
+This matrix describes **DTS-owned runtime support**, not generic SQL/protocol
+compatibility. A connector is marked source-CDC capable only when DTS can
 capture a durable source position and stream changes from the configured source
 endpoint without falling back to DataX, SeaTunnel, Flink CDC, Debezium or Canal.
 
 ## Maturity levels
 
-- `NATIVE`: QMigration native software path is enabled by default for the advertised capabilities.
+- `NATIVE`: DTS native software path is enabled by default for the advertised capabilities.
 - `NATIVE_FULL_ONLY`: native Full Load / target apply exists, but source CDC is intentionally not advertised for that product endpoint.
 - `EXPERIMENTAL`: software path exists behind an explicit gate and requires real-instance qualification before production claims.
 - `PROBE_ONLY`: connection/probe surface only; migration planning must reject the datasource.

@@ -1,12 +1,12 @@
-# QMigration V0.15.0-rc18 Release Notes
+# DTS V0.15.0-rc18 Release Notes
 
-RC18 is a GBase 8a MPP Full-migration correctness release. It fixes the RC17 auto-target layout so QMigration never pairs retry-safe `MERGE` with an unqualified random/replicated target. GBase 8s and GBase 8c remain separate unsupported families.
+RC18 is a GBase 8a MPP Full-migration correctness release. It fixes the RC17 auto-target layout so DTS never pairs retry-safe `MERGE` with an unqualified random/replicated target. GBase 8s and GBase 8c remain separate unsupported families.
 
 ## HASH distribution is now part of the Full Write contract
 
 GBase 8a documentation and current application guidance constrain `MERGE` to HASH-distributed tables and require the MERGE condition to contain the distribution column. RC18 therefore treats the distribution layout as a correctness prerequisite rather than a performance hint.
 
-For automatically created targets QMigration now:
+For automatically created targets DTS now:
 
 1. requires a stable migration key;
 2. scans migration-key columns in order;
@@ -42,7 +42,7 @@ The selected HASH key is a subset of the full MERGE predicate, so RC18 never upd
 
 ## Qualification
 
-`qmigration-gbase-qualify --target-write` now exercises HASH target creation, `SHOW CREATE TABLE` validation, replay MERGE and exact binary round trip. Real GBase 8a V9.5.x/topology/TLS/failure-window evidence is still required before production promotion.
+`dts-gbase-qualify --target-write` now exercises HASH target creation, `SHOW CREATE TABLE` validation, replay MERGE and exact binary round trip. Real GBase 8a V9.5.x/topology/TLS/failure-window evidence is still required before production promotion.
 
 ## Deliberate boundaries
 

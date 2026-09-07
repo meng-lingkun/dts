@@ -11,12 +11,12 @@ import (
 	"strings"
 	"time"
 
-	"qmigration/backend/internal/connector"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/connector"
+	"dts/backend/internal/domain"
 )
 
 // DamengCDCTransaction is the committed transaction unit consumed by the
-// protocol-independent QMigration CDC runtime. DM's DBMS_LOGMNR only mines
+// protocol-independent DTS CDC runtime. DM's DBMS_LOGMNR only mines
 // archived logs, so every checkpoint is an archived DM LSN that can be reopened
 // after a Worker restart.
 type DamengCDCTransaction struct {
@@ -127,7 +127,7 @@ func dmCDCFields(cols []domain.ColumnInfo, row []connector.Value) ([]domain.CDCF
 
 func (c *Connector) damengCDCPrechecks(ctx context.Context) []domain.PrecheckItem {
 	if !experimentalCDCEnabled() {
-		return []domain.PrecheckItem{{Name: "Dameng LogMiner CDC gate", Level: domain.PrecheckFailed, Message: "QMIGRATION_EXPERIMENTAL_DAMENG_LOG_CDC=1 is required"}}
+		return []domain.PrecheckItem{{Name: "Dameng LogMiner CDC gate", Level: domain.PrecheckFailed, Message: "DTS_EXPERIMENTAL_DAMENG_LOG_CDC=1 is required"}}
 	}
 	r, err := c.get(ctx)
 	if err != nil {
@@ -158,7 +158,7 @@ func (c *Connector) damengCDCPrechecks(ctx context.Context) []domain.PrecheckIte
 		n, _ := strconv.Atoi(strings.TrimSpace(v))
 		return n >= 1 && n <= 3
 	}, "1, 2 or 3")
-	// QMigration reconstructs complete before/after row images with AS OF SCN
+	// DTS reconstructs complete before/after row images with AS OF SCN
 	// instead of parsing SQL_REDO literals. Flashback must therefore be enabled.
 	checkParam("ENABLE_FLASHBACK", func(v string) bool { return strings.TrimSpace(v) == "1" }, "1")
 	checkParam("RLOG_LLOG_COMPRESS", func(v string) bool { return strings.TrimSpace(v) == "0" }, "0 for the RC25 qualified CDC contract")
@@ -180,7 +180,7 @@ func (c *Connector) damengCDCPrechecks(ctx context.Context) []domain.PrecheckIte
 // an un-mineable restart point until the containing redo file is archived.
 func (c *Connector) CurrentCDCPosition(ctx context.Context) (*domain.CDCPosition, error) {
 	if !experimentalCDCEnabled() {
-		return nil, errors.New("Dameng source CDC requires QMIGRATION_EXPERIMENTAL_DAMENG_NATIVE=1 and QMIGRATION_EXPERIMENTAL_DAMENG_LOG_CDC=1")
+		return nil, errors.New("Dameng source CDC requires DTS_EXPERIMENTAL_DAMENG_NATIVE=1 and DTS_EXPERIMENTAL_DAMENG_LOG_CDC=1")
 	}
 	for _, item := range c.damengCDCPrechecks(ctx) {
 		if item.Level == domain.PrecheckFailed {
@@ -458,7 +458,7 @@ func (c *Connector) mineDMLogWindow(ctx context.Context, r dmRunner, mineFrom, a
 	if len(filters) == 0 {
 		return nil, errors.New("Dameng LogMiner CDC has no enabled selected tables")
 	}
-	// COMMIT/XA_COMMIT rows are included regardless of table so QMigration can
+	// COMMIT/XA_COMMIT rows are included regardless of table so DTS can
 	// discover a transaction whose selected DML started before the acknowledged
 	// checkpoint. START_SCN then drives a second, earlier mining pass before any
 	// transaction can be emitted.
@@ -483,7 +483,7 @@ func (c *Connector) mineDMLogWindow(ctx context.Context, r dmRunner, mineFrom, a
 //
 // Long transactions are handled by first including COMMIT/XA_COMMIT markers. If
 // any transaction that commits after the durable checkpoint started earlier than
-// the current mining window, QMigration reopens LogMiner from the minimum
+// the current mining window, DTS reopens LogMiner from the minimum
 // START_SCN. Missing retained archives then fail as a gap before any checkpoint
 // can advance.
 func (c *Connector) ReadLogMinerTransactions(ctx context.Context, fromRaw, toRaw string, selected map[string]bool) ([]DamengCDCTransaction, error) {
@@ -598,7 +598,7 @@ func (c *Connector) ReadLogMinerTransactions(ctx context.Context, fromRaw, toRaw
 	out := make([]DamengCDCTransaction, 0, len(keys)+1)
 	last := from
 	// DM_LSN is the durable position key used by the shared CDC runtime. More than
-	// one source XID may therefore not be emitted as separate QMigration
+	// one source XID may therefore not be emitted as separate DTS
 	// transactions at the same COMMIT_SCN: the second transaction would look like
 	// a duplicate checkpoint after restart/apply. Aggregate every committed XID at
 	// the same COMMIT_SCN into one target transaction. This preserves the complete

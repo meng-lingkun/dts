@@ -4,13 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/domain"
 	"strconv"
 	"strings"
 )
 
 // OpenGaussTransaction is one complete committed transaction decoded from
-// openGauss mppdb_decoding. The source slot is only advanced after QMigration
+// openGauss mppdb_decoding. The source slot is only advanced after DTS
 // has atomically applied the target transaction and persisted OPENGAUSS_LSN.
 type OpenGaussTransaction struct {
 	XID       string
@@ -53,7 +53,7 @@ func openGaussDecodeQuery(function, slot string, maxChanges int, uptoLSN string,
 		upto = pgLiteral(norm)
 	}
 	// openGauss documents mppdb_decoding SQL functions with complete-transaction
-	// stopping semantics. QMigration explicitly requests JSON text output,
+	// stopping semantics. DTS explicitly requests JSON text output,
 	// selected-table filtering and XIDs so transaction identity remains stable.
 	return "SELECT location::text,xid::text,data FROM " + function + "(" +
 		pgLiteral(slot) + "," + upto + "," + strconv.Itoa(maxChanges) +

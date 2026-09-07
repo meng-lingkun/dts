@@ -1,4 +1,4 @@
-# QMigration V0.15.0-rc27 Support Matrix
+# DTS V0.15.0-rc27 Support Matrix
 
 | Database | Metadata | Full Read | Full Write / CDC Apply | Source CDC | Schema / DDL | Status |
 |---|---:|---:|---:|---|---:|---|
@@ -10,7 +10,7 @@
 | **KingbaseES** | **Yes** | **Yes** | **Yes** | **sys_* logical slots + kboutput / KINGBASE_LSN** | Target yes; publication DML only | **EXPERIMENTAL CDC / kboutput wire qualification required** |
 | Oracle | Yes | Yes + exact SCN validation snapshot | Yes | LogMiner / SCN | Yes | EXPERIMENTAL |
 | SQL Server | Yes | Yes | Yes | SQL Server CDC / LSN | Yes | EXPERIMENTAL |
-| DB2 LUW | Yes | Yes | Yes | QMigration Log Agent + IBM db2ReadLog | Yes | EXPERIMENTAL |
+| DB2 LUW | Yes | Yes | Yes | DTS Log Agent + IBM db2ReadLog | Yes | EXPERIMENTAL |
 | Dameng / DM8 | Yes | Yes + exact DM_LSN validation snapshot | Yes | DBMS_LOGMNR archived-log CDC / DM_LSN | Table/PK/index/FK target; source DDL fails closed | EXPERIMENTAL / qualification required |
 | GaussDB | Yes | Yes | Yes | mppdb_decoding binary DML + optional DDL-only classification / GAUSSDB_LSN | Target yes; selected-table DDL-only same-family replay | EXPERIMENTAL |
 | GBase 8a MPP Cluster | Yes | Yes | Full Write + optional retry-idempotent target CDC Apply; no transactional atomicity claim | Not advertised | Table/PK create only | EXPERIMENTAL / target CDC qualification required |
@@ -28,7 +28,7 @@
 ## RC26 KingbaseES boundary
 
 - Product path: PostgreSQL-wire Full/target + Kingbase `sys_*` logical slot APIs.
-- Output plugin: `kboutput`; QMigration intentionally does not create a `pgoutput` slot.
+- Output plugin: `kboutput`; DTS intentionally does not create a `pgoutput` slot.
 - Durable position: `KINGBASE_LSN`.
 - `sys_publication` is used to retain selected-table publication membership.
 - Slot plugin identity is checked before every managed stream connection.
@@ -37,7 +37,7 @@
 
 ## RC27 GBase 8a target CDC boundary
 
-- Enable with both `QMIGRATION_EXPERIMENTAL_GBASE8A_NATIVE=1` and `QMIGRATION_EXPERIMENTAL_GBASE8A_TARGET_CDC=1`.
+- Enable with both `DTS_EXPERIMENTAL_GBASE8A_NATIVE=1` and `DTS_EXPERIMENTAL_GBASE8A_TARGET_CDC=1`.
 - INSERT/UPDATE replay uses the existing validated HASH staging table + `MERGE`; DELETE uses the mapped stable key.
 - Retry after a lost ACK/checkpoint response is idempotent at the event/position level.
 - `cdc-transactional-apply` is intentionally **not** advertised: a multi-event source transaction may be transiently visible event-by-event on GBase 8a MPP.
@@ -46,8 +46,8 @@
 ## RC27 CDC chaos qualification
 
 - Deterministic failpoints cover spool persist, target apply, spool mark, checkpoint and source-ACK boundaries.
-- `qmigration-chaos-qualify` proves replay/duplicate-suppression invariants without an external database.
-- Fault injection is off by default and requires explicit `QMIGRATION_ENABLE_FAULT_INJECTION=1`.
+- `dts-chaos-qualify` proves replay/duplicate-suppression invariants without an external database.
+- Fault injection is off by default and requires explicit `DTS_ENABLE_FAULT_INJECTION=1`.
 
 ## Remaining highest-priority gaps
 

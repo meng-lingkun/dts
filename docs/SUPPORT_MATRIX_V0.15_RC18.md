@@ -1,4 +1,4 @@
-# QMigration V0.15.0-rc18 Support Matrix
+# DTS V0.15.0-rc18 Support Matrix
 
 | Database | Metadata | Full Read | Full Write / CDC Apply | Source CDC | Schema / DDL | Status |
 |---|---:|---:|---:|---|---:|---|
@@ -9,14 +9,14 @@
 | openGauss / Kingbase | Yes | Yes | Yes | Not advertised | Yes | NATIVE_FULL_ONLY |
 | Oracle | Yes | Yes | Yes | LogMiner / SCN | Yes | EXPERIMENTAL |
 | SQL Server | Yes | Yes | Yes | SQL Server CDC / LSN | Yes | EXPERIMENTAL |
-| DB2 LUW | Yes | Yes | Yes | QMigration Log Agent + IBM db2ReadLog | Yes | EXPERIMENTAL |
+| DB2 LUW | Yes | Yes | Yes | DTS Log Agent + IBM db2ReadLog | Yes | EXPERIMENTAL |
 | Dameng / DM8 | Yes | Yes | Yes | Not advertised | Table/PK/index/FK target | EXPERIMENTAL |
 | GaussDB | Yes | Yes | Yes | mppdb_decoding binary DML + optional DDL-only classification / GAUSSDB_LSN | Target yes; selected-table DDL-only same-family replay | EXPERIMENTAL |
 | **GBase 8a MPP Cluster** | **Yes** | **Yes** | **Full Write only; validated HASH staging+MERGE; no CDC apply** | **Not advertised** | **Table/PK create only; no FK/post-load replay** | **EXPERIMENTAL / FULL_ONLY** |
 
 ## GBase 8a RC18 scope
 
-Behind `QMIGRATION_EXPERIMENTAL_GBASE8A_NATIVE=1`:
+Behind `DTS_EXPERIMENTAL_GBASE8A_NATIVE=1`:
 
 - distinct GBase 8a Connector and native packet Metadata/Full Read;
 - stable numeric/composite migration-key keyset reads;

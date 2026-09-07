@@ -10,7 +10,7 @@ import (
 	"strings"
 	"syscall"
 
-	"qmigration/backend/internal/netchaos"
+	"dts/backend/internal/netchaos"
 )
 
 func main() {
@@ -37,9 +37,9 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	fmt.Printf("QMigration netchaos listening=%s upstream=%s action=%s trigger_bytes=%d\n", p.Addr(), *upstream, strings.ToUpper(strings.TrimSpace(*action)), len(trig))
+	fmt.Printf("DTS netchaos listening=%s upstream=%s action=%s trigger_bytes=%d\n", p.Addr(), *upstream, strings.ToUpper(strings.TrimSpace(*action)), len(trig))
 	<-ctx.Done()
 	_ = p.Close()
 	st := p.Stats()
-	fmt.Printf("QMigration netchaos stopped connections=%d triggered=%d dropped_bytes=%d resets=%d\n", st.Connections, st.Triggered, st.DroppedBytes, st.Resets)
+	fmt.Printf("DTS netchaos stopped connections=%d triggered=%d dropped_bytes=%d resets=%d\n", st.Connections, st.Triggered, st.DroppedBytes, st.Resets)
 }

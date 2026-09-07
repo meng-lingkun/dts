@@ -13,10 +13,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"qmigration/backend/internal/cdc/obbinlog"
-	"qmigration/backend/internal/cdc/ticdc"
-	"qmigration/backend/internal/connector"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/cdc/obbinlog"
+	"dts/backend/internal/cdc/ticdc"
+	"dts/backend/internal/connector"
+	"dts/backend/internal/domain"
 )
 
 type Factory struct{}
@@ -41,7 +41,7 @@ func (*Factory) Capabilities(t domain.DataSourceType) connector.Descriptor {
 		connector.CapabilityMigrationPrecheck,
 	}
 	// Source-side CDC is advertised only when the SQL endpoint itself exposes a
-	// MySQL-compatible replication stream that the QMigration native binlog reader
+	// MySQL-compatible replication stream that the DTS native binlog reader
 	// can consume. TiDB uses TiCDC rather than COM_BINLOG_DUMP, while OceanBase
 	// exposes MySQL Binlog through a separate Binlog Service endpoint; neither is
 	// safe to infer from the full-load SQL endpoint stored in the datasource.
@@ -57,10 +57,10 @@ func (*Factory) Capabilities(t domain.DataSourceType) connector.Descriptor {
 		caps = append(caps, connector.CapabilityValidationSnapshot)
 	}
 	maturity := connector.MaturityNative
-	note := "QMigration native MySQL protocol full data plane"
+	note := "DTS native MySQL protocol full data plane"
 	if t == domain.DataSourceTiDB {
 		maturity = connector.MaturityExperimental
-		note = "Native MySQL-protocol Full Load/target apply plus QMigration TiCDC OpenAPI + native Kafka Canal-JSON CDC; real TiCDC/Kafka qualification required"
+		note = "Native MySQL-protocol Full Load/target apply plus DTS TiCDC OpenAPI + native Kafka Canal-JSON CDC; real TiCDC/Kafka qualification required"
 	} else if t == domain.DataSourceOceanBase {
 		maturity = connector.MaturityExperimental
 		note = "Native MySQL-protocol Full Load/target apply plus OceanBase Binlog Service (MySQL Binlog V4/GTID) through an explicit tenant ODP cdc_url; real ODP/Binlog Service qualification required"
@@ -149,7 +149,7 @@ func (c *Connector) Close() error {
 }
 
 // OpenValidationSnapshot pins a fresh TiDB SQL session to the exact TSO stored
-// in QMigration's durable TIDB_TSO checkpoint. TiDB's SESSION tidb_snapshot
+// in DTS's durable TIDB_TSO checkpoint. TiDB's SESSION tidb_snapshot
 // makes every subsequent SELECT on that session read the same historical MVCC
 // snapshot, so online validation can compare the source at the target's frozen
 // apply watermark instead of racing concurrent source writes.
@@ -991,7 +991,7 @@ func (c *Connector) validateGBaseMergeLayout(ctx context.Context, schema, table 
 	ddl := string(r.rows[0][1])
 	kind, distCols := gbaseDistributionFromDDL(ddl)
 	if kind != "hash" || len(distCols) == 0 {
-		return fmt.Errorf("GBase 8a idempotent MERGE requires a HASH-distributed target; %s.%s is %s/unknown distribution. Pre-create a HASH target or let QMigration create it", schema, table, kind)
+		return fmt.Errorf("GBase 8a idempotent MERGE requires a HASH-distributed target; %s.%s is %s/unknown distribution. Pre-create a HASH target or let DTS create it", schema, table, kind)
 	}
 	keys := make(map[string]struct{}, len(mergeKeys))
 	for _, key := range mergeKeys {
@@ -1038,7 +1038,7 @@ func (c *Connector) createGBaseTable(ctx context.Context, schema, table string, 
 		} else {
 			d += " NULL"
 		}
-		// QMigration copies explicit source values. AUTO_INCREMENT is deliberately
+		// DTS copies explicit source values. AUTO_INCREMENT is deliberately
 		// not enabled on an automatically-created GBase target because GBase 8a
 		// commonly rejects explicit inserts into such columns unless a vendor
 		// session parameter is enabled. Generator restoration remains manual.
@@ -1213,9 +1213,9 @@ func (c *Connector) gbasePrechecks(ctx context.Context, needCDC bool) []domain.P
 	} else if err != nil {
 		items = append(items, domain.PrecheckItem{Name: "gbase8a_charset", Level: domain.PrecheckWarning, Message: err.Error()})
 	}
-	items = append(items, domain.PrecheckItem{Name: "gbase8a_full_write_semantics", Level: domain.PrecheckPass, Message: "QMigration target replay uses per-batch staging table + MERGE keyed by the migration primary key; target HASH distribution is validated before MERGE and keyless target Full Write is rejected"})
+	items = append(items, domain.PrecheckItem{Name: "gbase8a_full_write_semantics", Level: domain.PrecheckPass, Message: "DTS target replay uses per-batch staging table + MERGE keyed by the migration primary key; target HASH distribution is validated before MERGE and keyless target Full Write is rejected"})
 	items = append(items, domain.PrecheckItem{Name: "gbase8a_distribution_policy", Level: domain.PrecheckWarning, Message: "auto-created target tables use a HASH distribution column selected from the stable migration key because GBase MERGE requires HASH distribution; pre-create a workload-tuned HASH table when another key is required"})
-	items = append(items, domain.PrecheckItem{Name: "gbase8a_foreign_keys", Level: domain.PrecheckWarning, Message: "GBase 8a does not provide foreign-key enforcement; QMigration RC18 does not replay source FKs to GBase targets"})
+	items = append(items, domain.PrecheckItem{Name: "gbase8a_foreign_keys", Level: domain.PrecheckWarning, Message: "GBase 8a does not provide foreign-key enforcement; DTS RC18 does not replay source FKs to GBase targets"})
 	if needCDC {
 		items = append(items, domain.PrecheckItem{Name: "gbase8a_source_cdc", Level: domain.PrecheckFailed, Message: "GBase 8a source CDC is not advertised in RC27 because no retained public row-change feed with exact row images has been qualified; use GBase only as Full source or as an explicitly gated CDC target"})
 	}
@@ -1442,7 +1442,7 @@ func (c *Connector) binaryLogStatus(ctx context.Context) (*queryResult, int64, e
 
 func (c *Connector) CurrentBinlogPosition(ctx context.Context) (*domain.CDCPosition, error) {
 	if !mysqlBinlogSourceSupported(c.ds.Type) {
-		return nil, fmt.Errorf("%s does not expose source CDC through QMigration MySQL COM_BINLOG_DUMP", c.ds.Type)
+		return nil, fmt.Errorf("%s does not expose source CDC through DTS MySQL COM_BINLOG_DUMP", c.ds.Type)
 	}
 	r, capturedAt, err := c.binaryLogStatus(ctx)
 	if err != nil {
@@ -1676,7 +1676,7 @@ func (c *Connector) MigrationPrechecks(ctx context.Context, needCDC bool) []doma
 		} else {
 			items = append(items, domain.PrecheckItem{Name: "oceanbase_binlog_files", Level: domain.PrecheckPass, Message: fmt.Sprintf("%d binlog file(s) visible through ODP", len(logs.rows))})
 		}
-		items = append(items, domain.PrecheckItem{Name: "oceanbase_binlog_protocol", Level: domain.PrecheckPass, Message: "QMigration will use MySQL Binlog V4 row events and prefer GTID resumable subscription when Executed_Gtid_Set is available"})
+		items = append(items, domain.PrecheckItem{Name: "oceanbase_binlog_protocol", Level: domain.PrecheckPass, Message: "DTS will use MySQL Binlog V4 row events and prefer GTID resumable subscription when Executed_Gtid_Set is available"})
 		return items
 	}
 	variable := func(name string) (string, error) {
@@ -1734,7 +1734,7 @@ func (c *Connector) MigrationPrechecks(ctx context.Context, needCDC bool) []doma
 		message := v
 		if strings.EqualFold(v, "ON") || v == "1" {
 			level = domain.PrecheckWarning
-			message = v + "; native CDC can decode TRANSACTION_PAYLOAD_EVENT when a zstd executable is available on the native CDC worker; set QMIGRATION_ZSTD_BIN when zstd is not on PATH"
+			message = v + "; native CDC can decode TRANSACTION_PAYLOAD_EVENT when a zstd executable is available on the native CDC worker; set DTS_ZSTD_BIN when zstd is not on PATH"
 		}
 		items = append(items, domain.PrecheckItem{Name: "mysql_binlog_transaction_compression", Level: level, Message: message})
 	}
@@ -1853,7 +1853,7 @@ func (c *Connector) ExecDDL(ctx context.Context, schema, ddl string) error {
 var _ connector.DDLApplyConnector = (*Connector)(nil)
 
 // ExecSQL is intentionally exposed for integration/admin workflows inside
-// QMigration (for example E2E fixtures). Migration data paths still use the
+// DTS (for example E2E fixtures). Migration data paths still use the
 // typed ReadBatch/WriteBatch APIs.
 func (c *Connector) ExecSQL(ctx context.Context, sql string) error {
 	p, err := c.get(ctx)

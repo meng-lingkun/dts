@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"qmigration/backend/internal/connector"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/connector"
+	"dts/backend/internal/domain"
 )
 
 func TestSQLServerSchemaObjectType(t *testing.T) {
@@ -71,8 +71,8 @@ func TestSQLServerIdentityClause(t *testing.T) {
 }
 
 func TestSQLServerExperimentalCapabilitiesIncludeSchemaObjects(t *testing.T) {
-	t.Setenv("QMIGRATION_EXPERIMENTAL_SQLSERVER_NATIVE", "1")
-	t.Setenv("QMIGRATION_EXPERIMENTAL_SQLSERVER_CDC", "")
+	t.Setenv("DTS_EXPERIMENTAL_SQLSERVER_NATIVE", "1")
+	t.Setenv("DTS_EXPERIMENTAL_SQLSERVER_CDC", "")
 	d := NewFactory().Capabilities(domain.DataSourceSQLServer)
 	for _, cap := range []connector.Capability{
 		connector.CapabilityMetadata,

@@ -1,6 +1,6 @@
-# QMigration V0.15.0-rc17 Release Notes
+# DTS V0.15.0-rc17 Release Notes
 
-RC17 adds the first qualification-gated QMigration Native data plane for
+RC17 adds the first qualification-gated DTS Native data plane for
 **GBase 8a MPP Cluster**. The scope is deliberately limited to deterministic
 Full migration. GBase 8s and GBase 8c are different product families and are
 not covered by this connector.
@@ -9,13 +9,13 @@ not covered by this connector.
 
 - Added a distinct `gbase8a` Connector Factory rather than routing GBase through
   the former generic/external-JDBC placeholder.
-- QMigration owns catalog discovery, Full Read/Write, keyset planning, schema
+- DTS owns catalog discovery, Full Read/Write, keyset planning, schema
   conversion, retry semantics and qualification. No DataX/SeaTunnel/Flink/JDBC
   migration runtime is launched.
-- The connector reuses QMigration's audited MySQL/GBase-compatible packet
+- The connector reuses DTS's audited MySQL/GBase-compatible packet
   transport because GBase 8a application drivers use the GBase/MySQL-style SQL
   protocol family; it does not inherit MySQL Binlog CDC capability.
-- Native capabilities are behind `QMIGRATION_EXPERIMENTAL_GBASE8A_NATIVE=1` and
+- Native capabilities are behind `DTS_EXPERIMENTAL_GBASE8A_NATIVE=1` and
   remain `EXPERIMENTAL / QualificationRequired`.
 
 ## Metadata and source Full Read
@@ -28,7 +28,7 @@ RC17 provides:
 - utf8mb4 session setup over the packet transport;
 - migration prechecks for server version, character set and unsupported CDC.
 
-The source still requires the QMigration-wide stable migration-key rule: a
+The source still requires the DTS-wide stable migration-key rule: a
 primary key or UNIQUE NOT NULL key is needed for resumable Full migration.
 
 ## Target schema and idempotent Full Write
@@ -48,7 +48,7 @@ RC17 therefore adds a GBase-specific target path:
 - VARCHAR/DECIMAL/BLOB/TEXT mappings respect the RC17 GBase 8a target limits.
 
 Full Write does **not** use MySQL `ON DUPLICATE KEY UPDATE`. GBase 8a primary-key
-syntax is not treated as an enforced uniqueness contract by QMigration. Every
+syntax is not treated as an enforced uniqueness contract by DTS. Every
 batch instead uses a private staging table and GBase `MERGE` keyed by the stable
 migration key:
 
@@ -79,7 +79,7 @@ runtime.
 
 Added:
 
-- `qmigration-gbase-qualify`;
+- `dts-gbase-qualify`;
 - `deployments/scripts/qualify-gbase.sh`;
 - `docs/GBASE8A_NATIVE_QUALIFICATION.md`.
 

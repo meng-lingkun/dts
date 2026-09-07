@@ -5,7 +5,7 @@ import (
 	"errors"
 	"strings"
 
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/domain"
 )
 
 var ErrValidationReportArchiveConflict = errors.New("validation report archive record conflicts with immutable existing record")

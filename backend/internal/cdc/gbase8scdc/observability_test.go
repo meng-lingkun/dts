@@ -57,7 +57,7 @@ func TestObserveAgentStatusAndMetrics(t *testing.T) {
 		t.Fatalf("provider=%+v", s.Provider)
 	}
 	m := a.(MetricsRenderer).PrometheusMetrics()
-	for _, want := range []string{"qmigration_gbase8s_cdc_agent_up 1", "qmigration_gbase8s_cdc_health_calls_total 1", "qmigration_gbase8s_cdc_read_calls_total 1", "qmigration_gbase8s_cdc_records_returned_total 1"} {
+	for _, want := range []string{"dts_gbase8s_cdc_agent_up 1", "dts_gbase8s_cdc_health_calls_total 1", "dts_gbase8s_cdc_read_calls_total 1", "dts_gbase8s_cdc_records_returned_total 1"} {
 		if !strings.Contains(m, want) {
 			t.Fatalf("metrics missing %q:\n%s", want, m)
 		}

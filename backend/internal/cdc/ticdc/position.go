@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// Position is QMigration's durable TiCDC receive cursor. TSO preserves the
+// Position is DTS's durable TiCDC receive cursor. TSO preserves the
 // upstream TiDB commit/resolved timestamp. Offset is retained as the
 // single-partition compatibility cursor for partition 0, while Offsets carries
 // the next offset for every Kafka partition when a TiCDC topic is sharded.

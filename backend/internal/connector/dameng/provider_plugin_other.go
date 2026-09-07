@@ -11,5 +11,5 @@ func loadDriverPlugin(path string) error {
 	if strings.TrimSpace(path) == "" {
 		return nil
 	}
-	return fmt.Errorf("QMIGRATION_DAMENG_DRIVER_PLUGIN is currently supported only on Linux")
+	return fmt.Errorf("DTS_DAMENG_DRIVER_PLUGIN is currently supported only on Linux")
 }

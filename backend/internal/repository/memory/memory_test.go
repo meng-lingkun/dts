@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"qmigration/backend/internal/domain"
-	"qmigration/backend/internal/repository"
+	"dts/backend/internal/domain"
+	"dts/backend/internal/repository"
 	"strings"
 	"testing"
 	"time"
@@ -370,8 +370,8 @@ func TestRC35HealthyRemoteOutranksDegradedLocal(t *testing.T) {
 }
 
 func TestRC39FaultDomainRiskPrefersIndependentDomainAndCapsCascade(t *testing.T) {
-	t.Setenv("QMIGRATION_TOPOLOGY_FAULT_DOMAIN_PROTECTION", "true")
-	t.Setenv("QMIGRATION_TOPOLOGY_FAULT_DOMAIN_CRITICAL_MAX_CONCURRENCY", "1")
+	t.Setenv("DTS_TOPOLOGY_FAULT_DOMAIN_PROTECTION", "true")
+	t.Setenv("DTS_TOPOLOGY_FAULT_DOMAIN_CRITICAL_MAX_CONCURRENCY", "1")
 	ctx := context.Background()
 	s := New()
 	m := domain.MigrationTask{ID: "rc39-domain-task", Status: domain.StatusFullMigrating, FullEngine: "native", Parallelism: 8, EffectiveParallelism: 8}

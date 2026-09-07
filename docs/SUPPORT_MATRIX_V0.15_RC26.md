@@ -1,4 +1,4 @@
-# QMigration V0.15.0-rc26 Support Matrix
+# DTS V0.15.0-rc26 Support Matrix
 
 | Database | Metadata | Full Read | Full Write / CDC Apply | Source CDC | Schema / DDL | Status |
 |---|---:|---:|---:|---|---:|---|
@@ -10,7 +10,7 @@
 | **KingbaseES** | **Yes** | **Yes** | **Yes** | **sys_* logical slots + kboutput / KINGBASE_LSN** | Target yes; publication DML only | **EXPERIMENTAL CDC / kboutput wire qualification required** |
 | Oracle | Yes | Yes + exact SCN validation snapshot | Yes | LogMiner / SCN | Yes | EXPERIMENTAL |
 | SQL Server | Yes | Yes | Yes | SQL Server CDC / LSN | Yes | EXPERIMENTAL |
-| DB2 LUW | Yes | Yes | Yes | QMigration Log Agent + IBM db2ReadLog | Yes | EXPERIMENTAL |
+| DB2 LUW | Yes | Yes | Yes | DTS Log Agent + IBM db2ReadLog | Yes | EXPERIMENTAL |
 | Dameng / DM8 | Yes | Yes + exact DM_LSN validation snapshot | Yes | DBMS_LOGMNR archived-log CDC / DM_LSN | Table/PK/index/FK target; source DDL fails closed | EXPERIMENTAL / qualification required |
 | GaussDB | Yes | Yes | Yes | mppdb_decoding binary DML + optional DDL-only classification / GAUSSDB_LSN | Target yes; selected-table DDL-only same-family replay | EXPERIMENTAL |
 | GBase 8a MPP Cluster | Yes | Yes | Full Write only; validated HASH staging+MERGE; no CDC apply | Not advertised | Table/PK create only | EXPERIMENTAL / FULL_ONLY |
@@ -28,7 +28,7 @@
 ## RC26 KingbaseES boundary
 
 - Product path: PostgreSQL-wire Full/target + Kingbase `sys_*` logical slot APIs.
-- Output plugin: `kboutput`; QMigration intentionally does not create a `pgoutput` slot.
+- Output plugin: `kboutput`; DTS intentionally does not create a `pgoutput` slot.
 - Durable position: `KINGBASE_LSN`.
 - `sys_publication` is used to retain selected-table publication membership.
 - Slot plugin identity is checked before every managed stream connection.

@@ -68,14 +68,14 @@ func TestDeriveOracle6949AuthProofDeterministic(t *testing.T) {
 }
 
 func TestBuildOracleAuthMessagesDoNotContainPassword(t *testing.T) {
-	init, err := buildOracleAuthInit("scott", oracleClientIdentity{Terminal: "tty", Program: "QMigration", Machine: "host", PID: "123", OSUser: "svc"})
+	init, err := buildOracleAuthInit("scott", oracleClientIdentity{Terminal: "tty", Program: "DTS", Machine: "host", PID: "123", OSUser: "svc"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !bytes.Contains(init, []byte("scott")) {
 		t.Fatal("auth init missing user")
 	}
-	resp, err := buildOracleAuthResponse("scott", oracleAuthProof{EncryptedClientSessionKey: "AA11", EncryptedPassword: "BB22"}, oracleClientIdentity{Program: "QMigration", Machine: "host", PID: "123", OSUser: "svc", ConnectString: "ORCL", Charset: 873})
+	resp, err := buildOracleAuthResponse("scott", oracleAuthProof{EncryptedClientSessionKey: "AA11", EncryptedPassword: "BB22"}, oracleClientIdentity{Program: "DTS", Machine: "host", PID: "123", OSUser: "svc", ConnectString: "ORCL", Charset: 873})
 	if err != nil {
 		t.Fatal(err)
 	}

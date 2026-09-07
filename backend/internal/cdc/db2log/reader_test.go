@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/domain"
 )
 
 type fakeAgent struct {
@@ -336,7 +336,7 @@ func outOfRowBlobInsertRecord(tid string, lri, next uint64, id int32) RecordEnve
 	binary.LittleEndian.PutUint16(data[4:6], 0x8008)
 	binary.LittleEndian.PutUint16(data[6:8], 24)
 	// The following 24 bytes are the documented varying-data descriptor. Its
-	// internal fields are intentionally opaque to QMigration; the LOB manager
+	// internal fields are intentionally opaque to DTS; the LOB manager
 	// records carry the replicated bytes.
 	rec := make([]byte, 4+len(data))
 	binary.LittleEndian.PutUint16(rec[2:4], uint16(len(rec)))
@@ -1436,7 +1436,7 @@ func vectorInsertRecord(tid string, lri, next uint64, id int32, nullable, isNull
 	}
 	data := make([]byte, dataLen)
 	binary.LittleEndian.PutUint32(data[0:4], uint32(id))
-	// Two opaque bytes model the internal fixed VECTOR representation. QMigration
+	// Two opaque bytes model the internal fixed VECTOR representation. DTS
 	// never consumes these bytes; function 213 supplies the serialized value.
 	data[4], data[5] = 0xaa, 0xbb
 	if nullable && isNull {

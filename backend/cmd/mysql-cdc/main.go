@@ -12,11 +12,11 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"qmigration/backend/internal/cdc/mysqlbinlog"
-	cdcruntime "qmigration/backend/internal/cdc/runtime"
-	"qmigration/backend/internal/connector"
-	mysqlconnector "qmigration/backend/internal/connector/mysql"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/cdc/mysqlbinlog"
+	cdcruntime "dts/backend/internal/cdc/runtime"
+	"dts/backend/internal/connector"
+	mysqlconnector "dts/backend/internal/connector/mysql"
+	"dts/backend/internal/domain"
 	"strconv"
 	"strings"
 	"time"
@@ -38,8 +38,8 @@ func addAuth(req *http.Request, token string) {
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	if v := strings.TrimSpace(os.Getenv("QMIGRATION_WORKER_TOKEN")); v != "" {
-		req.Header.Set("X-QMigration-Worker-Token", v)
+	if v := strings.TrimSpace(os.Getenv("DTS_WORKER_TOKEN")); v != "" {
+		req.Header.Set("X-DTS-Worker-Token", v)
 	}
 }
 
@@ -99,7 +99,7 @@ func postEvents(ctx context.Context, client *http.Client, endpoint, token, direc
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("QMigration returned %s: %s", resp.Status, strings.TrimSpace(string(data)))
+		return nil, fmt.Errorf("DTS returned %s: %s", resp.Status, strings.TrimSpace(string(data)))
 	}
 	var out domain.CDCApplyResult
 	if len(data) > 0 {
@@ -268,69 +268,69 @@ func splitPosition(v string) (string, uint32, error) {
 }
 
 func run(ctx context.Context) error {
-	server := strings.TrimRight(env("QMIGRATION_SERVER", "http://127.0.0.1:8080"), "/")
-	taskID := env("QMIGRATION_TASK_ID", "")
+	server := strings.TrimRight(env("DTS_SERVER", "http://127.0.0.1:8080"), "/")
+	taskID := env("DTS_TASK_ID", "")
 	if taskID == "" {
-		return errors.New("QMIGRATION_TASK_ID is required")
+		return errors.New("DTS_TASK_ID is required")
 	}
-	direction := strings.ToLower(env("QMIGRATION_CDC_DIRECTION", "forward"))
+	direction := strings.ToLower(env("DTS_CDC_DIRECTION", "forward"))
 	if direction != "forward" && direction != "reverse" {
 		return errors.New("invalid CDC direction")
 	}
-	host, user := env("QMIGRATION_MYSQL_HOST", ""), env("QMIGRATION_MYSQL_USER", "")
+	host, user := env("DTS_MYSQL_HOST", ""), env("DTS_MYSQL_USER", "")
 	if host == "" || user == "" {
 		return errors.New("MYSQL host/user are required")
 	}
-	port, _ := strconv.Atoi(env("QMIGRATION_MYSQL_PORT", "3306"))
+	port, _ := strconv.Atoi(env("DTS_MYSQL_PORT", "3306"))
 	if port <= 0 {
 		port = 3306
 	}
-	startGTID := env("QMIGRATION_MYSQL_START_GTID", "")
-	startFile := env("QMIGRATION_MYSQL_START_FILE", "")
+	startGTID := env("DTS_MYSQL_START_GTID", "")
+	startFile := env("DTS_MYSQL_START_FILE", "")
 	startPos64 := uint64(4)
 	var err error
 	if startGTID == "" {
-		startPos64, err = strconv.ParseUint(env("QMIGRATION_MYSQL_START_POS", "4"), 10, 32)
+		startPos64, err = strconv.ParseUint(env("DTS_MYSQL_START_POS", "4"), 10, 32)
 		if err != nil {
 			return err
 		}
 		if startFile == "" {
-			return errors.New("QMIGRATION_MYSQL_START_GTID or QMIGRATION_MYSQL_START_FILE is required")
+			return errors.New("DTS_MYSQL_START_GTID or DTS_MYSQL_START_FILE is required")
 		}
 	}
 	var executed *mysqlbinlog.GTIDSet
 	if startGTID != "" {
 		executed, err = mysqlbinlog.ParseGTIDSet(startGTID)
 		if err != nil {
-			return fmt.Errorf("parse QMIGRATION_MYSQL_START_GTID: %w", err)
+			return fmt.Errorf("parse DTS_MYSQL_START_GTID: %w", err)
 		}
 	}
-	serverID64, _ := strconv.ParseUint(env("QMIGRATION_MYSQL_SERVER_ID", fmt.Sprint(700000+os.Getpid()%200000)), 10, 32)
-	sourceType := domain.DataSourceType(env("QMIGRATION_MYSQL_SOURCE_TYPE", string(domain.DataSourceMySQL)))
+	serverID64, _ := strconv.ParseUint(env("DTS_MYSQL_SERVER_ID", fmt.Sprint(700000+os.Getpid()%200000)), 10, 32)
+	sourceType := domain.DataSourceType(env("DTS_MYSQL_SOURCE_TYPE", string(domain.DataSourceMySQL)))
 	if !sourceType.IsMySQLFamily() {
 		return fmt.Errorf("invalid MySQL CDC source type %q", sourceType)
 	}
 	ds := domain.DataSource{
 		Type: sourceType, Host: host, Port: port, Username: user,
-		Password:      os.Getenv(env("QMIGRATION_MYSQL_PASSWORD_ENV", "MYSQL_PWD")),
-		Database:      env("QMIGRATION_MYSQL_DATABASE", ""),
-		CDCURL:        env("QMIGRATION_MYSQL_CDC_URL", ""),
-		TLSMode:       domain.TLSMode(strings.ToUpper(env("QMIGRATION_MYSQL_TLS_MODE", string(domain.TLSModeDisable)))),
-		TLSServerName: env("QMIGRATION_MYSQL_TLS_SERVER_NAME", ""),
-		TLSCACert:     env("QMIGRATION_MYSQL_TLS_CA", ""),
-		TLSClientCert: env("QMIGRATION_MYSQL_TLS_CLIENT_CERT", ""),
-		TLSClientKey:  env("QMIGRATION_MYSQL_TLS_CLIENT_KEY", ""),
+		Password:      os.Getenv(env("DTS_MYSQL_PASSWORD_ENV", "MYSQL_PWD")),
+		Database:      env("DTS_MYSQL_DATABASE", ""),
+		CDCURL:        env("DTS_MYSQL_CDC_URL", ""),
+		TLSMode:       domain.TLSMode(strings.ToUpper(env("DTS_MYSQL_TLS_MODE", string(domain.TLSModeDisable)))),
+		TLSServerName: env("DTS_MYSQL_TLS_SERVER_NAME", ""),
+		TLSCACert:     env("DTS_MYSQL_TLS_CA", ""),
+		TLSClientCert: env("DTS_MYSQL_TLS_CLIENT_CERT", ""),
+		TLSClientKey:  env("DTS_MYSQL_TLS_CLIENT_KEY", ""),
 	}
-	replEndpoints, err := replicationEndpoints(host, port, env("QMIGRATION_MYSQL_FAILOVER_ENDPOINTS", ""))
+	replEndpoints, err := replicationEndpoints(host, port, env("DTS_MYSQL_FAILOVER_ENDPOINTS", ""))
 	if err != nil {
 		return err
 	}
 	endpointIndex := 0
-	endpoint := env("QMIGRATION_CDC_ENDPOINT", server+"/api/v1/migrations/"+taskID+"/cdc/events")
-	readyEndpoint := env("QMIGRATION_CDC_READY_ENDPOINT", "")
-	token := env("QMIGRATION_API_TOKEN", "")
-	selected := selectedSet(env("QMIGRATION_MYSQL_TABLES", ""))
-	zstdBin := env("QMIGRATION_ZSTD_BIN", "zstd")
+	endpoint := env("DTS_CDC_ENDPOINT", server+"/api/v1/migrations/"+taskID+"/cdc/events")
+	readyEndpoint := env("DTS_CDC_READY_ENDPOINT", "")
+	token := env("DTS_API_TOKEN", "")
+	selected := selectedSet(env("DTS_MYSQL_TABLES", ""))
+	zstdBin := env("DTS_ZSTD_BIN", "zstd")
 	client := &http.Client{Timeout: 90 * time.Second}
 	retryDelay := time.Second
 	currentFile, currentPos := startFile, uint32(startPos64)

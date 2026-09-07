@@ -28,10 +28,8 @@ import_archive() {
     ctr --namespace k8s.io images import "$archive"
   elif command -v nerdctl >/dev/null 2>&1; then
     nerdctl --namespace k8s.io load --input "$archive"
-  elif command -v docker >/dev/null 2>&1; then
-    docker load --input "$archive"
   else
-    echo "ERROR: no supported Kubernetes image importer found (k3s, microk8s, ctr, nerdctl or Docker)" >&2
+    echo "ERROR: no Kubernetes containerd importer found (k3s, microk8s, ctr or nerdctl)" >&2
     exit 1
   fi
 }

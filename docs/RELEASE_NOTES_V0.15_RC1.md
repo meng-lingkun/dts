@@ -1,4 +1,4 @@
-# QMigration V0.15.0-rc1 Release Notes
+# DTS V0.15.0-rc1 Release Notes
 
 ## Release purpose
 
@@ -12,7 +12,7 @@ instances pass the matrix in `docs/ORACLE_NATIVE_QUALIFICATION.md`.
 
 ## Oracle qualification executable
 
-Added `qmigration-oracle-qualify` and `deployments/scripts/qualify-oracle.sh`.
+Added `dts-oracle-qualify` and `deployments/scripts/qualify-oracle.sh`.
 
 The tool produces a structured JSON report with PASS / FAIL / SKIP results and
 never includes the Oracle password or private-key contents. By default the tool
@@ -35,12 +35,12 @@ and BLOB write/read, transactional rollback/commit, bound delete and post-load
 index creation. The table is dropped with PURGE when the test finishes.
 
 The qualification process enables experimental Oracle gates only inside its own
-process; it does not edit QMigration service configuration.
+process; it does not edit DTS service configuration.
 
 ## Release-build integration
 
-`make backend-build` now builds `bin/qmigration-oracle-qualify` together with the
-server, worker, CDC binaries and `qmigrationctl`.
+`make backend-build` now builds `bin/dts-oracle-qualify` together with the
+server, worker, CDC binaries and `dtsctl`.
 
 ## Archive verification correctness
 

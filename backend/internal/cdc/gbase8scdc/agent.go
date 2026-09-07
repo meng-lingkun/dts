@@ -18,12 +18,12 @@ import (
 	"sync"
 	"time"
 
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/domain"
 )
 
-// TableSelection is the stable contract between QMigration and a local
+// TableSelection is the stable contract between DTS and a local
 // GBase Client-SDK CDC provider. The provider owns only vendor CSDK/syscdcv1
-// calls and smart-LOB transport; QMigration owns table selection, transaction
+// calls and smart-LOB transport; DTS owns table selection, transaction
 // assembly, checkpointing and target apply.
 type SchemaColumn struct {
 	Name       string `json:"name"`
@@ -238,7 +238,7 @@ type CheckpointResponse struct {
 }
 
 // SmartLOBImageProof proves transport integrity for a provider-supplied smart
-// BLOB/CLOB image. The acquisition value is deliberately fixed: QMigration
+// BLOB/CLOB image. The acquisition value is deliberately fixed: DTS
 // never accepts a later SELECT-current-row fallback as a historical CDC image.
 type SmartLOBImageProof struct {
 	Column      string `json:"column"`
@@ -252,7 +252,7 @@ type SmartLOBImageProof struct {
 // the exact syscdcv1 record sequence/transaction/table identity and convert
 // column values to CDCField without lossy stringification. Binary values use
 // Encoding=base64. This keeps vendor CSDK representation out of the control
-// plane while leaving transaction semantics in QMigration.
+// plane while leaving transaction semantics in DTS.
 type RecordEnvelope struct {
 	Kind              string               `json:"kind"`
 	Sequence          string               `json:"sequence,omitempty"`
@@ -278,7 +278,7 @@ type ReadRequest struct {
 type ReadResponse struct {
 	Records []RecordEnvelope `json:"records"`
 	// NextSequence is an opaque syscdcv1 restart position suitable for the
-	// next provider read in the same live Worker. It is distinct from QMigration's
+	// next provider read in the same live Worker. It is distinct from DTS's
 	// durable restart/commit checkpoint, which may need to rewind to an open
 	// transaction BEGIN after a process crash.
 	NextSequence          string        `json:"next_sequence,omitempty"`
@@ -461,7 +461,7 @@ func providerHostIsLoopback(host string) bool {
 // NewClient accepts gbase8scdc:// for HTTP and gbase8scdcs:// for HTTPS.
 // Production deployments should prefer HTTPS when the provider is not strictly
 // loopback-local. The agent is datasource-specific and does not receive source
-// database credentials from QMigration.
+// database credentials from DTS.
 func NewClient(rawURL, caPEM, serverName, token string) (*Client, error) {
 	rawURL = strings.TrimSpace(rawURL)
 	if rawURL == "" {

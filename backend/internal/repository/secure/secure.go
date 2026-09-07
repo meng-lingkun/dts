@@ -8,9 +8,9 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"qmigration/backend/internal/domain"
-	"qmigration/backend/internal/repository"
-	"qmigration/backend/internal/security"
+	"dts/backend/internal/domain"
+	"dts/backend/internal/repository"
+	"dts/backend/internal/security"
 	"strings"
 	"time"
 )

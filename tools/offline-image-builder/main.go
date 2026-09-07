@@ -32,11 +32,11 @@ type layerEntry struct {
 func main() {
 	var binaryDir, webDir, nginxConfig, outputDir, version, baseWebArchive string
 	var serverOnly bool
-	flag.StringVar(&binaryDir, "binary-dir", "", "directory containing linux/amd64 QMigration binaries")
+	flag.StringVar(&binaryDir, "binary-dir", "", "directory containing linux/amd64 DTS binaries")
 	flag.StringVar(&webDir, "web-dir", "", "built web dist directory")
 	flag.StringVar(&nginxConfig, "nginx-config", "", "nginx default.conf")
 	flag.StringVar(&outputDir, "output-dir", "", "output directory for Docker image archives")
-	flag.StringVar(&version, "version", "", "QMigration version")
+	flag.StringVar(&version, "version", "", "DTS version")
 	flag.StringVar(&baseWebArchive, "base-web-archive", "", "existing web Docker archive to refresh without a registry")
 	flag.BoolVar(&serverOnly, "server-only", false, "build only the server image archive")
 	flag.Parse()
@@ -68,7 +68,7 @@ func main() {
 		if err != nil {
 			fatalf("refresh web image: %v", err)
 		}
-		if err := writeImage(filepath.Join(outputDir, "qmigration-web-"+version+".tar"), "qmigration/web:"+version, web); err != nil {
+		if err := writeImage(filepath.Join(outputDir, "dts-web-"+version+".tar"), "dts/web:"+version, web); err != nil {
 			fatalf("write web image: %v", err)
 		}
 		return
@@ -78,7 +78,7 @@ func main() {
 	if err != nil {
 		fatalf("build server image: %v", err)
 	}
-	if err := writeImage(filepath.Join(outputDir, "qmigration-server-"+version+".tar"), "qmigration/server:"+version, server); err != nil {
+	if err := writeImage(filepath.Join(outputDir, "dts-server-"+version+".tar"), "dts/server:"+version, server); err != nil {
 		fatalf("write server image: %v", err)
 	}
 	if serverOnly {
@@ -89,7 +89,7 @@ func main() {
 	if err != nil {
 		fatalf("build web image: %v", err)
 	}
-	if err := writeImage(filepath.Join(outputDir, "qmigration-web-"+version+".tar"), "qmigration/web:"+version, web); err != nil {
+	if err := writeImage(filepath.Join(outputDir, "dts-web-"+version+".tar"), "dts/web:"+version, web); err != nil {
 		fatalf("write web image: %v", err)
 	}
 
@@ -97,7 +97,7 @@ func main() {
 	if err != nil {
 		fatalf("pull postgres image: %v", err)
 	}
-	if err := writeImage(filepath.Join(outputDir, "postgres-17.tar"), "qmigration/postgres:17", postgres); err != nil {
+	if err := writeImage(filepath.Join(outputDir, "postgres-17.tar"), "dts/postgres:17", postgres); err != nil {
 		fatalf("write postgres image: %v", err)
 	}
 }
@@ -147,10 +147,10 @@ func buildServer(ctx context.Context, platform v1.Platform, binaryDir string) (v
 	}
 	entries := map[string]layerEntry{}
 	required := []string{
-		"qmigration-server", "qmigration-worker", "qmigrationctl", "qmigration-cdc-bridge", "qmigration-binlog-inspect",
-		"qmigration-mysql-cdc", "qmigration-tidb-cdc", "qmigration-postgres-cdc", "qmigration-opengauss-cdc",
-		"qmigration-gaussdb-cdc", "qmigration-sqlserver-cdc", "qmigration-oracle-cdc", "qmigration-db2-cdc",
-		"qmigration-dameng-cdc", "qmigration-gbase-cdc", "qmigration-gbase8s-cdc",
+		"dts-server", "dts-worker", "dtsctl", "dts-cdc-bridge", "dts-binlog-inspect",
+		"dts-mysql-cdc", "dts-tidb-cdc", "dts-postgres-cdc", "dts-opengauss-cdc",
+		"dts-gaussdb-cdc", "dts-sqlserver-cdc", "dts-oracle-cdc", "dts-db2-cdc",
+		"dts-dameng-cdc", "dts-gbase-cdc", "dts-gbase8s-cdc",
 	}
 	for _, binary := range required {
 		data, readErr := os.ReadFile(filepath.Join(binaryDir, binary))
@@ -160,8 +160,8 @@ func buildServer(ctx context.Context, platform v1.Platform, binaryDir string) (v
 		entries["usr/local/bin/"+binary] = regularEntry("usr/local/bin/"+binary, data, 0o755, 0, 0)
 	}
 	entries["app/"] = directoryEntry("app/", 0o755, 10001, 10001)
-	entries["var/lib/qmigration/"] = directoryEntry("var/lib/qmigration/", 0o755, 10001, 10001)
-	entries["var/lib/qmigration/cdc-spool/"] = directoryEntry("var/lib/qmigration/cdc-spool/", 0o755, 10001, 10001)
+	entries["var/lib/dts/"] = directoryEntry("var/lib/dts/", 0o755, 10001, 10001)
+	entries["var/lib/dts/cdc-spool/"] = directoryEntry("var/lib/dts/cdc-spool/", 0o755, 10001, 10001)
 
 	if err := addAlpinePackages(ctx, entries, []string{"ca-certificates-bundle", "zstd", "zstd-libs", "libgcc", "libstdc++"}); err != nil {
 		return nil, err
@@ -180,10 +180,10 @@ func buildServer(ctx context.Context, platform v1.Platform, binaryDir string) (v
 	}
 	config.Config.User = "10001:10001"
 	config.Config.WorkingDir = "/app"
-	config.Config.Entrypoint = []string{"/usr/local/bin/qmigration-server"}
+	config.Config.Entrypoint = []string{"/usr/local/bin/dts-server"}
 	config.Config.Cmd = nil
 	config.Config.Labels = copyMap(config.Config.Labels)
-	config.Config.Labels["org.opencontainers.image.title"] = "QMigration Server and Worker"
+	config.Config.Labels["org.opencontainers.image.title"] = "DTS Server and Worker"
 	return mutate.ConfigFile(image, config)
 }
 

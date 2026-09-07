@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"qmigration/backend/internal/connector"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/connector"
+	"dts/backend/internal/domain"
 )
 
 type OracleLogMinerRecord struct {
@@ -55,7 +55,7 @@ func (c *Connector) CurrentCDCPosition(ctx context.Context) (*domain.CDCPosition
 
 func (c *Connector) ValidateCDCSelection(ctx context.Context, mappings []domain.TableMapping) error {
 	if !experimentalOracleLogMinerCDCEnabled() {
-		return errors.New("Oracle LogMiner CDC requires QMIGRATION_EXPERIMENTAL_ORACLE_LOGMINER_CDC=1")
+		return errors.New("Oracle LogMiner CDC requires DTS_EXPERIMENTAL_ORACLE_LOGMINER_CDC=1")
 	}
 	if len(mappings) == 0 {
 		return errors.New("Oracle LogMiner CDC requires selected tables")

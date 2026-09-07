@@ -9,8 +9,8 @@ import (
 	"net/http"
 	"os"
 	"path"
-	"qmigration/backend/internal/domain"
-	"qmigration/backend/internal/repository"
+	"dts/backend/internal/domain"
+	"dts/backend/internal/repository"
 	"strconv"
 	"strings"
 	"sync"
@@ -119,23 +119,23 @@ var _ repository.ValidationReportArchiveProvider = (*Store)(nil)
 
 func ConfigFromEnv() Config {
 	return Config{
-		Endpoint:  strings.TrimRight(strings.TrimSpace(os.Getenv("QMIGRATION_CDC_SPOOL_S3_ENDPOINT")), "/"),
-		Bucket:    strings.TrimSpace(os.Getenv("QMIGRATION_CDC_SPOOL_S3_BUCKET")),
-		Prefix:    strings.Trim(strings.TrimSpace(env("QMIGRATION_CDC_SPOOL_S3_PREFIX", "qmigration/cdc-spool")), "/"),
-		Region:    strings.TrimSpace(env("QMIGRATION_CDC_SPOOL_S3_REGION", "us-east-1")),
-		AccessKey: os.Getenv("QMIGRATION_CDC_SPOOL_S3_ACCESS_KEY"), SecretKey: os.Getenv("QMIGRATION_CDC_SPOOL_S3_SECRET_KEY"), SessionToken: os.Getenv("QMIGRATION_CDC_SPOOL_S3_SESSION_TOKEN"),
-		PathStyle:           boolEnv("QMIGRATION_CDC_SPOOL_S3_PATH_STYLE", true),
-		AppliedRetention:    time.Duration(intEnv("QMIGRATION_CDC_SPOOL_APPLIED_FILE_RETENTION_HOURS", 24)) * time.Hour,
-		MaxPendingBytes:     int64Env("QMIGRATION_CDC_SPOOL_MAX_PENDING_BYTES", 64<<30),
-		WarnUsedPct:         floatEnv("QMIGRATION_CDC_SPOOL_DISK_WARN_PCT", 80),
-		CriticalUsedPct:     floatEnv("QMIGRATION_CDC_SPOOL_DISK_CRITICAL_PCT", 90),
-		CACert:              os.Getenv("QMIGRATION_CDC_SPOOL_S3_CA_CERT"),
-		TLSServerName:       strings.TrimSpace(os.Getenv("QMIGRATION_CDC_SPOOL_S3_TLS_SERVER_NAME")),
-		TLSClientCert:       os.Getenv("QMIGRATION_CDC_SPOOL_S3_TLS_CLIENT_CERT"),
-		TLSClientKey:        os.Getenv("QMIGRATION_CDC_SPOOL_S3_TLS_CLIENT_KEY"),
-		MultipartThreshold:  int64Env("QMIGRATION_CDC_SPOOL_S3_MULTIPART_THRESHOLD_BYTES", 8<<20),
-		MultipartPartSize:   int64Env("QMIGRATION_CDC_SPOOL_S3_MULTIPART_PART_BYTES", 8<<20),
-		MultipartAbortAfter: time.Duration(intEnv("QMIGRATION_CDC_SPOOL_S3_MULTIPART_ABORT_AFTER_HOURS", 6)) * time.Hour,
+		Endpoint:  strings.TrimRight(strings.TrimSpace(os.Getenv("DTS_CDC_SPOOL_S3_ENDPOINT")), "/"),
+		Bucket:    strings.TrimSpace(os.Getenv("DTS_CDC_SPOOL_S3_BUCKET")),
+		Prefix:    strings.Trim(strings.TrimSpace(env("DTS_CDC_SPOOL_S3_PREFIX", "dts/cdc-spool")), "/"),
+		Region:    strings.TrimSpace(env("DTS_CDC_SPOOL_S3_REGION", "us-east-1")),
+		AccessKey: os.Getenv("DTS_CDC_SPOOL_S3_ACCESS_KEY"), SecretKey: os.Getenv("DTS_CDC_SPOOL_S3_SECRET_KEY"), SessionToken: os.Getenv("DTS_CDC_SPOOL_S3_SESSION_TOKEN"),
+		PathStyle:           boolEnv("DTS_CDC_SPOOL_S3_PATH_STYLE", true),
+		AppliedRetention:    time.Duration(intEnv("DTS_CDC_SPOOL_APPLIED_FILE_RETENTION_HOURS", 24)) * time.Hour,
+		MaxPendingBytes:     int64Env("DTS_CDC_SPOOL_MAX_PENDING_BYTES", 64<<30),
+		WarnUsedPct:         floatEnv("DTS_CDC_SPOOL_DISK_WARN_PCT", 80),
+		CriticalUsedPct:     floatEnv("DTS_CDC_SPOOL_DISK_CRITICAL_PCT", 90),
+		CACert:              os.Getenv("DTS_CDC_SPOOL_S3_CA_CERT"),
+		TLSServerName:       strings.TrimSpace(os.Getenv("DTS_CDC_SPOOL_S3_TLS_SERVER_NAME")),
+		TLSClientCert:       os.Getenv("DTS_CDC_SPOOL_S3_TLS_CLIENT_CERT"),
+		TLSClientKey:        os.Getenv("DTS_CDC_SPOOL_S3_TLS_CLIENT_KEY"),
+		MultipartThreshold:  int64Env("DTS_CDC_SPOOL_S3_MULTIPART_THRESHOLD_BYTES", 8<<20),
+		MultipartPartSize:   int64Env("DTS_CDC_SPOOL_S3_MULTIPART_PART_BYTES", 8<<20),
+		MultipartAbortAfter: time.Duration(intEnv("DTS_CDC_SPOOL_S3_MULTIPART_ABORT_AFTER_HOURS", 6)) * time.Hour,
 	}
 }
 func env(k, d string) string {
@@ -488,7 +488,7 @@ func (s *Store) PurgeApplied(ctx context.Context, now time.Time) error {
 // that situation could discard a legitimate transaction.
 func (s *Store) Reconcile(ctx context.Context) error {
 	// Multipart uploads can survive a worker/server crash before Complete/Abort.
-	// Abort only stale uploads under QMigration pending/ so fresh uploads from
+	// Abort only stale uploads under DTS pending/ so fresh uploads from
 	// another live server are never touched. This cleanup is storage hygiene;
 	// source ACK correctness still depends on completed object + metadata commit.
 	if s.cfg.MultipartAbortAfter > 0 {

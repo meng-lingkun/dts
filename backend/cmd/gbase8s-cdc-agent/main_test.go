@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"qmigration/backend/internal/cdc/gbase8scdc"
+	"dts/backend/internal/cdc/gbase8scdc"
 )
 
 func TestValidateAgentExposure(t *testing.T) {
@@ -48,8 +48,8 @@ func TestProviderConfigFilePermissions(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`{"server":"gbase8s"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("QMIGRATION_GBASE8S_CDC_PROVIDER_CONFIG_JSON", "")
-	t.Setenv("QMIGRATION_GBASE8S_CDC_PROVIDER_CONFIG_FILE", path)
+	t.Setenv("DTS_GBASE8S_CDC_PROVIDER_CONFIG_JSON", "")
+	t.Setenv("DTS_GBASE8S_CDC_PROVIDER_CONFIG_FILE", path)
 	got, err := providerConfig()
 	if runtime.GOOS == "windows" {
 		if err == nil || !strings.Contains(err.Error(), "not supported on Windows") {
@@ -69,8 +69,8 @@ func TestProviderConfigFilePermissions(t *testing.T) {
 }
 
 func TestProviderSelectionIsUnambiguous(t *testing.T) {
-	t.Setenv("QMIGRATION_GBASE8S_CDC_PROVIDER_LIBRARY", "/tmp/native.so")
-	t.Setenv("QMIGRATION_GBASE8S_CDC_PROVIDER_PLUGIN", "/tmp/legacy.so")
+	t.Setenv("DTS_GBASE8S_CDC_PROVIDER_LIBRARY", "/tmp/native.so")
+	t.Setenv("DTS_GBASE8S_CDC_PROVIDER_PLUGIN", "/tmp/legacy.so")
 	if _, err := loadProvider(); err == nil {
 		t.Fatal("expected ambiguous provider rejection")
 	}
@@ -117,7 +117,7 @@ func TestStatusAndMetricsEndpoints(t *testing.T) {
 		if path == "/v1/status" && !strings.Contains(string(b), `"api_version":"v4"`) {
 			t.Fatalf("status body=%s", b)
 		}
-		if path == "/metrics" && !strings.Contains(string(b), "qmigration_gbase8s_cdc_agent_up") {
+		if path == "/metrics" && !strings.Contains(string(b), "dts_gbase8s_cdc_agent_up") {
 			t.Fatalf("metrics body=%s", b)
 		}
 	}

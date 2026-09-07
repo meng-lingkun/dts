@@ -39,7 +39,7 @@ func (t DataSourceType) IsPostgreSQLFamily() bool {
 
 // IsPostgreSQLWireCompatible is broader than IsPostgreSQLFamily: these
 // products speak the PostgreSQL frontend/backend protocol and can therefore
-// reuse QMigration's native full-load connector. It deliberately does not imply
+// reuse DTS's native full-load connector. It deliberately does not imply
 // pgoutput compatibility; CDC capability is advertised separately by the SPI.
 func (t DataSourceType) IsPostgreSQLWireCompatible() bool {
 	return t.IsPostgreSQLFamily() || t == DataSourceOpenGauss || t == DataSourceKingbase || t == DataSourceGaussDB
@@ -171,7 +171,7 @@ type RateLimitWindow struct {
 	Parallelism          int    `json:"parallelism,omitempty"`
 }
 
-// TransformAction is a safe, declarative QMigration value transformation.
+// TransformAction is a safe, declarative DTS value transformation.
 // Rules never execute user SQL or arbitrary code; they operate on connector-
 // neutral row images inside the unified Full Load pipeline.
 type TransformAction string
@@ -209,7 +209,7 @@ type MigrationTask struct {
 	Status           MigrationStatus `json:"status"`
 	PausedFromStatus MigrationStatus `json:"paused_from_status,omitempty"`
 	// Engine fields are retained for metadata/API compatibility. V0.15+ always
-	// normalizes them to "qmigration"; users do not select third-party runtimes.
+	// normalizes them to "dts"; users do not select third-party runtimes.
 	FullEngine                     string            `json:"full_engine"`
 	CDCEngine                      string            `json:"cdc_engine,omitempty"`
 	RollbackCDCEngine              string            `json:"rollback_cdc_engine,omitempty"`
@@ -900,7 +900,7 @@ type CDCPosition struct {
 	RecordedAt        time.Time `json:"recorded_at"`
 }
 
-// CDCSpoolRecord is a durable transaction staged by QMigration before the
+// CDCSpoolRecord is a durable transaction staged by DTS before the
 // target apply gate opens. Events are encrypted at rest by the secure
 // repository wrapper. Sequence is repository-assigned and preserves source
 // transaction order for deterministic draining after the snapshot finishes.
@@ -943,7 +943,7 @@ type CDCSpoolStats struct {
 	StorageUsedPct       float64 `json:"storage_used_pct,omitempty"`
 }
 
-// EngineInfo describes QMigration Unified Engine capabilities exposed for diagnostics.
+// EngineInfo describes DTS Unified Engine capabilities exposed for diagnostics.
 type EngineInfo struct {
 	Name      string   `json:"name"`
 	Available bool     `json:"available"`
@@ -952,13 +952,13 @@ type EngineInfo struct {
 	Note      string   `json:"note,omitempty"`
 }
 
-// EngineRenderRequest asks QMigration to render its internal runtime diagnostics/configuration.
+// EngineRenderRequest asks DTS to render its internal runtime diagnostics/configuration.
 type EngineRenderRequest struct {
 	Engine string `json:"engine"`
 	TaskID string `json:"task_id"`
 }
 
-// RuntimeSpec describes an internally supervised QMigration runtime. FULL jobs do not use commands; native CDC readers may run as QMigration-owned subprocesses.
+// RuntimeSpec describes an internally supervised DTS runtime. FULL jobs do not use commands; native CDC readers may run as DTS-owned subprocesses.
 type RuntimeSpec struct {
 	Engine   string            `json:"engine"`
 	Format   string            `json:"format"`
@@ -968,7 +968,7 @@ type RuntimeSpec struct {
 	Env      map[string]string `json:"env,omitempty"`
 }
 
-// EngineJob is a durable long-running QMigration-owned runtime process, primarily used
+// EngineJob is a durable long-running DTS-owned runtime process, primarily used
 // for managed CDC. Unlike MigrationChunk it is not part of full-load progress.
 type EngineJobStatus string
 

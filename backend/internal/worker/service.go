@@ -5,8 +5,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"os"
-	"qmigration/backend/internal/domain"
-	"qmigration/backend/internal/repository"
+	"dts/backend/internal/domain"
+	"dts/backend/internal/repository"
 	"strconv"
 	"strings"
 	"time"
@@ -58,7 +58,7 @@ func schedulerLoadScore(w *domain.Worker) float64 {
 	}
 	jobsPct := float64(w.RunningJobs) * 100 / float64(cores)
 	capacity := 1000.0
-	if raw := strings.TrimSpace(os.Getenv("QMIGRATION_WORKER_NETWORK_CAPACITY_MBPS")); raw != "" {
+	if raw := strings.TrimSpace(os.Getenv("DTS_WORKER_NETWORK_CAPACITY_MBPS")); raw != "" {
 		if n, e := strconv.ParseFloat(raw, 64); e == nil && n > 0 {
 			capacity = n
 		}

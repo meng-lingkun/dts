@@ -1,4 +1,4 @@
-# QMigration Implementation Status
+# DTS Implementation Status
 
 ## V0.15.0-rc29
 
@@ -10,7 +10,7 @@
 - [x] operator COMMITTED decision advances checkpoint only; subsequent source redelivery is duplicate-suppressed
 - [x] child-process SIGKILL after durable spool persist / before source ACK
 - [x] restart/source redelivery retains one durable spool transaction
-- [x] `qmigration-chaos-qualify` now 10/10 scenarios
+- [x] `dts-chaos-qualify` now 10/10 scenarios
 - [ ] external TCP proxy response-drop at a real vendor target COMMIT boundary remains retained qualification work
 
 ### Predictive 10–40 TB Full+CDC flow control

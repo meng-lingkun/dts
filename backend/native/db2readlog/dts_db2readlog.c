@@ -1,8 +1,8 @@
 /*
- * QMigration DB2 read-log provider.
+ * DTS DB2 read-log provider.
  *
  * Build only on the DB2 Log Agent host against IBM Data Server Client
- * headers/libdb2. The pure-Go QMigration binaries never link libdb2.
+ * headers/libdb2. The pure-Go DTS binaries never link libdb2.
  */
 #include <errno.h>
 #include <inttypes.h>
@@ -15,15 +15,15 @@
 #include <sqlca.h>
 #include <sqlcli1.h>
 
-#ifndef QMIGRATION_DB2_API_VERSION
+#ifndef DTS_DB2_API_VERSION
 # ifdef db2Version11580
-#  define QMIGRATION_DB2_API_VERSION db2Version11580
+#  define DTS_DB2_API_VERSION db2Version11580
 # elif defined(db2Version1150)
-#  define QMIGRATION_DB2_API_VERSION db2Version1150
+#  define DTS_DB2_API_VERSION db2Version1150
 # elif defined(db2Version1110)
-#  define QMIGRATION_DB2_API_VERSION db2Version1110
+#  define DTS_DB2_API_VERSION db2Version1110
 # else
-#  define QMIGRATION_DB2_API_VERSION 0
+#  define DTS_DB2_API_VERSION 0
 # endif
 #endif
 
@@ -105,13 +105,13 @@ static void disconnect_db(void) {
 }
 
 static int connect_db(void) {
-    const char *db = getenv("QMIGRATION_DB2_DATABASE");
-    const char *user = getenv("QMIGRATION_DB2_USER");
-    const char *pw = getenv("QMIGRATION_DB2_PASSWORD");
+    const char *db = getenv("DTS_DB2_DATABASE");
+    const char *user = getenv("DTS_DB2_USER");
+    const char *pw = getenv("DTS_DB2_PASSWORD");
     SQLRETURN rc;
 
     if (db == NULL || *db == '\0' || user == NULL || *user == '\0') {
-        fprintf(stderr, "QMIGRATION_DB2_DATABASE and QMIGRATION_DB2_USER are required\n");
+        fprintf(stderr, "DTS_DB2_DATABASE and DTS_DB2_USER are required\n");
         return 2;
     }
     if (SQLAllocHandle(SQL_HANDLE_ENV, SQL_NULL_HANDLE, &henv) != SQL_SUCCESS) {
@@ -138,7 +138,7 @@ static int connect_db(void) {
 static int call_readlog(db2ReadLogStruct *request, struct sqlca *ca) {
     int rc;
     memset(ca, 0, sizeof(*ca));
-    rc = db2ReadLog(QMIGRATION_DB2_API_VERSION, request, ca);
+    rc = db2ReadLog(DTS_DB2_API_VERSION, request, ca);
     if (rc != 0 && ca->sqlcode < 0) {
         fprintf(stderr, "db2ReadLog failed rc=%d sqlcode=%ld\n",
                 rc, (long)ca->sqlcode);
@@ -161,7 +161,7 @@ static int query_position(db2ReadLogInfoStruct *info) {
 static int emit_position(void) {
     db2ReadLogInfoStruct info;
     db2LRI current;
-    const char *db = getenv("QMIGRATION_DB2_DATABASE");
+    const char *db = getenv("DTS_DB2_DATABASE");
 
     if (query_position(&info) != 0) {
         return 3;

@@ -1,8 +1,8 @@
-# QMigration V0.15.0-rc5 Release Notes
+# DTS V0.15.0-rc5 Release Notes
 
 ## Release purpose
 
-RC5 moves DB2 LUW from an external/JDBC placeholder to a QMigration-owned
+RC5 moves DB2 LUW from an external/JDBC placeholder to a DTS-owned
 native DRDA/DDM data plane. The new path is intentionally `EXPERIMENTAL` until
 real DB2 qualification reports are retained. DB2 source CDC is not advertised.
 
@@ -14,14 +14,14 @@ real DB2 qualification reports are retained. DB2 source CDC is not advertised.
 - DRDA flow covers EXCSAT / ACCSEC / SECCHK / ACCRDB and dynamic SQL query /
   execute / commit / rollback.
 - SECMEC 9 encrypted user/password authentication is implemented.
-- SECMEC 3 is accepted only on an already-established TLS session; QMigration
+- SECMEC 3 is accepted only on an already-established TLS session; DTS
   refuses to send plaintext credentials over a non-TLS DRDA connection.
 - Direct TLS, CA verification, server-name verification and optional mTLS use
   the common datasource TLS policy.
 - Native QRYDSC/QRYDTA decoding for integer, decimal, floating point, character,
   date/time/timestamp, binary, boolean and LOB families.
 - EXTDTA LOB payload association for source Full Read.
-- DB2 timestamp values are normalized to QMigration's canonical
+- DB2 timestamp values are normalized to DTS's canonical
   `YYYY-MM-DD HH:MM:SS[.fraction]` representation before heterogeneous writes.
 
 ## Metadata and Full Load
@@ -58,7 +58,7 @@ real DB2 qualification reports are retained. DB2 source CDC is not advertised.
 
 New artifacts:
 
-- `qmigration-db2-qualify`
+- `dts-db2-qualify`
 - `deployments/scripts/qualify-db2.sh`
 - `docs/DB2_NATIVE_QUALIFICATION.md`
 

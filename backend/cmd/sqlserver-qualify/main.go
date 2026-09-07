@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"qmigration/backend/internal/connector"
-	sqlserverconnector "qmigration/backend/internal/connector/sqlserver"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/connector"
+	sqlserverconnector "dts/backend/internal/connector/sqlserver"
+	"dts/backend/internal/domain"
 )
 
 const toolVersion = "0.15.0-rc49"
@@ -128,9 +128,9 @@ func main() {
 	fatalIf(err)
 	key, err := readFile(*keyFile)
 	fatalIf(err)
-	_ = os.Setenv("QMIGRATION_EXPERIMENTAL_SQLSERVER_NATIVE", "1")
+	_ = os.Setenv("DTS_EXPERIMENTAL_SQLSERVER_NATIVE", "1")
 	if *cdc {
-		_ = os.Setenv("QMIGRATION_EXPERIMENTAL_SQLSERVER_CDC", "1")
+		_ = os.Setenv("DTS_EXPERIMENTAL_SQLSERVER_CDC", "1")
 	}
 
 	ds := domain.DataSource{Type: domain.DataSourceSQLServer, Host: strings.TrimSpace(*host), Port: *port, Username: strings.TrimSpace(*user), Password: password, Database: strings.TrimSpace(*database), TLSMode: domain.TLSMode(strings.ToUpper(strings.TrimSpace(*tlsMode))), TLSServerName: strings.TrimSpace(*tlsServerName), TLSCACert: ca, TLSClientCert: cert, TLSClientKey: key}
@@ -289,7 +289,7 @@ func runTargetWrite(r *runner, base connector.Connector, schema string) {
 		defer func() {
 			_ = ddl.ExecDDL(context.Background(), schema, "DROP TABLE "+"["+strings.ReplaceAll(schema, "]", "]]")+"]."+"["+strings.ReplaceAll(table, "]", "]]")+"]")
 		}()
-		largeText := strings.Repeat("QMigration-SQLServer-LOB-你", 2500)
+		largeText := strings.Repeat("DTS-SQLServer-LOB-你", 2500)
 		blob := make([]byte, 48<<10)
 		for i := range blob {
 			blob[i] = byte(i % 251)

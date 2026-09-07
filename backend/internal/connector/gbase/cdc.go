@@ -7,19 +7,19 @@ import (
 	"os"
 	"strings"
 
-	"qmigration/backend/internal/cdc/gbase8acdc"
-	"qmigration/backend/internal/connector"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/cdc/gbase8acdc"
+	"dts/backend/internal/connector"
+	"dts/backend/internal/domain"
 )
 
 func (c *Connector) cdcAgent() (*gbase8acdc.Client, error) {
 	if !sourceCDCEnabled() {
-		return nil, errors.New("GBase 8a source CDC requires QMIGRATION_EXPERIMENTAL_GBASE8A_NATIVE=1 and QMIGRATION_EXPERIMENTAL_GBASE8A_SOURCE_CDC=1")
+		return nil, errors.New("GBase 8a source CDC requires DTS_EXPERIMENTAL_GBASE8A_NATIVE=1 and DTS_EXPERIMENTAL_GBASE8A_SOURCE_CDC=1")
 	}
 	if strings.TrimSpace(c.ds.CDCURL) == "" {
 		return nil, errors.New("GBase 8a source CDC requires datasource cdc_url pointing at a datasource-local proof provider")
 	}
-	return gbase8acdc.NewClient(c.ds.CDCURL, os.Getenv("QMIGRATION_GBASE8A_CDC_CA_PEM"), os.Getenv("QMIGRATION_GBASE8A_CDC_SERVER_NAME"), os.Getenv("QMIGRATION_GBASE8A_CDC_TOKEN"))
+	return gbase8acdc.NewClient(c.ds.CDCURL, os.Getenv("DTS_GBASE8A_CDC_CA_PEM"), os.Getenv("DTS_GBASE8A_CDC_SERVER_NAME"), os.Getenv("DTS_GBASE8A_CDC_TOKEN"))
 }
 
 func (c *Connector) cdcSelections(ctx context.Context, mappings []domain.TableMapping) ([]gbase8acdc.TableSelection, error) {

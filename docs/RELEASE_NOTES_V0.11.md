@@ -1,4 +1,4 @@
-# QMigration V0.11.0 Release Notes
+# DTS V0.11.0 Release Notes
 
 ## Native MySQL OPAQUE JSON CDC
 

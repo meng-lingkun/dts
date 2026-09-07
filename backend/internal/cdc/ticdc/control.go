@@ -49,7 +49,7 @@ func DeterministicNames(taskID, direction string) (string, string) {
 	raw := strings.TrimSpace(taskID) + "\x00" + strings.ToLower(strings.TrimSpace(direction))
 	h := sha256.Sum256([]byte(raw))
 	suffix := hex.EncodeToString(h[:8])
-	return "qmigration-" + suffix, "qmigration-" + suffix
+	return "dts-" + suffix, "dts-" + suffix
 }
 
 func (c *ControlClient) Health(ctx context.Context) error {
@@ -151,10 +151,10 @@ func buildKafkaSinkURIEndpoint(ep Endpoint, topic string) string {
 	}
 	if ep.KafkaSASLMechanism != "" {
 		q.Set("sasl-mechanism", strings.ToLower(ep.KafkaSASLMechanism))
-		if user := os.Getenv("QMIGRATION_TIDB_KAFKA_SASL_USERNAME"); user != "" {
+		if user := os.Getenv("DTS_TIDB_KAFKA_SASL_USERNAME"); user != "" {
 			q.Set("sasl-user", user)
 		}
-		if password := os.Getenv("QMIGRATION_TIDB_KAFKA_SASL_PASSWORD"); password != "" {
+		if password := os.Getenv("DTS_TIDB_KAFKA_SASL_PASSWORD"); password != "" {
 			q.Set("sasl-password", password)
 		}
 	}

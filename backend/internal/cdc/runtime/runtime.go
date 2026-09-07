@@ -4,13 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/domain"
 )
 
 // Transaction is the protocol-independent unit emitted by every native CDC
 // reader. Acknowledge MUST advance only the source-side receive checkpoint
 // (for example PostgreSQL standby status or a local MySQL reconnect cursor)
-// after QMigration has durably applied Events and persisted its checkpoint.
+// after DTS has durably applied Events and persisted its checkpoint.
 type Transaction struct {
 	Events     []domain.CDCEvent
 	Checkpoint domain.CDCPosition
@@ -40,10 +40,10 @@ type Runner struct {
 
 // Run enforces the core CDC durability ordering shared by all vendors:
 //
-//	read/decode -> QMigration apply+durable checkpoint -> source acknowledge
+//	read/decode -> DTS apply+durable checkpoint -> source acknowledge
 //
 // If Apply fails, Acknowledge is never called. Reconnect therefore starts from
-// the last source position that was already accepted by QMigration.
+// the last source position that was already accepted by DTS.
 func (r Runner) Run(ctx context.Context) error {
 	if r.Reader == nil || r.Apply == nil {
 		return errors.New("cdc runtime requires reader and apply hooks")

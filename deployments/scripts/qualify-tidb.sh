@@ -2,10 +2,10 @@
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-BIN=${QMIGRATION_TIDB_QUALIFY_BIN:-"$ROOT/bin/qmigration-tidb-qualify"}
+BIN=${DTS_TIDB_QUALIFY_BIN:-"$ROOT/bin/dts-tidb-qualify"}
 
 if [[ ! -x "$BIN" ]]; then
-  echo "building qmigration-tidb-qualify" >&2
+  echo "building dts-tidb-qualify" >&2
   (cd "$ROOT/backend" && go build -o "$BIN" ./cmd/tidb-qualify)
 fi
 

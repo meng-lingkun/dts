@@ -1,4 +1,4 @@
-# QMigration V0.15.0-rc42 Release Notes
+# DTS V0.15.0-rc42 Release Notes
 
 RC42 continues the long-running 10-40TB control-plane hardening started in RC41.
 

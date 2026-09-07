@@ -2,27 +2,27 @@ apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   name: image-preflight
-  namespace: qmigration
+  namespace: dts
 spec:
   selector:
-    matchLabels: {app: qmigration-image-preflight}
+    matchLabels: {app: dts-image-preflight}
   template:
     metadata:
-      labels: {app: qmigration-image-preflight}
+      labels: {app: dts-image-preflight}
     spec:
       automountServiceAccountToken: false
       initContainers:
       - name: web-image
-        image: qmigration/web:0.15.0-rc49
+        image: dts/web:0.15.0-rc49
         imagePullPolicy: Never
         command: ["/bin/sh", "-c", "true"]
       - name: postgres-image
-        image: qmigration/postgres:17
+        image: dts/postgres:17
         imagePullPolicy: Never
         command: ["/bin/sh", "-c", "true"]
       containers:
       - name: server-image
-        image: qmigration/server:0.15.0-rc49
+        image: dts/server:0.15.0-rc49
         imagePullPolicy: Never
         command: ["/bin/sh", "-c", "sleep 3600"]
         resources:

@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"qmigration/backend/internal/connector"
-	"qmigration/backend/internal/domain"
-	"qmigration/backend/internal/engine"
-	"qmigration/backend/internal/repository/memory"
+	"dts/backend/internal/connector"
+	"dts/backend/internal/domain"
+	"dts/backend/internal/engine"
+	"dts/backend/internal/repository/memory"
 )
 
 func TestDebeziumIngressRejectsMissingDurablePosition(t *testing.T) {
@@ -27,9 +27,9 @@ func TestDebeziumIngressRejectsMissingDurablePosition(t *testing.T) {
 }
 
 func TestCanalIngressReturnsRetryableWhileFullLoadRuns(t *testing.T) {
-	t.Setenv("QMIGRATION_RBAC_TOKENS", "")
-	t.Setenv("QMIGRATION_API_TOKEN", "")
-	t.Setenv("QMIGRATION_AUTH_REQUIRED", "")
+	t.Setenv("DTS_RBAC_TOKENS", "")
+	t.Setenv("DTS_API_TOKEN", "")
+	t.Setenv("DTS_AUTH_REQUIRED", "")
 	repo := memory.New()
 	now := time.Now().UTC()
 	if err := repo.CreateMigration(context.Background(), &domain.MigrationTask{
@@ -92,9 +92,9 @@ func (*externalCDCTestConnector) DeleteByKey(context.Context, connector.DeleteBy
 }
 
 func TestCanalIngressAppliesAndDeduplicatesThroughCDCService(t *testing.T) {
-	t.Setenv("QMIGRATION_RBAC_TOKENS", "")
-	t.Setenv("QMIGRATION_API_TOKEN", "")
-	t.Setenv("QMIGRATION_AUTH_REQUIRED", "")
+	t.Setenv("DTS_RBAC_TOKENS", "")
+	t.Setenv("DTS_API_TOKEN", "")
+	t.Setenv("DTS_AUTH_REQUIRED", "")
 	repo := memory.New()
 	now := time.Now().UTC()
 	src := &domain.DataSource{ID: "src", Name: "src", Type: domain.DataSourceMySQL, Host: "src", Port: 3306, CreatedAt: now, UpdatedAt: now}
@@ -142,9 +142,9 @@ func TestCanalIngressAppliesAndDeduplicatesThroughCDCService(t *testing.T) {
 
 func setupPushCDCTest(t *testing.T, id string, mode domain.MigrationMode, status domain.MigrationStatus, totalChunks int) (*memory.Store, http.Handler, *externalCDCTestConnector) {
 	t.Helper()
-	t.Setenv("QMIGRATION_RBAC_TOKENS", "")
-	t.Setenv("QMIGRATION_API_TOKEN", "")
-	t.Setenv("QMIGRATION_AUTH_REQUIRED", "")
+	t.Setenv("DTS_RBAC_TOKENS", "")
+	t.Setenv("DTS_API_TOKEN", "")
+	t.Setenv("DTS_AUTH_REQUIRED", "")
 	repo := memory.New()
 	now := time.Now().UTC()
 	for _, ds := range []*domain.DataSource{

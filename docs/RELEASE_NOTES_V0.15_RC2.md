@@ -1,4 +1,4 @@
-# QMigration V0.15.0-rc2 Release Notes
+# DTS V0.15.0-rc2 Release Notes
 
 ## Release purpose
 
@@ -13,7 +13,7 @@ qualification-oriented software-completion model used by Oracle.
 - Added SQL Server `IDENTITY(seed,increment)` discovery and target restoration.
 - Full Writer / CDC Apply now manages `SET IDENTITY_INSERT ... ON/OFF` when explicit identity values are migrated; cleanup failure closes the connection instead of leaving a poisoned session in the pool.
 - Added same-family SQL Server schema-object/DDL policy path; unsafe routines/triggers remain manual rather than blindly converted.
-- Added `qmigration-sqlserver-qualify` and `deployments/scripts/qualify-sqlserver.sh` for structured real-instance PASS/FAIL/SKIP qualification.
+- Added `dts-sqlserver-qualify` and `deployments/scripts/qualify-sqlserver.sh` for structured real-instance PASS/FAIL/SKIP qualification.
 
 ## Cross-connector hardening
 
@@ -24,8 +24,8 @@ qualification-oriented software-completion model used by Oracle.
 ## Truthful source-CDC capability matrix
 
 - MySQL/MariaDB/PolarDB MySQL and PolarDB-X continue to advertise native MySQL-compatible Binlog source CDC with runtime prechecks.
-- TiDB no longer advertises MySQL Binlog source CDC from its SQL endpoint; QMigration requires a dedicated TiCDC adapter.
-- OceanBase MySQL no longer advertises source CDC from its SQL endpoint; QMigration must model the separately deployed OceanBase Binlog Service endpoint.
+- TiDB no longer advertises MySQL Binlog source CDC from its SQL endpoint; DTS requires a dedicated TiCDC adapter.
+- OceanBase MySQL no longer advertises source CDC from its SQL endpoint; DTS must model the separately deployed OceanBase Binlog Service endpoint.
 - Both products remain native Full Load and CDC targets.
 
 ## Connector diagnostics
@@ -42,4 +42,4 @@ This makes `/api/v1/connectors` usable as a machine-readable support matrix inst
 - real Oracle qualification remains required;
 - real SQL Server qualification remains required;
 - TiCDC and OceanBase Binlog Service source adapters remain separate implementation items;
-- DB2/DM/GaussDB/GBase remain probe-only until their QMigration Native connectors exist.
+- DB2/DM/GaussDB/GBase remain probe-only until their DTS Native connectors exist.

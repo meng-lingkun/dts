@@ -1,4 +1,4 @@
--- QMigration V0.15.0-unified-dev2
+-- DTS V0.15.0-unified-dev2
 -- Unified Connector Capability SPI / Native CDC Runtime release marker.
 INSERT INTO metadata_schema_state(id, schema_version, updated_at)
 VALUES (1, '0.15.0-unified-dev2', now())

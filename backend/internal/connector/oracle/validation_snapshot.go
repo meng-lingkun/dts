@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	"qmigration/backend/internal/connector"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/connector"
+	"dts/backend/internal/domain"
 )
 
 var _ connector.ValidationSnapshotConnector = (*Connector)(nil)
@@ -20,7 +20,7 @@ var _ connector.ValidationSnapshotConnector = (*Connector)(nil)
 // to current data.
 func (c *Connector) OpenValidationSnapshot(_ context.Context, position domain.CDCPosition) (connector.DataConnector, error) {
 	if !experimentalOracleLogMinerCDCEnabled() {
-		return nil, fmt.Errorf("Oracle exact validation snapshots require QMIGRATION_EXPERIMENTAL_ORACLE_LOGMINER_CDC=1")
+		return nil, fmt.Errorf("Oracle exact validation snapshots require DTS_EXPERIMENTAL_ORACLE_LOGMINER_CDC=1")
 	}
 	if !strings.EqualFold(strings.TrimSpace(position.PositionType), "ORACLE_SCN") {
 		return nil, fmt.Errorf("Oracle exact validation snapshot requires ORACLE_SCN position, got %q", position.PositionType)

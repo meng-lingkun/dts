@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"qmigration/backend/internal/connector"
-	damengconnector "qmigration/backend/internal/connector/dameng"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/connector"
+	damengconnector "dts/backend/internal/connector/dameng"
+	"dts/backend/internal/domain"
 )
 
 const toolVersion = "0.15.0-rc49"
@@ -109,20 +109,20 @@ func main() {
 	if strings.TrimSpace(*schema) == "" {
 		*schema = strings.ToUpper(strings.TrimSpace(*user))
 	}
-	_ = os.Setenv("QMIGRATION_EXPERIMENTAL_DAMENG_NATIVE", "1")
+	_ = os.Setenv("DTS_EXPERIMENTAL_DAMENG_NATIVE", "1")
 	if *cdc {
-		_ = os.Setenv("QMIGRATION_EXPERIMENTAL_DAMENG_LOG_CDC", "1")
+		_ = os.Setenv("DTS_EXPERIMENTAL_DAMENG_LOG_CDC", "1")
 	}
 	ds := domain.DataSource{Type: domain.DataSourceDameng, Host: strings.TrimSpace(*host), Port: *port, Username: strings.TrimSpace(*user), Password: password, Schema: strings.TrimSpace(*schema)}
 	f := damengconnector.NewFactory()
 	base, err := f.New(ds)
 	fatal(err)
 	defer base.Close()
-	driverName := strings.TrimSpace(os.Getenv("QMIGRATION_DAMENG_SQL_DRIVER"))
+	driverName := strings.TrimSpace(os.Getenv("DTS_DAMENG_SQL_DRIVER"))
 	if driverName == "" {
 		driverName = "dm"
 	}
-	rep := report{ToolVersion: toolVersion, GeneratedAt: time.Now().UTC().Format(time.RFC3339Nano), Target: map[string]any{"host": ds.Host, "port": ds.Port, "user": ds.Username, "schema": ds.Schema, "driver": driverName, "provider_plugin_configured": strings.TrimSpace(os.Getenv("QMIGRATION_DAMENG_DRIVER_PLUGIN")) != ""}, Descriptor: f.Capabilities(domain.DataSourceDameng)}
+	rep := report{ToolVersion: toolVersion, GeneratedAt: time.Now().UTC().Format(time.RFC3339Nano), Target: map[string]any{"host": ds.Host, "port": ds.Port, "user": ds.Username, "schema": ds.Schema, "driver": driverName, "provider_plugin_configured": strings.TrimSpace(os.Getenv("DTS_DAMENG_DRIVER_PLUGIN")) != ""}, Descriptor: f.Capabilities(domain.DataSourceDameng)}
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
 	r := &runner{ctx: ctx, rep: &rep}
@@ -238,7 +238,7 @@ func main() {
 			r.skip("target-write", "unexpected connector type")
 		} else {
 			r.run("target-write", func() (string, map[string]any, error) {
-				name := fmt.Sprintf("QMIGRATION_Q_%d", time.Now().UnixNano())
+				name := fmt.Sprintf("DTS_Q_%d", time.Now().UnixNano())
 				cols := []domain.ColumnInfo{{Name: "ID", DataType: "bigint", Nullable: false}, {Name: "TXT", DataType: "varchar", ColumnType: "VARCHAR(200)", Nullable: true}, {Name: "AMOUNT", DataType: "decimal", ColumnType: "DECIMAL(20,4)", Nullable: true}, {Name: "PAYLOAD", DataType: "blob", Nullable: true}}
 				if err := c.CreateTableWithPrimaryKeys(ctx, ds.Schema, name, cols, []string{"ID"}); err != nil {
 					return "", nil, err

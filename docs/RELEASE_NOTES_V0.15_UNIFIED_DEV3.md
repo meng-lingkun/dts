@@ -1,8 +1,8 @@
-# QMigration V0.15.0-unified-dev3 Release Notes
+# DTS V0.15.0-unified-dev3 Release Notes
 
 ## 目标
 
-继续把开源迁移工具的优秀设计融合进单一 QMigration Unified Engine，而不是恢复多引擎管理模式。本轮重点是：可审计的值转换策略，以及 Oracle/SQL Server 原生协议 Connector 的第一阶段。
+继续把开源迁移工具的优秀设计融合进单一 DTS Unified Engine，而不是恢复多引擎管理模式。本轮重点是：可审计的值转换策略，以及 Oracle/SQL Server 原生协议 Connector 的第一阶段。
 
 ## Transform Policy DSL
 
@@ -28,7 +28,7 @@ MySQL zero-date 等无法无损转换的值仍默认 fail-safe；只有显式声
 
 ## Oracle Native TNS Foundation
 
-新增 QMigration 自研 Oracle Net/TNS CONNECT 协议层：
+新增 DTS 自研 Oracle Net/TNS CONNECT 协议层：
 
 - 发送 TNS CONNECT packet
 - 识别 ACCEPT / REFUSE / REDIRECT
@@ -39,7 +39,7 @@ MySQL zero-date 等无法无损转换的值仍默认 fail-safe；只有显式声
 
 ## SQL Server Native TDS Foundation
 
-新增 QMigration 自研 TDS 层：
+新增 DTS 自研 TDS 层：
 
 - PRELOGIN
 - LOGIN7
@@ -55,7 +55,7 @@ MySQL zero-date 等无法无损转换的值仍默认 fail-safe；只有显式声
 当显式设置：
 
 ```bash
-QMIGRATION_EXPERIMENTAL_SQLSERVER_NATIVE=1
+DTS_EXPERIMENTAL_SQLSERVER_NATIVE=1
 ```
 
 Connector 才会开放实验性 `metadata/full-read/full-write/schema-create/cdc-apply/...` target-side 能力，并进入 LOGIN7 + SQL Batch 数据面。SQL Server source CDC 仍未开放。
@@ -66,7 +66,7 @@ Connector 才会开放实验性 `metadata/full-read/full-write/schema-create/cdc
 
 实验开关开启时 Worker 额外声明：
 
-`qmigration:sqlserver-full-experimental`
+`dts:sqlserver-full-experimental`
 
 默认 Worker 不声明该能力。
 

@@ -74,10 +74,10 @@ func NewKafkaClientForEndpoint(ep Endpoint, clientID string) (*KafkaClient, erro
 		ClientCert:    ep.KafkaCert,
 		ClientKey:     ep.KafkaKey,
 		SASLMechanism: strings.ToLower(strings.TrimSpace(ep.KafkaSASLMechanism)),
-		SASLUsername:  os.Getenv("QMIGRATION_TIDB_KAFKA_SASL_USERNAME"),
-		SASLPassword:  os.Getenv("QMIGRATION_TIDB_KAFKA_SASL_PASSWORD"),
-		SASLToken:     os.Getenv("QMIGRATION_TIDB_KAFKA_SASL_TOKEN"),
-		SASLProvider:  os.Getenv("QMIGRATION_TIDB_KAFKA_SASL_PROVIDER"),
+		SASLUsername:  os.Getenv("DTS_TIDB_KAFKA_SASL_USERNAME"),
+		SASLPassword:  os.Getenv("DTS_TIDB_KAFKA_SASL_PASSWORD"),
+		SASLToken:     os.Getenv("DTS_TIDB_KAFKA_SASL_TOKEN"),
+		SASLProvider:  os.Getenv("DTS_TIDB_KAFKA_SASL_PROVIDER"),
 	}
 	client, err := newKafkaClient(ep.Brokers, clientID, security)
 	if err != nil {
@@ -94,7 +94,7 @@ func newKafkaClient(brokers []string, clientID string, security KafkaSecurityCon
 		return nil, errors.New("Kafka client requires bootstrap brokers")
 	}
 	if strings.TrimSpace(clientID) == "" {
-		clientID = "qmigration-ticdc"
+		clientID = "dts-ticdc"
 	}
 	security.SASLMechanism = strings.ToLower(strings.TrimSpace(security.SASLMechanism))
 	switch security.SASLMechanism {
@@ -109,11 +109,11 @@ func newKafkaClient(brokers []string, clientID string, security KafkaSecurityCon
 		}
 	case "oauthbearer":
 		if strings.TrimSpace(security.SASLToken) == "" {
-			return nil, errors.New("Kafka OAUTHBEARER requires QMIGRATION_TIDB_KAFKA_SASL_TOKEN")
+			return nil, errors.New("Kafka OAUTHBEARER requires DTS_TIDB_KAFKA_SASL_TOKEN")
 		}
 	case "gssapi":
 		if strings.TrimSpace(security.SASLProvider) == "" {
-			return nil, errors.New("Kafka GSSAPI requires QMIGRATION_TIDB_KAFKA_SASL_PROVIDER")
+			return nil, errors.New("Kafka GSSAPI requires DTS_TIDB_KAFKA_SASL_PROVIDER")
 		}
 	}
 	if (security.ClientCert == "") != (security.ClientKey == "") {
@@ -148,7 +148,7 @@ func (k *KafkaClient) Metadata(ctx context.Context, topic string) (kafkaPartitio
 			continue
 		}
 		if k.expectedPartitions > 0 && meta.Count != k.expectedPartitions {
-			return kafkaPartitionMeta{}, fmt.Errorf("Kafka topic %q partition topology changed: expected %d, got %d; QMigration refuses to infer new partition offsets during an active capture", topic, k.expectedPartitions, meta.Count)
+			return kafkaPartitionMeta{}, fmt.Errorf("Kafka topic %q partition topology changed: expected %d, got %d; DTS refuses to infer new partition offsets during an active capture", topic, k.expectedPartitions, meta.Count)
 		}
 		return meta, nil
 	}
@@ -1055,9 +1055,9 @@ func decompressKafkaRecords(codec int, raw []byte) ([]byte, error) {
 	case 2:
 		return decodeXerialSnappy(raw, kafkaMaxResponse)
 	case 3:
-		return decompressKafkaHelper("QMIGRATION_KAFKA_LZ4_BIN", raw)
+		return decompressKafkaHelper("DTS_KAFKA_LZ4_BIN", raw)
 	case 4:
-		return decompressKafkaHelper("QMIGRATION_KAFKA_ZSTD_BIN", raw)
+		return decompressKafkaHelper("DTS_KAFKA_ZSTD_BIN", raw)
 	default:
 		return nil, fmt.Errorf("unsupported Kafka compression codec %d", codec)
 	}

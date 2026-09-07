@@ -1,3 +1,3 @@
-module qmigration/backend
+module dts/backend
 
 go 1.23

@@ -14,8 +14,8 @@ import (
 	"io"
 	"math/big"
 	"net"
-	"qmigration/backend/internal/connector"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/connector"
+	"dts/backend/internal/domain"
 	"strings"
 	"testing"
 	"time"
@@ -123,7 +123,7 @@ func fakeNVarCharResult(value string) []byte {
 }
 
 func TestExperimentalNativeTDSSessionAgainstFakeServer(t *testing.T) {
-	t.Setenv("QMIGRATION_EXPERIMENTAL_SQLSERVER_NATIVE", "1")
+	t.Setenv("DTS_EXPERIMENTAL_SQLSERVER_NATIVE", "1")
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -201,7 +201,7 @@ func testTDSServerCertificate(t *testing.T) (tls.Certificate, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	caTmpl := &x509.Certificate{SerialNumber: big.NewInt(100), Subject: pkix.Name{CommonName: "QMigration TDS Test CA"}, NotBefore: now.Add(-time.Minute), NotAfter: now.Add(time.Hour), IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature}
+	caTmpl := &x509.Certificate{SerialNumber: big.NewInt(100), Subject: pkix.Name{CommonName: "DTS TDS Test CA"}, NotBefore: now.Add(-time.Minute), NotAfter: now.Add(time.Hour), IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature}
 	caDER, err := x509.CreateCertificate(rand.Reader, caTmpl, caTmpl, &caKey.PublicKey, caKey)
 	if err != nil {
 		t.Fatal(err)
@@ -229,7 +229,7 @@ func testTDSServerCertificate(t *testing.T) (tls.Certificate, string) {
 }
 
 func TestExperimentalNativeTDSTLSRequired(t *testing.T) {
-	t.Setenv("QMIGRATION_EXPERIMENTAL_SQLSERVER_NATIVE", "1")
+	t.Setenv("DTS_EXPERIMENTAL_SQLSERVER_NATIVE", "1")
 	cert, ca := testTDSServerCertificate(t)
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -291,7 +291,7 @@ func TestExperimentalNativeTDSTLSRequired(t *testing.T) {
 }
 
 func TestSQLServerTLSRequiredNeverDowngrades(t *testing.T) {
-	t.Setenv("QMIGRATION_EXPERIMENTAL_SQLSERVER_NATIVE", "1")
+	t.Setenv("DTS_EXPERIMENTAL_SQLSERVER_NATIVE", "1")
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -316,7 +316,7 @@ func TestSQLServerTLSRequiredNeverDowngrades(t *testing.T) {
 }
 
 func TestExperimentalNativeTDSPreferredUsesLoginOnlyTLSWhenServerOff(t *testing.T) {
-	t.Setenv("QMIGRATION_EXPERIMENTAL_SQLSERVER_NATIVE", "1")
+	t.Setenv("DTS_EXPERIMENTAL_SQLSERVER_NATIVE", "1")
 	cert, ca := testTDSServerCertificate(t)
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -406,8 +406,8 @@ func fakeNVarCharRows(rows [][]string) []byte {
 }
 
 func TestSQLServerCDCPositionAndWindowAgainstFakeTDS(t *testing.T) {
-	t.Setenv("QMIGRATION_EXPERIMENTAL_SQLSERVER_NATIVE", "1")
-	t.Setenv("QMIGRATION_EXPERIMENTAL_SQLSERVER_CDC", "1")
+	t.Setenv("DTS_EXPERIMENTAL_SQLSERVER_NATIVE", "1")
+	t.Setenv("DTS_EXPERIMENTAL_SQLSERVER_CDC", "1")
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -476,8 +476,8 @@ func TestSQLServerCDCPositionAndWindowAgainstFakeTDS(t *testing.T) {
 }
 
 func TestSQLServerReadCDCChangesAgainstFakeTDS(t *testing.T) {
-	t.Setenv("QMIGRATION_EXPERIMENTAL_SQLSERVER_NATIVE", "1")
-	t.Setenv("QMIGRATION_EXPERIMENTAL_SQLSERVER_CDC", "1")
+	t.Setenv("DTS_EXPERIMENTAL_SQLSERVER_NATIVE", "1")
+	t.Setenv("DTS_EXPERIMENTAL_SQLSERVER_CDC", "1")
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -559,7 +559,7 @@ func TestLexCompareCompositeBoundsAreExact(t *testing.T) {
 }
 
 func TestSQLServerExperimentalCapabilitiesIncludePlannerAndFlowControl(t *testing.T) {
-	t.Setenv("QMIGRATION_EXPERIMENTAL_SQLSERVER_NATIVE", "1")
+	t.Setenv("DTS_EXPERIMENTAL_SQLSERVER_NATIVE", "1")
 	d := NewFactory().Capabilities(domain.DataSourceSQLServer)
 	if !d.Has(connector.CapabilityKeysetBoundary) || !d.Has(connector.CapabilityRuntimeLoad) {
 		t.Fatalf("capabilities=%v", d.Capabilities)
@@ -585,7 +585,7 @@ func TestSQLServerPartitionDescriptorRoundTrip(t *testing.T) {
 }
 
 func TestSQLServerOrderedKeysetBoundaryPlannerAgainstFakeTDS(t *testing.T) {
-	t.Setenv("QMIGRATION_EXPERIMENTAL_SQLSERVER_NATIVE", "1")
+	t.Setenv("DTS_EXPERIMENTAL_SQLSERVER_NATIVE", "1")
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -656,7 +656,7 @@ func TestSQLServerOrderedKeysetBoundaryPlannerAgainstFakeTDS(t *testing.T) {
 }
 
 func TestSQLServerPartitionReadPredicateAgainstFakeTDS(t *testing.T) {
-	t.Setenv("QMIGRATION_EXPERIMENTAL_SQLSERVER_NATIVE", "1")
+	t.Setenv("DTS_EXPERIMENTAL_SQLSERVER_NATIVE", "1")
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)

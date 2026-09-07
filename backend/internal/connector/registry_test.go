@@ -1,14 +1,14 @@
 package connector_test
 
 import (
-	"qmigration/backend/internal/connector"
-	gbaseconnector "qmigration/backend/internal/connector/gbase"
-	gbase8sconnector "qmigration/backend/internal/connector/gbase8s"
-	mysqlconnector "qmigration/backend/internal/connector/mysql"
-	oracleconnector "qmigration/backend/internal/connector/oracle"
-	postgresconnector "qmigration/backend/internal/connector/postgres"
-	sqlserverconnector "qmigration/backend/internal/connector/sqlserver"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/connector"
+	gbaseconnector "dts/backend/internal/connector/gbase"
+	gbase8sconnector "dts/backend/internal/connector/gbase8s"
+	mysqlconnector "dts/backend/internal/connector/mysql"
+	oracleconnector "dts/backend/internal/connector/oracle"
+	postgresconnector "dts/backend/internal/connector/postgres"
+	sqlserverconnector "dts/backend/internal/connector/sqlserver"
+	"dts/backend/internal/domain"
 	"testing"
 )
 
@@ -52,7 +52,7 @@ func TestPostgreSQLWireCompatibleDerivativesExposeFullNotPgoutput(t *testing.T) 
 }
 
 func TestSQLServerExperimentalCapabilityGate(t *testing.T) {
-	t.Setenv("QMIGRATION_EXPERIMENTAL_SQLSERVER_NATIVE", "1")
+	t.Setenv("DTS_EXPERIMENTAL_SQLSERVER_NATIVE", "1")
 	r := connector.NewRegistry()
 	r.Register(domain.DataSourceSQLServer, sqlserverconnector.NewFactory())
 	if !r.Supports(domain.DataSourceSQLServer, connector.CapabilityFullRead) || !r.Supports(domain.DataSourceSQLServer, connector.CapabilityFullWrite) {
@@ -64,8 +64,8 @@ func TestSQLServerExperimentalCapabilityGate(t *testing.T) {
 }
 
 func TestSQLServerExperimentalCDCCapabilityGate(t *testing.T) {
-	t.Setenv("QMIGRATION_EXPERIMENTAL_SQLSERVER_NATIVE", "1")
-	t.Setenv("QMIGRATION_EXPERIMENTAL_SQLSERVER_CDC", "1")
+	t.Setenv("DTS_EXPERIMENTAL_SQLSERVER_NATIVE", "1")
+	t.Setenv("DTS_EXPERIMENTAL_SQLSERVER_CDC", "1")
 	r := connector.NewRegistry()
 	r.Register(domain.DataSourceSQLServer, sqlserverconnector.NewFactory())
 	if !r.Supports(domain.DataSourceSQLServer, connector.CapabilityCDCRead) || !r.Supports(domain.DataSourceSQLServer, connector.CapabilityCDCPosition) {
@@ -74,8 +74,8 @@ func TestSQLServerExperimentalCDCCapabilityGate(t *testing.T) {
 }
 
 func TestSQLServerCDCGateRequiresNativeGate(t *testing.T) {
-	t.Setenv("QMIGRATION_EXPERIMENTAL_SQLSERVER_NATIVE", "")
-	t.Setenv("QMIGRATION_EXPERIMENTAL_SQLSERVER_CDC", "1")
+	t.Setenv("DTS_EXPERIMENTAL_SQLSERVER_NATIVE", "")
+	t.Setenv("DTS_EXPERIMENTAL_SQLSERVER_CDC", "1")
 	r := connector.NewRegistry()
 	r.Register(domain.DataSourceSQLServer, sqlserverconnector.NewFactory())
 	if r.Supports(domain.DataSourceSQLServer, connector.CapabilityCDCRead) {
@@ -94,24 +94,24 @@ func TestConnectorMaturityIsTruthful(t *testing.T) {
 	if d := mf.Capabilities(domain.DataSourceOceanBase); d.Maturity != connector.MaturityExperimental || !d.QualificationRequired || !d.Has(connector.CapabilityCDCRead) {
 		t.Fatalf("unexpected OceanBase maturity/cdc: %#v", d)
 	}
-	t.Setenv("QMIGRATION_EXPERIMENTAL_ORACLE_NATIVE", "1")
+	t.Setenv("DTS_EXPERIMENTAL_ORACLE_NATIVE", "1")
 	if d := oracleconnector.NewFactory().Capabilities(domain.DataSourceOracle); d.Maturity != connector.MaturityExperimental || !d.QualificationRequired {
 		t.Fatalf("unexpected Oracle maturity: %#v", d)
 	}
-	t.Setenv("QMIGRATION_EXPERIMENTAL_SQLSERVER_NATIVE", "1")
+	t.Setenv("DTS_EXPERIMENTAL_SQLSERVER_NATIVE", "1")
 	if d := sqlserverconnector.NewFactory().Capabilities(domain.DataSourceSQLServer); d.Maturity != connector.MaturityExperimental || !d.QualificationRequired {
 		t.Fatalf("unexpected SQL Server maturity: %#v", d)
 	}
 }
 
 func TestGBase8aExperimentalFullCapabilityGate(t *testing.T) {
-	t.Setenv("QMIGRATION_EXPERIMENTAL_GBASE8A_NATIVE", "")
+	t.Setenv("DTS_EXPERIMENTAL_GBASE8A_NATIVE", "")
 	r := connector.NewRegistry()
 	r.Register(domain.DataSourceGBase, gbaseconnector.NewFactory())
 	if !r.Supports(domain.DataSourceGBase, connector.CapabilityProtocolProbe) || r.Supports(domain.DataSourceGBase, connector.CapabilityFullRead) {
 		t.Fatal("GBase 8a must remain probe-only without its qualification gate")
 	}
-	t.Setenv("QMIGRATION_EXPERIMENTAL_GBASE8A_NATIVE", "1")
+	t.Setenv("DTS_EXPERIMENTAL_GBASE8A_NATIVE", "1")
 	if !r.Supports(domain.DataSourceGBase, connector.CapabilityFullRead) || !r.Supports(domain.DataSourceGBase, connector.CapabilityFullWrite) {
 		t.Fatal("GBase 8a native gate must expose Full Read/Write")
 	}
@@ -121,13 +121,13 @@ func TestGBase8aExperimentalFullCapabilityGate(t *testing.T) {
 }
 
 func TestGBase8sExperimentalTargetCapabilityGate(t *testing.T) {
-	t.Setenv("QMIGRATION_EXPERIMENTAL_GBASE8S_NATIVE", "")
+	t.Setenv("DTS_EXPERIMENTAL_GBASE8S_NATIVE", "")
 	r := connector.NewRegistry()
 	r.Register(domain.DataSourceGBase8s, gbase8sconnector.NewFactory())
 	if !r.Supports(domain.DataSourceGBase8s, connector.CapabilityProtocolProbe) || r.Supports(domain.DataSourceGBase8s, connector.CapabilityFullRead) {
 		t.Fatal("GBase 8s must remain probe-only without its qualification gate")
 	}
-	t.Setenv("QMIGRATION_EXPERIMENTAL_GBASE8S_NATIVE", "1")
+	t.Setenv("DTS_EXPERIMENTAL_GBASE8S_NATIVE", "1")
 	if !r.Supports(domain.DataSourceGBase8s, connector.CapabilityFullRead) || !r.Supports(domain.DataSourceGBase8s, connector.CapabilityFullWrite) || !r.Supports(domain.DataSourceGBase8s, connector.CapabilityCDCTransactional) {
 		t.Fatal("GBase 8s native gate must expose Full and transactional target apply")
 	}

@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"qmigration/backend/internal/cdc/mysqlbinlog"
-	"qmigration/backend/internal/cdc/pgoutput"
-	"qmigration/backend/internal/connector"
-	mysqlconnector "qmigration/backend/internal/connector/mysql"
-	postgresconnector "qmigration/backend/internal/connector/postgres"
+	"dts/backend/internal/cdc/mysqlbinlog"
+	"dts/backend/internal/cdc/pgoutput"
+	"dts/backend/internal/connector"
+	mysqlconnector "dts/backend/internal/connector/mysql"
+	postgresconnector "dts/backend/internal/connector/postgres"
 )
 
 func TestMySQLGTIDReplicationTransport(t *testing.T) {
@@ -25,9 +25,9 @@ func TestMySQLGTIDReplicationTransport(t *testing.T) {
 	my := raw.(*mysqlconnector.Connector)
 	defer my.Close()
 	for _, q := range []string{
-		"CREATE DATABASE IF NOT EXISTS `qmigration_e2e` CHARACTER SET utf8mb4",
-		"DROP TABLE IF EXISTS `qmigration_e2e`.`cdc_orders`",
-		"CREATE TABLE `qmigration_e2e`.`cdc_orders` (`id` bigint NOT NULL,`payload` varchar(64),PRIMARY KEY (`id`))",
+		"CREATE DATABASE IF NOT EXISTS `dts_e2e` CHARACTER SET utf8mb4",
+		"DROP TABLE IF EXISTS `dts_e2e`.`cdc_orders`",
+		"CREATE TABLE `dts_e2e`.`cdc_orders` (`id` bigint NOT NULL,`payload` varchar(64),PRIMARY KEY (`id`))",
 	} {
 		if err := my.ExecSQL(ctx, q); err != nil {
 			t.Fatal(err)
@@ -46,7 +46,7 @@ func TestMySQLGTIDReplicationTransport(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer stream.Close()
-	if err := my.ExecSQL(ctx, "INSERT INTO `qmigration_e2e`.`cdc_orders` VALUES (101,'gtid-e2e')"); err != nil {
+	if err := my.ExecSQL(ctx, "INSERT INTO `dts_e2e`.`cdc_orders` VALUES (101,'gtid-e2e')"); err != nil {
 		t.Fatal(err)
 	}
 	parser := mysqlbinlog.Parser{}
@@ -87,30 +87,30 @@ func TestPostgresLogicalReplicationTransport(t *testing.T) {
 	pg := raw.(*postgresconnector.Connector)
 	defer pg.Close()
 	for _, q := range []string{
-		"CREATE SCHEMA IF NOT EXISTS qmigration_e2e",
-		"DROP TABLE IF EXISTS qmigration_e2e.cdc_orders",
-		"CREATE TABLE qmigration_e2e.cdc_orders (id bigint PRIMARY KEY,payload varchar(64))",
-		"SELECT pg_drop_replication_slot(slot_name) FROM pg_replication_slots WHERE slot_name='qmigration_e2e_slot'",
+		"CREATE SCHEMA IF NOT EXISTS dts_e2e",
+		"DROP TABLE IF EXISTS dts_e2e.cdc_orders",
+		"CREATE TABLE dts_e2e.cdc_orders (id bigint PRIMARY KEY,payload varchar(64))",
+		"SELECT pg_drop_replication_slot(slot_name) FROM pg_replication_slots WHERE slot_name='dts_e2e_slot'",
 	} {
 		if err := pg.ExecSQL(ctx, q); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := pg.EnsurePublication(ctx, "qmigration_e2e_pub", []string{"qmigration_e2e.cdc_orders"}); err != nil {
+	if err := pg.EnsurePublication(ctx, "dts_e2e_pub", []string{"dts_e2e.cdc_orders"}); err != nil {
 		t.Fatal(err)
 	}
-	cp, err := pg.CreateCDCCheckpoint(ctx, "qmigration_e2e_slot")
+	cp, err := pg.CreateCDCCheckpoint(ctx, "dts_e2e_slot")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = pg.DropCDCCheckpoint(context.Background(), cp.Resource) }()
 	source := any(pg).(connector.PostgreSQLLogicalSource)
-	stream, err := source.OpenLogicalReplicationStream(ctx, cp.Resource, cp.PositionValue, "qmigration_e2e_pub")
+	stream, err := source.OpenLogicalReplicationStream(ctx, cp.Resource, cp.PositionValue, "dts_e2e_pub")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer stream.Close()
-	if err := pg.ExecSQL(ctx, "INSERT INTO qmigration_e2e.cdc_orders VALUES (202,'pg-e2e')"); err != nil {
+	if err := pg.ExecSQL(ctx, "INSERT INTO dts_e2e.cdc_orders VALUES (202,'pg-e2e')"); err != nil {
 		t.Fatal(err)
 	}
 	decoder := pgoutput.NewDecoder()

@@ -15,10 +15,10 @@ import (
 	"strings"
 	"time"
 
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/domain"
 )
 
-const SchemaVersion = "qmigration.validation-report/v1"
+const SchemaVersion = "dts.validation-report/v1"
 
 type TaskSnapshot struct {
 	ID            string                 `json:"id"`
@@ -93,14 +93,14 @@ type Signer struct {
 }
 
 func SignerFromEnv() (Signer, error) {
-	key := os.Getenv("QMIGRATION_VALIDATION_REPORT_HMAC_KEY")
-	if file := strings.TrimSpace(os.Getenv("QMIGRATION_VALIDATION_REPORT_HMAC_KEY_FILE")); file != "" {
+	key := os.Getenv("DTS_VALIDATION_REPORT_HMAC_KEY")
+	if file := strings.TrimSpace(os.Getenv("DTS_VALIDATION_REPORT_HMAC_KEY_FILE")); file != "" {
 		b, err := os.ReadFile(file)
 		if err != nil {
 			return Signer{}, fmt.Errorf("read validation report HMAC key file: %w", err)
 		}
 		if key != "" {
-			return Signer{}, fmt.Errorf("set only one of QMIGRATION_VALIDATION_REPORT_HMAC_KEY or QMIGRATION_VALIDATION_REPORT_HMAC_KEY_FILE")
+			return Signer{}, fmt.Errorf("set only one of DTS_VALIDATION_REPORT_HMAC_KEY or DTS_VALIDATION_REPORT_HMAC_KEY_FILE")
 		}
 		key = strings.TrimSpace(string(b))
 	}
@@ -110,7 +110,7 @@ func SignerFromEnv() (Signer, error) {
 			return Signer{}, fmt.Errorf("validation report HMAC key must be at least 16 bytes")
 		}
 		signer.Key = []byte(key)
-		signer.KeyID = strings.TrimSpace(os.Getenv("QMIGRATION_VALIDATION_REPORT_HMAC_KEY_ID"))
+		signer.KeyID = strings.TrimSpace(os.Getenv("DTS_VALIDATION_REPORT_HMAC_KEY_ID"))
 	}
 	ext, err := newExternalSignerFromEnv()
 	if err != nil {
@@ -131,8 +131,8 @@ func SignerFromEnv() (Signer, error) {
 		return signer, nil
 	}
 	// Optional scheduled local rotation. The next key becomes the signer only at/after not_before.
-	if nextRaw := strings.TrimSpace(os.Getenv("QMIGRATION_VALIDATION_REPORT_ED25519_NEXT_PRIVATE_KEY")); nextRaw != "" {
-		nbRaw := strings.TrimSpace(os.Getenv("QMIGRATION_VALIDATION_REPORT_ED25519_NEXT_NOT_BEFORE"))
+	if nextRaw := strings.TrimSpace(os.Getenv("DTS_VALIDATION_REPORT_ED25519_NEXT_PRIVATE_KEY")); nextRaw != "" {
+		nbRaw := strings.TrimSpace(os.Getenv("DTS_VALIDATION_REPORT_ED25519_NEXT_NOT_BEFORE"))
 		nb, parseErr := time.Parse(time.RFC3339, nbRaw)
 		if parseErr != nil {
 			return Signer{}, fmt.Errorf("invalid NEXT_NOT_BEFORE: %w", parseErr)
@@ -143,7 +143,7 @@ func SignerFromEnv() (Signer, error) {
 				return Signer{}, parseErr
 			}
 			priv = next
-			keyID = strings.TrimSpace(os.Getenv("QMIGRATION_VALIDATION_REPORT_ED25519_NEXT_KEY_ID"))
+			keyID = strings.TrimSpace(os.Getenv("DTS_VALIDATION_REPORT_ED25519_NEXT_KEY_ID"))
 			if keyID == "" {
 				keyID = defaultEd25519KeyID(next.Public().(ed25519.PublicKey))
 			}
@@ -342,7 +342,7 @@ func stripArtifactData(in []Artifact) []Artifact {
 func safeBase(v string) string {
 	v = strings.TrimSpace(v)
 	if v == "" {
-		return "qmigration"
+		return "dts"
 	}
 	var b strings.Builder
 	for _, r := range v {
@@ -377,13 +377,13 @@ var htmlTemplate = template.Must(template.New("validation-report").Funcs(templat
 		return t.UTC().Format(time.RFC3339)
 	},
 }).Parse(`<!doctype html>
-<html><head><meta charset="utf-8"><title>QMigration Validation Report - {{.Task.ID}}</title>
+<html><head><meta charset="utf-8"><title>DTS Validation Report - {{.Task.ID}}</title>
 <style>body{font-family:Arial,sans-serif;margin:40px;color:#222}h1,h2{margin-bottom:8px}.meta{display:grid;grid-template-columns:220px 1fr;gap:6px 14px;margin-bottom:24px}.ok{color:#16794a;font-weight:700}.bad{color:#b42318;font-weight:700}table{border-collapse:collapse;width:100%;font-size:13px}th,td{border:1px solid #ddd;padding:7px;text-align:left}th{background:#f4f5f7}.mono{font-family:monospace;word-break:break-all}.footer{margin-top:28px;font-size:12px;color:#666}</style></head><body>
-<h1>QMigration Validation Acceptance Report</h1>
+<h1>DTS Validation Acceptance Report</h1>
 <div class="meta"><b>Task</b><span>{{.Task.Name}} ({{.Task.ID}})</span><b>Mode</b><span>{{.Task.Mode}}</span><b>Terminal status</b><span>{{.Validation.TerminalStatus}}</span><b>Generated</b><span>{{fmtTime .GeneratedAt}}</span><b>Product version</b><span>{{.ProductVersion}}</span><b>Archive evidence SHA-256</b><span class="mono">{{.Validation.EvidenceDigest}}</span></div>
 <h2>Validation summary</h2><div class="meta"><b>Total tables</b><span>{{.Validation.TotalTables}}</span><b>Total chunks</b><span>{{.Validation.TotalChunks}}</span><b>Covered chunks</b><span>{{.Validation.CoveredChunks}}</span><b>Successful</b><span class="ok">{{.Validation.SuccessChunks}}</span><b>Mismatch</b><span class="bad">{{.Validation.MismatchChunks}}</span><b>Error</b><span class="bad">{{.Validation.ErrorChunks}}</span><b>Missing</b><span class="bad">{{.Validation.MissingChunks}}</span><b>Barrier</b><span>{{.Validation.ValidationBarrierPositionType}} {{.Validation.ValidationBarrierPosition}} {{.Validation.ValidationBarrierResource}}</span></div>
 <h2>Table evidence</h2><table><thead><tr><th>Source</th><th>Target</th><th>Scope</th><th>Chunks</th><th>Success/Mismatch/Error/Missing</th><th>Source rows</th><th>Target rows</th><th>Evidence SHA-256</th></tr></thead><tbody>{{range .Validation.Tables}}<tr><td>{{.SourceSchema}}.{{.SourceTable}}</td><td>{{.TargetSchema}}.{{.TargetTable}}</td><td>{{.EvidenceScope}}</td><td>{{.CoveredChunks}} / {{.TotalChunks}}</td><td>{{.SuccessChunks}} / {{.MismatchChunks}} / {{.ErrorChunks}} / {{.MissingChunks}}</td><td>{{.SourceRows}}</td><td>{{.TargetRows}}</td><td class="mono">{{.EvidenceDigest}}</td></tr>{{end}}</tbody></table>
-<div class="footer">This report is derived from QMigration's immutable Validation Archive. Verify the artifact SHA-256/HMAC values in the accompanying manifest before relying on a copied report.</div></body></html>`))
+<div class="footer">This report is derived from DTS's immutable Validation Archive. Verify the artifact SHA-256/HMAC values in the accompanying manifest before relying on a copied report.</div></body></html>`))
 
 func renderHTML(r Report) ([]byte, error) {
 	var b strings.Builder

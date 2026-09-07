@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/domain"
 )
 
 func testReport(t *testing.T) Report {
@@ -22,7 +22,7 @@ func testReport(t *testing.T) Report {
 	ts := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
 	task := &domain.MigrationTask{ID: "m1", Name: "acceptance", Mode: domain.MigrationMode("FULL_CDC"), Status: domain.StatusFinished, SourceID: "src", TargetID: "dst", RowsMigrated: 100, BytesMigrated: 2048, CreatedAt: ts.Add(-time.Hour), UpdatedAt: ts}
 	archive := &domain.ValidationArchive{TaskID: "m1", TerminalStatus: domain.StatusFinished, ValidationMode: "ROW_COUNT_CHECKSUM", TotalTables: 1, TotalChunks: 2, CoveredChunks: 2, SuccessChunks: 2, EvidenceDigest: strings.Repeat("a", 64), ArchivedAt: ts, Tables: []domain.ValidationTableArchive{{TableID: "t1", SourceSchema: "app", SourceTable: "orders", TargetSchema: "app", TargetTable: "orders", EvidenceScope: "CHUNK_SET", ChecksumKind: "CHUNK_SET_SHA256", TotalChunks: 2, CoveredChunks: 2, SuccessChunks: 2, SourceRows: 100, TargetRows: 100, EvidenceDigest: strings.Repeat("b", 64)}}}
-	r, err := NewReport(task, archive, "QMigration", "0.15.0-rc46")
+	r, err := NewReport(task, archive, "DTS", "0.15.0-rc46")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +84,7 @@ func TestNewReportRejectsIdentityMismatch(t *testing.T) {
 	a := r.Validation
 	a.TaskID = "other"
 	task := domain.MigrationTask{ID: "m1"}
-	if _, err := NewReport(&task, &a, "QMigration", "x"); err == nil {
+	if _, err := NewReport(&task, &a, "DTS", "x"); err == nil {
 		t.Fatal("expected identity mismatch")
 	}
 }
@@ -162,8 +162,8 @@ func TestRC47Ed25519PublicVerificationAndTrustedKeyPin(t *testing.T) {
 
 func TestRC47SignerFromEnvBase64SeedAndPublicKey(t *testing.T) {
 	seed := bytes.Repeat([]byte{7}, ed25519.SeedSize)
-	t.Setenv("QMIGRATION_VALIDATION_REPORT_ED25519_PRIVATE_KEY", base64.StdEncoding.EncodeToString(seed))
-	t.Setenv("QMIGRATION_VALIDATION_REPORT_ED25519_KEY_ID", "customer-proof")
+	t.Setenv("DTS_VALIDATION_REPORT_ED25519_PRIVATE_KEY", base64.StdEncoding.EncodeToString(seed))
+	t.Setenv("DTS_VALIDATION_REPORT_ED25519_KEY_ID", "customer-proof")
 	s, err := SignerFromEnv()
 	if err != nil {
 		t.Fatal(err)

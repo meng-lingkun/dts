@@ -1,4 +1,4 @@
-# QMigration V0.15.0-rc22 Release Notes
+# DTS V0.15.0-rc22 Release Notes
 
 RC22 closes the next documented GBase 8s V8.8 CDC gap: transactional `TRUNCATE`.
 The source CDC/restart architecture from RC20/RC21 is unchanged; RC22 adds a
@@ -18,7 +18,7 @@ Reader rules are correctness-first:
 - an unmatched UPDATE_BEFORE cannot be followed by TRUNCATE;
 - only COMMIT or ROLLBACK may follow TRUNCATE in the transaction;
 - a second TRUNCATE, DML or DISCARD after TRUNCATE fails closed;
-- DML before TRUNCATE remains in the same emitted QMigration transaction.
+- DML before TRUNCATE remains in the same emitted DTS transaction.
 
 These rules mirror GBase 8s transaction semantics, where TRUNCATE is logged and
 can be rolled back, but after TRUNCATE only COMMIT/ROLLBACK is valid in that
@@ -28,7 +28,7 @@ transaction.
 
 A new `TruncateTableConnector` SPI avoids pretending that heterogeneous DDL text
 is portable. RC22 GBase 8s target apply implements the primitive as
-`TRUNCATE TABLE <owner>.<table>` only while an explicit QMigration CDC target
+`TRUNCATE TABLE <owner>.<table>` only while an explicit DTS CDC target
 transaction is active. The service requires TRUNCATE to be the final event in
 the batch before target COMMIT. Targets without this primitive fail closed.
 

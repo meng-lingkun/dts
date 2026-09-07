@@ -1,8 +1,8 @@
-# QMigration V0.15.0-unified-dev14 Release Notes
+# DTS V0.15.0-unified-dev14 Release Notes
 
 ## Scope
 
-This snapshot advances the QMigration-owned Oracle Native path from a TTC query/cursor qualification layer into an **explicitly gated source data plane**. It adds Data Dictionary metadata, Full Reader primitives and an experimental DBMS_LOGMNR/SCN CDC reader while keeping Oracle target write/schema/DDL capabilities disabled in the Connector capability matrix. No DataX, SeaTunnel, Flink CDC, Debezium, Canal or JDBC migration runtime is introduced.
+This snapshot advances the DTS-owned Oracle Native path from a TTC query/cursor qualification layer into an **explicitly gated source data plane**. It adds Data Dictionary metadata, Full Reader primitives and an experimental DBMS_LOGMNR/SCN CDC reader while keeping Oracle target write/schema/DDL capabilities disabled in the Connector capability matrix. No DataX, SeaTunnel, Flink CDC, Debezium, Canal or JDBC migration runtime is introduced.
 
 ## Oracle Native source data plane
 
@@ -16,20 +16,20 @@ This snapshot advances the QMigration-owned Oracle Native path from a TTC query/
 
 ## Experimental LogMiner / SCN CDC
 
-- Added `qmigration-oracle-cdc`, integrated with the shared QMigration Native CDC Runtime (`read -> durable apply/checkpoint -> source ACK`).
+- Added `dts-oracle-cdc`, integrated with the shared DTS Native CDC Runtime (`read -> durable apply/checkpoint -> source ACK`).
 - Added current-SCN capture from `V$DATABASE`, bounded SCN polling windows and selected-table filtering.
 - Added DBMS_LOGMNR startup with online catalog + committed-data-only semantics and explicit archive/online redo-file fallback when Oracle reports a missing-log window.
 - Added transaction grouping by Oracle XID + commit SCN and checkpoint-only progress when a scanned SCN range has no selected-table changes.
 - Added full-row reconstruction using Flashback Query at commit SCNs for the current experimental path.
 - Added `RS_ID` / `SSN` / `CSF` continuation handling so SQL_REDO/SQL_UNDO fragments larger than one LogMiner row are not silently truncated.
 - DDL emission is fail-safe: internal Oracle DDL is filtered and only executable user DDL (`STATUS=0`) can enter the CDC event stream.
-- Added Reader tests proving SCN does not advance before QMigration apply acknowledgement.
+- Added Reader tests proving SCN does not advance before DTS apply acknowledgement.
 
 ## Capability boundary
 
 Default Oracle capability remains only `protocol-probe`.
 
-`QMIGRATION_EXPERIMENTAL_ORACLE_NATIVE=1` enables **source-side** experimental capabilities:
+`DTS_EXPERIMENTAL_ORACLE_NATIVE=1` enables **source-side** experimental capabilities:
 
 - metadata
 - full-read
@@ -42,7 +42,7 @@ Default Oracle capability remains only `protocol-probe`.
 
 It intentionally does **not** expose `full-write`, `schema-create`, `post-load-schema`, `cdc-apply`, `cdc-transactional-apply` or `ddl-apply`. Those require native bind execution and large BLOB/CLOB DML qualification before they can be advertised safely.
 
-`QMIGRATION_EXPERIMENTAL_ORACLE_LOGMINER_CDC=1` additionally requires the native gate and exposes `cdc-position` + `cdc-read` for the experimental LogMiner reader.
+`DTS_EXPERIMENTAL_ORACLE_LOGMINER_CDC=1` additionally requires the native gate and exposes `cdc-position` + `cdc-read` for the experimental LogMiner reader.
 
 ## Qualification limits
 

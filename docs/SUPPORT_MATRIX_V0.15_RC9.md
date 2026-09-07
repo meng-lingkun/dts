@@ -1,10 +1,10 @@
-# QMigration V0.15.0-rc9 Support Matrix
+# DTS V0.15.0-rc9 Support Matrix
 
-This matrix describes QMigration-owned migration/runtime support. SQL-wire
+This matrix describes DTS-owned migration/runtime support. SQL-wire
 compatibility or a protocol probe alone does not imply source CDC support.
 Vendor client libraries may be required only where the database exposes a
 vendor API rather than a SQL/wire log API; RC9 uses this model for Db2
-`db2ReadLog` on the source-side QMigration Log Agent host.
+`db2ReadLog` on the source-side DTS Log Agent host.
 
 | Database | Metadata | Full Read | Full Write / CDC Apply | Source CDC | Schema / DDL | Status |
 |---|---:|---:|---:|---|---:|---|
@@ -20,7 +20,7 @@ vendor API rather than a SQL/wire log API; RC9 uses this model for Db2
 | Kingbase | Yes | Yes | Yes | Not advertised | Yes | NATIVE_FULL_ONLY |
 | Oracle | Yes | Yes | Yes | LogMiner / SCN | Yes | EXPERIMENTAL; qualification required |
 | SQL Server | Yes | Yes | Yes | SQL Server CDC / LSN | Yes | EXPERIMENTAL; qualification required |
-| **DB2 LUW** | **Yes** | **Yes, EXTDTA LOB** | **Yes, Prepared SQLDTA/EXTDTA** | **QMigration Log Agent + IBM db2ReadLog / DB2_LRI** | **Yes** | **EXPERIMENTAL; qualification required** |
+| **DB2 LUW** | **Yes** | **Yes, EXTDTA LOB** | **Yes, Prepared SQLDTA/EXTDTA** | **DTS Log Agent + IBM db2ReadLog / DB2_LRI** | **Yes** | **EXPERIMENTAL; qualification required** |
 | Dameng / DM | No | No | No | No | No | PROBE_ONLY |
 | GaussDB | No | No | No | No | No | PROBE_ONLY |
 | GBase | No | No | No | No | No | PROBE_ONLY |
@@ -29,8 +29,8 @@ vendor API rather than a SQL/wire log API; RC9 uses this model for Db2
 
 Implemented:
 
-- QMigration-owned `qmigration-db2-log-agent` on the source-side host;
-- a small QMigration C provider calling IBM's supported `db2ReadLog` API;
+- DTS-owned `dts-db2-log-agent` on the source-side host;
+- a small DTS C provider calling IBM's supported `db2ReadLog` API;
 - `DB2READLOG_FILTER_ON`, so only documented propagatable records are consumed;
 - durable `DB2_LRI` capture/resume using `nextStartLRI`;
 - `DATA CAPTURE CHANGES` and primary-key prechecks;
@@ -62,7 +62,7 @@ Fail-closed boundaries in RC9:
 
 Operational dependency: the Go Server/Worker does **not** link IBM libraries. The
 source-side DB2 Log Agent host needs IBM Data Server Client/Runtime headers and
-`libdb2` to build/run `qmigration-db2-readlog-provider`.
+`libdb2` to build/run `dts-db2-readlog-provider`.
 
 ## Remaining highest-priority gaps
 

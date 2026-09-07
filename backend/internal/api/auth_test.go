@@ -7,17 +7,17 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"qmigration/backend/internal/connector"
-	"qmigration/backend/internal/engine"
-	"qmigration/backend/internal/repository/memory"
+	"dts/backend/internal/connector"
+	"dts/backend/internal/engine"
+	"dts/backend/internal/repository/memory"
 )
 
 func newAuthTestServer(t *testing.T) http.Handler {
 	t.Helper()
-	t.Setenv("QMIGRATION_RBAC_TOKENS", "")
-	t.Setenv("QMIGRATION_API_TOKEN", "")
-	t.Setenv("QMIGRATION_AUTH_REQUIRED", "")
-	t.Setenv("QMIGRATION_AUTH_SECRET", "test-auth-secret-that-is-long-enough")
+	t.Setenv("DTS_RBAC_TOKENS", "")
+	t.Setenv("DTS_API_TOKEN", "")
+	t.Setenv("DTS_AUTH_REQUIRED", "")
+	t.Setenv("DTS_AUTH_SECRET", "test-auth-secret-that-is-long-enough")
 	return New(memory.New(), connector.NewRegistry(), engine.NewRegistry()).Handler()
 }
 

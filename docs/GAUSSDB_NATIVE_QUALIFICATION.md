@@ -2,19 +2,19 @@
 
 ## RC16 scope
 
-QMigration V0.15.0-rc16 provides a qualification-gated GaussDB data plane over
+DTS V0.15.0-rc16 provides a qualification-gated GaussDB data plane over
 the PostgreSQL frontend/backend protocol. Metadata, Full Load planning/read/
-write, schema creation and target CDC Apply are owned by QMigration.
+write, schema creation and target CDC Apply are owned by DTS.
 
 Source CDC is separately gated and uses GaussDB's documented
-`mppdb_decoding` **binary** SQL logical-decoding functions. QMigration does not
+`mppdb_decoding` **binary** SQL logical-decoding functions. DTS does not
 parse private WAL formats.
 
 ### Gates
 
 ```bash
-export QMIGRATION_EXPERIMENTAL_GAUSSDB_NATIVE=1
-export QMIGRATION_EXPERIMENTAL_GAUSSDB_LOGICAL_CDC=1
+export DTS_EXPERIMENTAL_GAUSSDB_NATIVE=1
+export DTS_EXPERIMENTAL_GAUSSDB_LOGICAL_CDC=1
 ```
 
 The second gate requires the first.
@@ -31,27 +31,27 @@ RC16 DML uses:
 - `encode(data,'hex')` over the PostgreSQL text frontend to preserve the exact
   returned `bytea` frame;
 - `pg_logical_slot_get_binary_changes(..., commit_lsn, ...)` -> source ACK only
-  after target commit and durable QMigration checkpoint;
+  after target commit and durable DTS checkpoint;
 - default DML capture keeps `enable-ddl-decoding=false`; optional RC16 DDL-only replay adds a second text classification pass while keeping DML values on the binary path.
 
 The binary tuple path preserves SQL NULL versus non-NULL empty values and can
 transport embedded NUL/non-UTF8 values without JSON truncation. `bytea` values
 are restored from their documented `\\x` hex representation before they enter
-QMigration CDC fields.
+DTS CDC fields.
 
 
 ## RC16 DDL-only qualification boundary
 
 GaussDB documents that hybrid DDL/DML transactions are not fully decodable: a
 DML statement following DDL can be absent from the logical stream. Therefore
-QMigration does not and cannot infer that a decoded DDL-only transaction was
+DTS does not and cannot infer that a decoded DDL-only transaction was
 safe if the source application is allowed to mix DDL and DML explicitly.
 
 Before enabling DDL replay, the operator must establish and retain evidence that
 migration-time DDL runs in independent transactions and set:
 
 ```bash
-export QMIGRATION_GAUSSDB_DDL_ONLY_TRANSACTIONS=1
+export DTS_GAUSSDB_DDL_ONLY_TRANSACTIONS=1
 ```
 
 The migration task must also use `cdc_ddl_mode=SAME_FAMILY`, the source and
@@ -85,7 +85,7 @@ limitation, not a target apply limitation.
 ```bash
 export GAUSSDB_HOST=10.0.0.10
 export GAUSSDB_PORT=8000
-export GAUSSDB_USER=qmigration
+export GAUSSDB_USER=dts
 export GAUSSDB_PASSWORD='***'
 export GAUSSDB_DATABASE=app
 export GAUSSDB_SCHEMA=public

@@ -2,8 +2,8 @@ package sqlserverconnector
 
 import (
 	"encoding/base64"
-	"qmigration/backend/internal/connector"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/connector"
+	"dts/backend/internal/domain"
 	"testing"
 )
 

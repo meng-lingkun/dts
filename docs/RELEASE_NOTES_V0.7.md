@@ -1,4 +1,4 @@
-# QMigration V0.7.0 Release Notes
+# DTS V0.7.0 Release Notes
 
 ## 主题：CDC Recovery / DLQ / Conflict Control
 
@@ -11,7 +11,7 @@ V0.7 在 V0.6 Native CDC 与 Generic Keyset 的基础上，补齐 CDC 失败事�
 - 支持 Admin/DBA 从 API / Vue 精确 Replay。
 - 已确认的相同 GTID/Binlog/LSN 再次提交会直接去重，避免“目标已提交但响应丢失”造成重复业务写入。
 - DLQ row-image payload 使用现有 AES-256-GCM Master Key 单独加密；底层 state file / PostgreSQL Metadata Repository 不保存业务明文。
-- Prometheus 新增 `qmigration_cdc_dlq_open`。
+- Prometheus 新增 `dts_cdc_dlq_open`。
 
 ### CDC Conflict Control
 

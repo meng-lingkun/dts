@@ -1,4 +1,4 @@
-# QMigration 项目架构文档
+# DTS 项目架构文档
 
 文档基线：`0.15.0-rc49`  
 分析日期：2026-09-02  
@@ -6,7 +6,7 @@
 
 ## 1. 系统定位
 
-QMigration 是统一数据库迁移平台，不是多个第三方迁移程序的启动器。用户只配置源端、目标端、迁移对象和策略；运行时固定使用 QMigration Unified Engine。
+DTS 是统一数据库迁移平台，不是多个第三方迁移程序的启动器。用户只配置源端、目标端、迁移对象和策略；运行时固定使用 DTS Unified Engine。
 
 系统覆盖以下迁移生命周期：
 
@@ -24,7 +24,7 @@ QMigration 是统一数据库迁移平台，不是多个第三方迁移程序的
 ```mermaid
 flowchart LR
     User[管理员 / DBA / Operator] --> Web[Vue 3 Console]
-    Automation[自动化 / qmigrationctl] --> API[Go Control Plane API]
+    Automation[自动化 / dtsctl] --> API[Go Control Plane API]
     Web --> API
     Prom[Prometheus] --> Metrics[/metrics]
     API --> Meta[(PostgreSQL Metadata)]
@@ -45,7 +45,7 @@ Web 和 CLI 属于管理面；Server 负责生命周期、策略和持久化；W
 | Web Console | `web/src` | Vue 3 + Element Plus 管理界面，轮询和 WebSocket 实时状态 |
 | HTTP API | `backend/internal/api` | REST、WebSocket、认证授权、审计、Prometheus 指标 |
 | Migration Service | `backend/internal/migration` | 状态机、Precheck、规划、调度、校验、CDC、割接和回切 |
-| Unified Engine | `backend/internal/engine` | 固定执行引擎；按源端协议选择 QMigration 自有 CDC Reader |
+| Unified Engine | `backend/internal/engine` | 固定执行引擎；按源端协议选择 DTS 自有 CDC Reader |
 | Connector SPI | `backend/internal/connector` | 数据库能力描述、元数据、读写、DDL、CDC、拓扑、压力采样 |
 | Full Pipeline | `backend/internal/pipeline` | Reader → 有界队列 → Transform → Writer → Checkpoint |
 | CDC Runtime | `backend/internal/cdc` | 各厂商日志读取、解码、事务组装和统一事件模型 |
@@ -53,7 +53,7 @@ Web 和 CLI 属于管理面；Server 负责生命周期、策略和持久化；W
 | Repository | `backend/internal/repository` | Memory/PostgreSQL 元数据实现，以及安全、File/S3 Spool 装饰器 |
 | Validation Report | `backend/internal/validationreport` | JSON/HTML/PDF、哈希、Ed25519、TSA、S3/WORM 归档 |
 | Maintenance | `backend/internal/maintenance` | 元数据保留策略和周期清理 |
-| CLI | `backend/cmd/qmigrationctl` | 任务操作、报告验签和 Trust Store 生命周期 |
+| CLI | `backend/cmd/dtsctl` | 任务操作、报告验签和 Trust Store 生命周期 |
 
 ## 4. 前端架构
 
@@ -180,7 +180,7 @@ Server 为 Precheck 和 Validation 写入带 TTL 的 `control_operation_leases` 
 
 ### 9.2 敏感数据
 
-`secure.Repository` 使用 AES-256-GCM 加密数据源密码、TLS 私钥、CDC DLQ/Spool 载荷。密钥由 `QMIGRATION_MASTER_KEY` 经 SHA-256 派生。丢失 Master Key 后相关密文不可恢复，因此它必须独立备份并由 Secret Manager 托管。
+`secure.Repository` 使用 AES-256-GCM 加密数据源密码、TLS 私钥、CDC DLQ/Spool 载荷。密钥由 `DTS_MASTER_KEY` 经 SHA-256 派生。丢失 Master Key 后相关密文不可恢复，因此它必须独立备份并由 Secret Manager 托管。
 
 ### 9.3 Schema 版本
 
@@ -205,9 +205,9 @@ Server 启动时会执行嵌入的幂等 `schema.sql`；外部脚本也可以按
 
 ## 11. 部署拓扑
 
-### Docker Compose
+### 运行底座
 
-包含单 PostgreSQL、单 Server、单 Worker 和单 Web。数据库密码、Master Key、Worker Token 与 Auth Secret 必须由私有 env 文件提供；新部署管理员使用显式初始默认值并要求首次登录后修改。Server 开启生产安全校验和强制认证；端口默认只绑定宿主机回环地址。该拓扑适合开发和单机验证，不提供数据库高可用。
+Kubernetes 是唯一容器部署入口，使用 containerd 执行 Pod。Server、Worker、Web 通过 Deployment 和 Service 管理，元数据及 Spool 使用持久存储。Dockerfile 与 Docker 镜像格式用于制作和分发镜像，运行阶段不依赖 Docker Engine 或 Compose。
 
 ### Kubernetes 示例
 
@@ -231,7 +231,7 @@ API 覆盖数据源、迁移、校验报告、CDC、DLQ、割接、Worker、用�
 - 账号密码登录签发有时效的 Session Token；
 - 静态 RBAC Token 适合自动化；
 - 角色为 Admin、DBA、Operator、Viewer；
-- Worker 使用独立 `X-QMigration-Worker-Token`；
+- Worker 使用独立 `X-DTS-Worker-Token`；
 - 数据源 TLS 支持 DISABLE、PREFERRED、REQUIRED 和双向证书字段；
 - API 可直接 TLS 或由可信代理终止 TLS；
 - 数据源凭据与 CDC 载荷静态加密；

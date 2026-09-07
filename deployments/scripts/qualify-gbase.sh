@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-BIN=${QMIGRATION_GBASE_QUALIFY_BIN:-"$ROOT/bin/qmigration-gbase-qualify"}
+BIN=${DTS_GBASE_QUALIFY_BIN:-"$ROOT/bin/dts-gbase-qualify"}
 if [[ ! -x "$BIN" ]]; then
-  echo "building qmigration-gbase-qualify" >&2
+  echo "building dts-gbase-qualify" >&2
   (cd "$ROOT/backend" && go build -o "$BIN" ./cmd/gbase-qualify)
 fi
 : "${GBASE_HOST:?set GBASE_HOST}"
@@ -22,5 +22,5 @@ args=(
 [[ -n "${GBASE_TABLE:-}" ]] && args+=(--table "$GBASE_TABLE")
 [[ "${GBASE_QUALIFY_TARGET_WRITE:-0}" == "1" ]] && args+=(--target-write)
 [[ -n "${GBASE_QUALIFY_OUTPUT:-}" ]] && args+=(--output "$GBASE_QUALIFY_OUTPUT")
-export QMIGRATION_EXPERIMENTAL_GBASE8A_NATIVE=1
+export DTS_EXPERIMENTAL_GBASE8A_NATIVE=1
 exec "$BIN" "${args[@]}"

@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-// ttcMessage is the minimal QMigration-owned message boundary layered on top
+// ttcMessage is the minimal DTS-owned message boundary layered on top
 // of Oracle Net/TNS DATA. Oracle TTC message payloads begin with a message code;
 // keeping framing separate from authentication lets negotiation/auth/query
 // codecs evolve without coupling them to TCP/TCPS or listener redirect logic.

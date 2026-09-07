@@ -1,4 +1,4 @@
--- QMigration V0.15.0-rc47: publicly verifiable validation-report delivery.
+-- DTS V0.15.0-rc47: publicly verifiable validation-report delivery.
 CREATE TABLE IF NOT EXISTS validation_report_archives(
   task_id text NOT NULL,
   evidence_digest text NOT NULL,

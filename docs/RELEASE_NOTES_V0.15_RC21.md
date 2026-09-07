@@ -1,4 +1,4 @@
-# QMigration V0.15.0-rc21 Release Notes
+# DTS V0.15.0-rc21 Release Notes
 
 RC21 productizes the RC20 **GBase 8s V8.8 syscdcv1 source CDC provider
 boundary**. The transaction/restart model is unchanged; the major change is that
@@ -7,15 +7,15 @@ library instead of a Go `buildmode=plugin` module.
 
 ## Native C ABI v1
 
-`qmigration-gbase8s-cdc-agent` now prefers:
+`dts-gbase8s-cdc-agent` now prefers:
 
 ```bash
-QMIGRATION_GBASE8S_CDC_PROVIDER_LIBRARY=/opt/qmigration/lib/qm-gbase8s-cdc-provider.so
+DTS_GBASE8S_CDC_PROVIDER_LIBRARY=/opt/dts/lib/qm-gbase8s-cdc-provider.so
 ```
 
 The library exports the ABI in:
 
-`deployments/gbase8s-cdc-provider/qmigration_gbase8s_cdc_provider.h`
+`deployments/gbase8s-cdc-provider/dts_gbase8s_cdc_provider.h`
 
 Required symbols are:
 
@@ -30,7 +30,7 @@ Required symbols are:
 The agent loads the library with `dlopen(RTLD_NOW|RTLD_LOCAL)` and requires ABI
 version `1`. This lets an operator build the provider with the local GBase
 Client-SDK / ESQL-C toolchain and call `ifx_lo_read()` directly; it no longer
-requires the provider itself to use the exact QMigration Go toolchain.
+requires the provider itself to use the exact DTS Go toolchain.
 
 The RC20 Go plugin contract remains as a legacy compatibility path, but both
 provider mechanisms may not be configured at the same time.
@@ -38,10 +38,10 @@ provider mechanisms may not be configured at the same time.
 ## Native provider integrity and local configuration
 
 - native library path must be absolute, regular and not world-writable;
-- optional `QMIGRATION_GBASE8S_CDC_PROVIDER_SHA256` pins the exact `.so` before
+- optional `DTS_GBASE8S_CDC_PROVIDER_SHA256` pins the exact `.so` before
   `dlopen`;
 - provider-local JSON can be supplied directly or through
-  `QMIGRATION_GBASE8S_CDC_PROVIDER_CONFIG_FILE`;
+  `DTS_GBASE8S_CDC_PROVIDER_CONFIG_FILE`;
 - a provider config file must not be accessible by `other` users and is capped
   at 1 MiB;
 - native JSON responses are capped at 64 MiB before entering Go memory.
@@ -82,7 +82,7 @@ backwards.
 - HTTP header/read/write/idle bounds are explicit.
 
 The `/v1/health` response now reports provider kind/ABI and whether native
-SHA-256 pinning is active. `qmigration-gbase8s-qualify --cdc` records these
+SHA-256 pinning is active. `dts-gbase8s-qualify --cdc` records these
 fields in the retained qualification report.
 
 ## Boundaries unchanged

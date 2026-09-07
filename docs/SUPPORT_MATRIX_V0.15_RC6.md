@@ -1,6 +1,6 @@
-# QMigration V0.15.0-rc6 Support Matrix
+# DTS V0.15.0-rc6 Support Matrix
 
-This matrix describes QMigration-owned runtime support. SQL-wire compatibility
+This matrix describes DTS-owned runtime support. SQL-wire compatibility
 or a successful protocol probe alone does not imply source CDC support.
 
 | Database | Metadata | Full Read | Full Write / CDC Apply | Source CDC | Schema / DDL | Status |
@@ -24,7 +24,7 @@ or a successful protocol probe alone does not imply source CDC support.
 
 ## DB2 RC6 scope
 
-Implemented in QMigration-owned Go code:
+Implemented in DTS-owned Go code:
 
 - DRDA/DDM authenticated session, TLS/mTLS and SECMEC 9 / TLS-protected 3;
 - SYSCAT metadata, PK/index/FK and schema objects;

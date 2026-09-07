@@ -1,4 +1,4 @@
-# QMigration V0.10.0 Release Notes
+# DTS V0.10.0 Release Notes
 
 ## Theme
 
@@ -16,7 +16,7 @@ V0.10 implements the MySQL 8 `PARTIAL_UPDATE_ROWS_EVENT` data path instead of tr
 - Added multi-diff tests and a native MySQL CDC transaction-level test that verifies rebuilt JSON and durable Binlog checkpoint attachment.
 - Native MySQL precheck now reports `binlog_row_value_options`.
 - Added `binlog_transaction_compression` safety guard. Native CDC requires it to be OFF until `TRANSACTION_PAYLOAD_EVENT` ZSTD decoding is implemented.
-- `qmigration-binlog-inspect` identifies `PARTIAL_UPDATE_ROWS` and `TRANSACTION_PAYLOAD`.
+- `dts-binlog-inspect` identifies `PARTIAL_UPDATE_ROWS` and `TRANSACTION_PAYLOAD`.
 
 ## Safety boundaries
 

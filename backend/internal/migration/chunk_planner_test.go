@@ -1,7 +1,7 @@
 package migration
 
 import (
-	"qmigration/backend/internal/connector"
+	"dts/backend/internal/connector"
 	"testing"
 )
 

@@ -9,7 +9,7 @@ import (
 
 // ttcEncoder/ttcDecoder implement the compact integer, CLR and key/value
 // primitives used by Oracle's TTC negotiation/authentication messages.  Keeping
-// these primitives inside QMigration avoids coupling Oracle support to a JDBC
+// these primitives inside DTS avoids coupling Oracle support to a JDBC
 // or external migration runtime and gives auth/query codecs a single audited
 // byte boundary.
 type ttcEncoder struct{ bytes.Buffer }

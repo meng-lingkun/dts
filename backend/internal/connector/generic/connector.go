@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"qmigration/backend/internal/connector"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/connector"
+	"dts/backend/internal/domain"
 	"time"
 )
 
@@ -18,7 +18,7 @@ func (*Factory) Capabilities(t domain.DataSourceType) connector.Descriptor {
 		Type: t, Protocol: "tcp-probe", Native: false,
 		Capabilities: nil,
 		Maturity:     connector.MaturityProbeOnly,
-		Note:         "connection probe only; a QMigration native connector implementation is required before migration",
+		Note:         "connection probe only; a DTS native connector implementation is required before migration",
 	}
 }
 func (*Factory) New(ds domain.DataSource) (connector.Connector, error) {

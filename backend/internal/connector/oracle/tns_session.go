@@ -17,7 +17,7 @@ const (
 
 // tnsDataSession is the protocol transport used after a listener ACCEPT.
 // Oracle authentication and TTC SQL messages are intentionally layered above
-// this type so the QMigration Connector can reuse the same TNS framing for
+// this type so the DTS Connector can reuse the same TNS framing for
 // plaintext TCP and TCPS sockets without vendor client libraries.
 type tnsDataSession struct {
 	conn net.Conn
@@ -53,7 +53,7 @@ func (s *tnsDataSession) WriteData(ctx context.Context, flags uint16, payload []
 	}
 	// TTC messages are byte streams and may legitimately exceed a single TNS
 	// DATA packet (large array binds / LOB PL/SQL blocks). Oracle clients split
-	// the stream at the negotiated SDU boundary; QMigration uses the protocol's
+	// the stream at the negotiated SDU boundary; DTS uses the protocol's
 	// absolute 16-bit packet ceiling here because the listener ACCEPT parser does
 	// not yet retain an SDU value. The server reassembles TTC across DATA packets.
 	if len(payload) == 0 {

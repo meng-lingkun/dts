@@ -35,5 +35,5 @@ const router=createRouter({
   ]
 })
 
-router.afterEach(to=>{document.title=`${String(to.meta.title||'控制台')} · QMigration`})
+router.afterEach(to=>{document.title=`${String(to.meta.title||'控制台')} · DTS`})
 export default router

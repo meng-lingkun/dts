@@ -14,10 +14,10 @@ import (
 	"strings"
 	"time"
 
-	"qmigration/backend/internal/cdc/damenglog"
-	cdcruntime "qmigration/backend/internal/cdc/runtime"
-	damengconnector "qmigration/backend/internal/connector/dameng"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/cdc/damenglog"
+	cdcruntime "dts/backend/internal/cdc/runtime"
+	damengconnector "dts/backend/internal/connector/dameng"
+	"dts/backend/internal/domain"
 )
 
 func env(k, d string) string {
@@ -48,8 +48,8 @@ func waitCDCReady(ctx context.Context, client *http.Client, endpoint, token stri
 		if token != "" {
 			req.Header.Set("Authorization", "Bearer "+token)
 		}
-		if wt := strings.TrimSpace(os.Getenv("QMIGRATION_WORKER_TOKEN")); wt != "" {
-			req.Header.Set("X-QMigration-Worker-Token", wt)
+		if wt := strings.TrimSpace(os.Getenv("DTS_WORKER_TOKEN")); wt != "" {
+			req.Header.Set("X-DTS-Worker-Token", wt)
 		}
 		resp, err := client.Do(req)
 		if err == nil {
@@ -91,8 +91,8 @@ func postTransaction(ctx context.Context, client *http.Client, endpoint, token, 
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	if wt := strings.TrimSpace(os.Getenv("QMIGRATION_WORKER_TOKEN")); wt != "" {
-		req.Header.Set("X-QMigration-Worker-Token", wt)
+	if wt := strings.TrimSpace(os.Getenv("DTS_WORKER_TOKEN")); wt != "" {
+		req.Header.Set("X-DTS-Worker-Token", wt)
 	}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -101,7 +101,7 @@ func postTransaction(ctx context.Context, client *http.Client, endpoint, token, 
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("QMigration returned %s: %s", resp.Status, strings.TrimSpace(string(data)))
+		return nil, fmt.Errorf("DTS returned %s: %s", resp.Status, strings.TrimSpace(string(data)))
 	}
 	var out domain.CDCApplyResult
 	if len(data) > 0 {
@@ -112,30 +112,30 @@ func postTransaction(ctx context.Context, client *http.Client, endpoint, token, 
 	return &out, nil
 }
 func run(ctx context.Context) error {
-	if !enabled("QMIGRATION_EXPERIMENTAL_DAMENG_NATIVE") {
-		return errors.New("QMIGRATION_EXPERIMENTAL_DAMENG_NATIVE=1 is required")
+	if !enabled("DTS_EXPERIMENTAL_DAMENG_NATIVE") {
+		return errors.New("DTS_EXPERIMENTAL_DAMENG_NATIVE=1 is required")
 	}
-	if !enabled("QMIGRATION_EXPERIMENTAL_DAMENG_LOG_CDC") {
-		return errors.New("QMIGRATION_EXPERIMENTAL_DAMENG_LOG_CDC=1 is required")
+	if !enabled("DTS_EXPERIMENTAL_DAMENG_LOG_CDC") {
+		return errors.New("DTS_EXPERIMENTAL_DAMENG_LOG_CDC=1 is required")
 	}
-	server := strings.TrimRight(env("QMIGRATION_SERVER", "http://127.0.0.1:8080"), "/")
-	taskID := env("QMIGRATION_TASK_ID", "")
+	server := strings.TrimRight(env("DTS_SERVER", "http://127.0.0.1:8080"), "/")
+	taskID := env("DTS_TASK_ID", "")
 	if taskID == "" {
-		return errors.New("QMIGRATION_TASK_ID is required")
+		return errors.New("DTS_TASK_ID is required")
 	}
-	direction := strings.ToLower(env("QMIGRATION_CDC_DIRECTION", "forward"))
+	direction := strings.ToLower(env("DTS_CDC_DIRECTION", "forward"))
 	if direction != "forward" && direction != "reverse" {
-		return errors.New("QMIGRATION_CDC_DIRECTION must be forward or reverse")
+		return errors.New("DTS_CDC_DIRECTION must be forward or reverse")
 	}
-	host, user, start := env("QMIGRATION_DAMENG_HOST", ""), env("QMIGRATION_DAMENG_USER", ""), env("QMIGRATION_DAMENG_START_LSN", "")
+	host, user, start := env("DTS_DAMENG_HOST", ""), env("DTS_DAMENG_USER", ""), env("DTS_DAMENG_START_LSN", "")
 	if host == "" || user == "" || start == "" {
 		return errors.New("DAMENG_HOST, USER and START_LSN are required")
 	}
-	port, _ := strconv.Atoi(env("QMIGRATION_DAMENG_PORT", "5236"))
+	port, _ := strconv.Atoi(env("DTS_DAMENG_PORT", "5236"))
 	if port <= 0 {
 		port = 5236
 	}
-	ds := domain.DataSource{Type: domain.DataSourceDameng, Host: host, Port: port, Username: user, Password: env("QMIGRATION_DAMENG_PASSWORD", ""), Schema: env("QMIGRATION_DAMENG_SCHEMA", user), Database: env("QMIGRATION_DAMENG_DATABASE", ""), JDBCURL: env("QMIGRATION_DAMENG_DSN", ""), DriverClass: env("QMIGRATION_DAMENG_SQL_DRIVER", ""), TLSMode: domain.TLSMode(strings.ToUpper(env("QMIGRATION_DAMENG_TLS_MODE", "DISABLE")))}
+	ds := domain.DataSource{Type: domain.DataSourceDameng, Host: host, Port: port, Username: user, Password: env("DTS_DAMENG_PASSWORD", ""), Schema: env("DTS_DAMENG_SCHEMA", user), Database: env("DTS_DAMENG_DATABASE", ""), JDBCURL: env("DTS_DAMENG_DSN", ""), DriverClass: env("DTS_DAMENG_SQL_DRIVER", ""), TLSMode: domain.TLSMode(strings.ToUpper(env("DTS_DAMENG_TLS_MODE", "DISABLE")))}
 	raw, err := damengconnector.NewFactory().New(ds)
 	if err != nil {
 		return err
@@ -145,24 +145,24 @@ func run(ctx context.Context) error {
 		return errors.New("Dameng native connector type assertion failed")
 	}
 	selected := []string{}
-	for _, v := range strings.Split(env("QMIGRATION_DAMENG_TABLES", ""), ",") {
+	for _, v := range strings.Split(env("DTS_DAMENG_TABLES", ""), ",") {
 		if x := strings.TrimSpace(v); x != "" {
 			selected = append(selected, x)
 		}
 	}
 	if len(selected) == 0 {
-		return errors.New("QMIGRATION_DAMENG_TABLES is required")
+		return errors.New("DTS_DAMENG_TABLES is required")
 	}
-	endpoint := env("QMIGRATION_CDC_ENDPOINT", server+"/api/v1/migrations/"+taskID+"/cdc/events")
-	ready := env("QMIGRATION_CDC_READY_ENDPOINT", "")
-	token := env("QMIGRATION_API_TOKEN", "")
+	endpoint := env("DTS_CDC_ENDPOINT", server+"/api/v1/migrations/"+taskID+"/cdc/events")
+	ready := env("DTS_CDC_READY_ENDPOINT", "")
+	token := env("DTS_API_TOKEN", "")
 	client := &http.Client{Timeout: 5 * time.Minute}
 	if err := waitCDCReady(ctx, client, ready, token, 5*time.Second); err != nil {
 		raw.Close()
 		return err
 	}
-	poll, _ := time.ParseDuration(env("QMIGRATION_DAMENG_CDC_POLL", "2s"))
-	span, _ := strconv.ParseUint(env("QMIGRATION_DAMENG_CDC_MAX_LSN_SPAN", "100000"), 10, 64)
+	poll, _ := time.ParseDuration(env("DTS_DAMENG_CDC_POLL", "2s"))
+	span, _ := strconv.ParseUint(env("DTS_DAMENG_CDC_MAX_LSN_SPAN", "100000"), 10, 64)
 	reader, err := damenglog.NewReader(src, start, selected, poll, span)
 	if err != nil {
 		raw.Close()

@@ -201,7 +201,7 @@ func verifyNativeLibrary(path, wantSHA256 string) (string, error) {
 
 // OpenNativeProvider loads a stable C ABI provider. The provider may be built
 // with GBase CSDK/ESQL-C independently from the Go toolchain. configJSON is
-// local agent configuration and is never supplied by the QMigration control
+// local agent configuration and is never supplied by the DTS control
 // plane unless the operator explicitly configures it on the agent host.
 func OpenNativeProvider(path, wantSHA256, configJSON string) (Agent, error) {
 	clean, err := verifyNativeLibrary(path, wantSHA256)

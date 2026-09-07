@@ -1,4 +1,4 @@
-// Package pipeline contains QMigration's built-in data-plane runtime.
+// Package pipeline contains DTS's built-in data-plane runtime.
 //
 // The design intentionally fuses the useful execution ideas of mature data
 // migration/streaming systems without depending on their runtimes:

@@ -11,10 +11,10 @@ import (
 	"strings"
 	"time"
 
-	"qmigration/backend/internal/cdc/db2log"
-	"qmigration/backend/internal/connector"
-	db2connector "qmigration/backend/internal/connector/db2"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/cdc/db2log"
+	"dts/backend/internal/connector"
+	db2connector "dts/backend/internal/connector/db2"
+	"dts/backend/internal/domain"
 )
 
 const toolVersion = "0.15.0-rc49"
@@ -94,9 +94,9 @@ func main() {
 		sampleRows    = flag.Int("sample-rows", 16, "maximum sample rows")
 		targetWrite   = flag.Bool("target-write", false, "run destructive target write qualification using a temporary table")
 		targetVector  = flag.Bool("target-vector", false, "with --target-write, qualify Db2 12.1.2+ VECTOR create/prepared write/read round-trip")
-		cdc           = flag.Bool("cdc", false, "qualify DB2 db2ReadLog source CDC through QMigration DB2 Log Agent")
-		cdcURL        = flag.String("cdc-url", "", "QMigration DB2 Log Agent URL (db2log:// or db2logs://)")
-		cdcTokenEnv   = flag.String("cdc-token-env", "QMIGRATION_DB2_LOG_TOKEN", "optional environment variable containing Log Agent bearer token")
+		cdc           = flag.Bool("cdc", false, "qualify DB2 db2ReadLog source CDC through DTS DB2 Log Agent")
+		cdcURL        = flag.String("cdc-url", "", "DTS DB2 Log Agent URL (db2log:// or db2logs://)")
+		cdcTokenEnv   = flag.String("cdc-token-env", "DTS_DB2_LOG_TOKEN", "optional environment variable containing Log Agent bearer token")
 		cdcCAFile     = flag.String("cdc-ca-file", "", "optional PEM CA for DB2 Log Agent HTTPS")
 		cdcServerName = flag.String("cdc-server-name", "", "optional DB2 Log Agent TLS server name")
 		timeout       = flag.Duration("timeout", 90*time.Second, "overall qualification timeout")
@@ -133,9 +133,9 @@ func main() {
 	fatal(e)
 	cdcCA, e := readFile(*cdcCAFile)
 	fatal(e)
-	_ = os.Setenv("QMIGRATION_EXPERIMENTAL_DB2_NATIVE", "1")
+	_ = os.Setenv("DTS_EXPERIMENTAL_DB2_NATIVE", "1")
 	if *cdc {
-		_ = os.Setenv("QMIGRATION_EXPERIMENTAL_DB2_LOG_CDC", "1")
+		_ = os.Setenv("DTS_EXPERIMENTAL_DB2_LOG_CDC", "1")
 	}
 	ds := domain.DataSource{Type: domain.DataSourceDB2, Host: strings.TrimSpace(*host), Port: *port, Username: strings.TrimSpace(*user), Password: password, Database: strings.TrimSpace(*database), Schema: strings.TrimSpace(*schema), CDCURL: strings.TrimSpace(*cdcURL), TLSMode: domain.TLSMode(strings.ToUpper(strings.TrimSpace(*tlsMode))), TLSServerName: strings.TrimSpace(*tlsServerName), TLSCACert: ca, TLSClientCert: cert, TLSClientKey: key}
 	f := db2connector.NewFactory()
@@ -287,7 +287,7 @@ func main() {
 			})
 		}
 	} else {
-		r.skip("source-cdc", "enable --cdc with a qualified QMigration DB2 Log Agent to validate db2ReadLog")
+		r.skip("source-cdc", "enable --cdc with a qualified DTS DB2 Log Agent to validate db2ReadLog")
 	}
 	if *targetWrite {
 		runTargetWrite(r, base, selectedSchema, *targetVector)
@@ -331,7 +331,7 @@ func runTargetWrite(r *runner, base connector.Connector, schema string, targetVe
 	}
 	r.run("target-write-prepared-extdta-lob", func() (string, map[string]any, error) {
 		blob := bytes.Repeat([]byte{0x00, 0x7f, 0xff, 0x42}, 512*1024) // 2 MiB
-		clob := bytes.Repeat([]byte("QMigration-DB2-EXTDTA-中文-"), 8192)
+		clob := bytes.Repeat([]byte("DTS-DB2-EXTDTA-中文-"), 8192)
 		rows := [][]connector.Value{{
 			{Raw: []byte("100")},
 			{Raw: []byte("db2-native")},

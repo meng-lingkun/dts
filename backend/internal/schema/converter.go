@@ -2,7 +2,7 @@ package schema
 
 import (
 	"fmt"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/domain"
 	"strings"
 )
 

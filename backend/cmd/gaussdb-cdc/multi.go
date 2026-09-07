@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"qmigration/backend/internal/cdc/orderedmerge"
-	postgresconnector "qmigration/backend/internal/connector/postgres"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/cdc/orderedmerge"
+	postgresconnector "dts/backend/internal/connector/postgres"
+	"dts/backend/internal/domain"
 	"sort"
 	"strconv"
 	"strings"
@@ -151,14 +151,14 @@ func mergeGaussPrimaryBatch(ctx context.Context, ps []gaussPrimary, tables []str
 }
 
 func runMultiPrimary(ctx context.Context, rawConfig string) error {
-	if !envEnabled("QMIGRATION_EXPERIMENTAL_GAUSSDB_MULTI_PRIMARY") {
-		return errors.New("GaussDB multi-primary requires QMIGRATION_EXPERIMENTAL_GAUSSDB_MULTI_PRIMARY=1")
+	if !envEnabled("DTS_EXPERIMENTAL_GAUSSDB_MULTI_PRIMARY") {
+		return errors.New("GaussDB multi-primary requires DTS_EXPERIMENTAL_GAUSSDB_MULTI_PRIMARY=1")
 	}
 	cfgs, err := loadGaussPrimaries(rawConfig)
 	if err != nil {
 		return err
 	}
-	tables, err := parseTables(env("QMIGRATION_GAUSSDB_TABLES", ""))
+	tables, err := parseTables(env("DTS_GAUSSDB_TABLES", ""))
 	if err != nil {
 		return err
 	}
@@ -171,27 +171,27 @@ func runMultiPrimary(ctx context.Context, rawConfig string) error {
 			_ = p.c.Close()
 		}
 	}()
-	server := strings.TrimRight(env("QMIGRATION_SERVER", "http://127.0.0.1:8080"), "/")
-	taskID := env("QMIGRATION_TASK_ID", "")
+	server := strings.TrimRight(env("DTS_SERVER", "http://127.0.0.1:8080"), "/")
+	taskID := env("DTS_TASK_ID", "")
 	if taskID == "" {
-		return errors.New("QMIGRATION_TASK_ID is required")
+		return errors.New("DTS_TASK_ID is required")
 	}
-	direction := strings.ToLower(env("QMIGRATION_CDC_DIRECTION", "forward"))
-	endpoint := env("QMIGRATION_CDC_ENDPOINT", server+"/api/v1/migrations/"+taskID+"/cdc/events")
-	token := env("QMIGRATION_API_TOKEN", "")
+	direction := strings.ToLower(env("DTS_CDC_DIRECTION", "forward"))
+	endpoint := env("DTS_CDC_ENDPOINT", server+"/api/v1/migrations/"+taskID+"/cdc/events")
+	token := env("DTS_API_TOKEN", "")
 	client := &http.Client{Timeout: 90 * time.Second}
-	if err := waitCDCReady(ctx, client, env("QMIGRATION_CDC_READY_ENDPOINT", ""), token); err != nil {
+	if err := waitCDCReady(ctx, client, env("DTS_CDC_READY_ENDPOINT", ""), token); err != nil {
 		return err
 	}
-	maxChanges, _ := strconv.Atoi(env("QMIGRATION_GAUSSDB_CDC_MAX_CHANGES", "4096"))
+	maxChanges, _ := strconv.Atoi(env("DTS_GAUSSDB_CDC_MAX_CHANGES", "4096"))
 	if maxChanges <= 0 {
 		maxChanges = 4096
 	}
-	poll, _ := time.ParseDuration(env("QMIGRATION_GAUSSDB_CDC_POLL_INTERVAL", "1s"))
+	poll, _ := time.ParseDuration(env("DTS_GAUSSDB_CDC_POLL_INTERVAL", "1s"))
 	if poll <= 0 {
 		poll = time.Second
 	}
-	vector, err := decodeGaussVector(env("QMIGRATION_GAUSSDB_START_VECTOR", ""))
+	vector, err := decodeGaussVector(env("DTS_GAUSSDB_START_VECTOR", ""))
 	if err != nil {
 		return err
 	}

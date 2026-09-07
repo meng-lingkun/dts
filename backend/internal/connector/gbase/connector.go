@@ -7,12 +7,12 @@ import (
 	"strings"
 	"sync"
 
-	"qmigration/backend/internal/connector"
-	mysqlconnector "qmigration/backend/internal/connector/mysql"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/connector"
+	mysqlconnector "dts/backend/internal/connector/mysql"
+	"dts/backend/internal/domain"
 )
 
-// Factory exposes GBase 8a as a distinct QMigration connector family while
+// Factory exposes GBase 8a as a distinct DTS connector family while
 // reusing the already-audited MySQL/GBase packet transport.  GBase 8a is not
 // treated as a MySQL-family CDC source: only metadata/full read/full write and
 // schema creation are advertised in RC18.
@@ -21,7 +21,7 @@ type Factory struct{}
 func NewFactory() *Factory { return &Factory{} }
 
 func experimentalEnabled() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("QMIGRATION_EXPERIMENTAL_GBASE8A_NATIVE"))) {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("DTS_EXPERIMENTAL_GBASE8A_NATIVE"))) {
 	case "1", "true", "yes", "on":
 		return true
 	default:
@@ -30,7 +30,7 @@ func experimentalEnabled() bool {
 }
 
 func sourceCDCEnabled() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("QMIGRATION_EXPERIMENTAL_GBASE8A_SOURCE_CDC"))) {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("DTS_EXPERIMENTAL_GBASE8A_SOURCE_CDC"))) {
 	case "1", "true", "yes", "on":
 		return experimentalEnabled()
 	default:
@@ -39,7 +39,7 @@ func sourceCDCEnabled() bool {
 }
 
 func transactionalTargetCDCEnabled() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("QMIGRATION_EXPERIMENTAL_GBASE8A_TRANSACTIONAL_TARGET_CDC"))) {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("DTS_EXPERIMENTAL_GBASE8A_TRANSACTIONAL_TARGET_CDC"))) {
 	case "1", "true", "yes", "on":
 		return experimentalEnabled() && targetCDCEnabled()
 	default:
@@ -48,7 +48,7 @@ func transactionalTargetCDCEnabled() bool {
 }
 
 func targetCDCEnabled() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("QMIGRATION_EXPERIMENTAL_GBASE8A_TARGET_CDC"))) {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("DTS_EXPERIMENTAL_GBASE8A_TARGET_CDC"))) {
 	case "1", "true", "yes", "on":
 		return true
 	default:
@@ -59,7 +59,7 @@ func targetCDCEnabled() bool {
 func (*Factory) Capabilities(t domain.DataSourceType) connector.Descriptor {
 	caps := []connector.Capability{connector.CapabilityProtocolProbe}
 	maturity := connector.MaturityProbeOnly
-	note := "GBase 8a protocol probe only; set QMIGRATION_EXPERIMENTAL_GBASE8A_NATIVE=1 after real-instance qualification"
+	note := "GBase 8a protocol probe only; set DTS_EXPERIMENTAL_GBASE8A_NATIVE=1 after real-instance qualification"
 	if experimentalEnabled() {
 		caps = append(caps,
 			connector.CapabilityMetadata,
@@ -70,7 +70,7 @@ func (*Factory) Capabilities(t domain.DataSourceType) connector.Descriptor {
 			connector.CapabilityMigrationPrecheck,
 		)
 		maturity = connector.MaturityExperimental
-		note = "EXPERIMENTAL GBase 8a MPP metadata/full-read/full-write/schema data plane over QMigration native packet transport; target Full Write requires validated HASH distribution compatible with the migration key"
+		note = "EXPERIMENTAL GBase 8a MPP metadata/full-read/full-write/schema data plane over DTS native packet transport; target Full Write requires validated HASH distribution compatible with the migration key"
 		if targetCDCEnabled() {
 			caps = append(caps, connector.CapabilityCDCApply, connector.CapabilityPointLookup)
 			note += "; target CDC apply is enabled"
@@ -134,7 +134,7 @@ func (c *Connector) WriteBatch(ctx context.Context, req connector.WriteBatchRequ
 	c.mu.Unlock()
 	if inTxn {
 		if !transactionalTargetCDCEnabled() {
-			return 0, errors.New("GBase 8a transactional CDC write requires QMIGRATION_EXPERIMENTAL_GBASE8A_TRANSACTIONAL_TARGET_CDC=1")
+			return 0, errors.New("GBase 8a transactional CDC write requires DTS_EXPERIMENTAL_GBASE8A_TRANSACTIONAL_TARGET_CDC=1")
 		}
 		return c.inner.WriteTransactionalGBaseBatch(ctx, req)
 	}
@@ -159,25 +159,25 @@ func (c *Connector) MigrationPrechecks(ctx context.Context, needCDC bool) []doma
 // DeleteByKey and ReadByKey expose a deliberately non-transactional target CDC
 // apply path for GBase 8a. Each individual operation is retry-idempotent: upserts
 // use the already-qualified HASH staging+MERGE path and deletes use the stable
-// migration key. QMigration does not expose TransactionalCDCApplyConnector here
+// migration key. DTS does not expose TransactionalCDCApplyConnector here
 // because GBase 8a MPP source-transaction atomicity is not portable/qualified.
 func (c *Connector) DeleteByKey(ctx context.Context, req connector.DeleteByKeyRequest) error {
 	if !targetCDCEnabled() {
-		return errors.New("GBase 8a target CDC apply requires QMIGRATION_EXPERIMENTAL_GBASE8A_TARGET_CDC=1")
+		return errors.New("GBase 8a target CDC apply requires DTS_EXPERIMENTAL_GBASE8A_TARGET_CDC=1")
 	}
 	return c.inner.DeleteByKey(ctx, req)
 }
 
 func (c *Connector) ReadByKey(ctx context.Context, req connector.ReadByKeyRequest) ([]connector.Value, bool, error) {
 	if !targetCDCEnabled() {
-		return nil, false, errors.New("GBase 8a target CDC point lookup requires QMIGRATION_EXPERIMENTAL_GBASE8A_TARGET_CDC=1")
+		return nil, false, errors.New("GBase 8a target CDC point lookup requires DTS_EXPERIMENTAL_GBASE8A_TARGET_CDC=1")
 	}
 	return c.inner.ReadByKey(ctx, req)
 }
 
 func (c *Connector) BeginCDCTransaction(ctx context.Context) error {
 	if !transactionalTargetCDCEnabled() {
-		return errors.New("GBase 8a transactional CDC apply requires QMIGRATION_EXPERIMENTAL_GBASE8A_TRANSACTIONAL_TARGET_CDC=1")
+		return errors.New("GBase 8a transactional CDC apply requires DTS_EXPERIMENTAL_GBASE8A_TRANSACTIONAL_TARGET_CDC=1")
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()

@@ -1,13 +1,13 @@
-# QMigration V0.15.0-unified-dev9 Release Notes
+# DTS V0.15.0-unified-dev9 Release Notes
 
 ## Scope
 
-This development snapshot continues the single QMigration Unified Engine. It does not add DataX, SeaTunnel, Flink CDC, Debezium, Canal or another migration runtime.
+This development snapshot continues the single DTS Unified Engine. It does not add DataX, SeaTunnel, Flink CDC, Debezium, Canal or another migration runtime.
 
 ## S3-compatible CDC spool hardening
 
-- Automatic multipart upload for encrypted spool objects over `QMIGRATION_CDC_SPOOL_S3_MULTIPART_THRESHOLD_BYTES` (default 8 MiB).
-- Configurable multipart part size via `QMIGRATION_CDC_SPOOL_S3_MULTIPART_PART_BYTES` (default 8 MiB, minimum 5 MiB).
+- Automatic multipart upload for encrypted spool objects over `DTS_CDC_SPOOL_S3_MULTIPART_THRESHOLD_BYTES` (default 8 MiB).
+- Configurable multipart part size via `DTS_CDC_SPOOL_S3_MULTIPART_PART_BYTES` (default 8 MiB, minimum 5 MiB).
 - A failed part/completion aborts the upload; Metadata is never committed and source ACK must not advance.
 - New `spools3:v2` references include SHA-256 of the encrypted payload. Hydration verifies the object before secure-repository decrypt/apply.
 - `spools3:v1` remains readable so pending dev8 transactions survive an upgrade.

@@ -6,8 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"qmigration/backend/internal/connector"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/connector"
+	"dts/backend/internal/domain"
 	"strconv"
 	"strings"
 	"sync"
@@ -20,7 +20,7 @@ func NewFactory() *Factory { return &Factory{} }
 
 func (*Factory) Capabilities(t domain.DataSourceType) connector.Descriptor {
 	if t == domain.DataSourceGaussDB && !gaussDBNativeEnabled() {
-		return connector.Descriptor{Type: t, Protocol: "postgresql", Capabilities: []connector.Capability{connector.CapabilityProtocolProbe}, Native: true, Maturity: connector.MaturityProbeOnly, QualificationRequired: true, Note: "GaussDB PostgreSQL-wire probe only; set QMIGRATION_EXPERIMENTAL_GAUSSDB_NATIVE=1 after qualification"}
+		return connector.Descriptor{Type: t, Protocol: "postgresql", Capabilities: []connector.Capability{connector.CapabilityProtocolProbe}, Native: true, Maturity: connector.MaturityProbeOnly, QualificationRequired: true, Note: "GaussDB PostgreSQL-wire probe only; set DTS_EXPERIMENTAL_GAUSSDB_NATIVE=1 after qualification"}
 	}
 	caps := []connector.Capability{
 		connector.CapabilityMetadata,
@@ -41,7 +41,7 @@ func (*Factory) Capabilities(t domain.DataSourceType) connector.Descriptor {
 		connector.CapabilityMigrationPrecheck,
 	}
 	// pgoutput/replication-slot semantics are guaranteed only for the PostgreSQL
-	// products currently covered by QMigration's native CDC reader.  Protocol-
+	// products currently covered by DTS's native CDC reader.  Protocol-
 	// compatible derivatives can still use the same full-load SPI without being
 	// incorrectly advertised as pgoutput-compatible.
 	if t == domain.DataSourcePostgreSQL || t == domain.DataSourcePolarDBPostgreSQL ||
@@ -55,14 +55,14 @@ func (*Factory) Capabilities(t domain.DataSourceType) connector.Descriptor {
 		)
 	}
 	maturity := connector.MaturityNative
-	note := "QMigration native PostgreSQL protocol full data plane with pgoutput CDC where advertised"
+	note := "DTS native PostgreSQL protocol full data plane with pgoutput CDC where advertised"
 	if t == domain.DataSourceOpenGauss {
 		if openGaussCDCEnabled() {
 			maturity = connector.MaturityExperimental
 			note = "EXPERIMENTAL openGauss PostgreSQL-wire Full/target + product-native mppdb_decoding SQL logical CDC"
 		} else {
 			maturity = connector.MaturityNativeFullOnly
-			note = "Native PostgreSQL-wire Full Load/target apply; set QMIGRATION_EXPERIMENTAL_OPENGAUSS_LOGICAL_CDC=1 only after qualification"
+			note = "Native PostgreSQL-wire Full Load/target apply; set DTS_EXPERIMENTAL_OPENGAUSS_LOGICAL_CDC=1 only after qualification"
 		}
 	}
 	if t == domain.DataSourceKingbase {
@@ -71,12 +71,12 @@ func (*Factory) Capabilities(t domain.DataSourceType) connector.Descriptor {
 			note = "EXPERIMENTAL KingbaseES PostgreSQL-wire Full/target + Kingbase sys_* slot functions with kboutput streaming CDC"
 		} else {
 			maturity = connector.MaturityNativeFullOnly
-			note = "Native PostgreSQL-wire Full Load/target apply; set QMIGRATION_EXPERIMENTAL_KINGBASE_LOGICAL_CDC=1 only after qualification"
+			note = "Native PostgreSQL-wire Full Load/target apply; set DTS_EXPERIMENTAL_KINGBASE_LOGICAL_CDC=1 only after qualification"
 		}
 	}
 	if t == domain.DataSourceGaussDB {
 		maturity = connector.MaturityExperimental
-		note = "EXPERIMENTAL GaussDB PostgreSQL-wire Full/target data plane; SQL logical-decoding CDC requires QMIGRATION_EXPERIMENTAL_GAUSSDB_LOGICAL_CDC=1"
+		note = "EXPERIMENTAL GaussDB PostgreSQL-wire Full/target data plane; SQL logical-decoding CDC requires DTS_EXPERIMENTAL_GAUSSDB_LOGICAL_CDC=1"
 	}
 	qualificationRequired := t == domain.DataSourceGaussDB ||
 		(t == domain.DataSourceOpenGauss && openGaussCDCEnabled()) ||
@@ -92,12 +92,12 @@ func envOn(name string) bool {
 		return false
 	}
 }
-func gaussDBNativeEnabled() bool { return envOn("QMIGRATION_EXPERIMENTAL_GAUSSDB_NATIVE") }
+func gaussDBNativeEnabled() bool { return envOn("DTS_EXPERIMENTAL_GAUSSDB_NATIVE") }
 func gaussDBCDCEnabled() bool {
-	return gaussDBNativeEnabled() && envOn("QMIGRATION_EXPERIMENTAL_GAUSSDB_LOGICAL_CDC")
+	return gaussDBNativeEnabled() && envOn("DTS_EXPERIMENTAL_GAUSSDB_LOGICAL_CDC")
 }
-func openGaussCDCEnabled() bool { return envOn("QMIGRATION_EXPERIMENTAL_OPENGAUSS_LOGICAL_CDC") }
-func kingbaseCDCEnabled() bool  { return envOn("QMIGRATION_EXPERIMENTAL_KINGBASE_LOGICAL_CDC") }
+func openGaussCDCEnabled() bool { return envOn("DTS_EXPERIMENTAL_OPENGAUSS_LOGICAL_CDC") }
+func kingbaseCDCEnabled() bool  { return envOn("DTS_EXPERIMENTAL_KINGBASE_LOGICAL_CDC") }
 func (f *Factory) New(d domain.DataSource) (connector.Connector, error) {
 	if d.Host == "" || d.Port <= 0 {
 		return nil, errors.New("invalid PostgreSQL endpoint")
@@ -956,19 +956,19 @@ func (c *Connector) CurrentCDCPosition(ctx context.Context) (*domain.CDCPosition
 	switch c.ds.Type {
 	case domain.DataSourceGaussDB:
 		if !gaussDBCDCEnabled() {
-			return nil, errors.New("GaussDB source CDC requires QMIGRATION_EXPERIMENTAL_GAUSSDB_NATIVE=1 and QMIGRATION_EXPERIMENTAL_GAUSSDB_LOGICAL_CDC=1")
+			return nil, errors.New("GaussDB source CDC requires DTS_EXPERIMENTAL_GAUSSDB_NATIVE=1 and DTS_EXPERIMENTAL_GAUSSDB_LOGICAL_CDC=1")
 		}
 		query = "SELECT pg_current_xlog_location()::text"
 		positionType = "GAUSSDB_LSN"
 	case domain.DataSourceOpenGauss:
 		if !openGaussCDCEnabled() {
-			return nil, errors.New("openGauss source CDC requires QMIGRATION_EXPERIMENTAL_OPENGAUSS_LOGICAL_CDC=1")
+			return nil, errors.New("openGauss source CDC requires DTS_EXPERIMENTAL_OPENGAUSS_LOGICAL_CDC=1")
 		}
 		query = "SELECT pg_current_xlog_location()::text"
 		positionType = "OPENGAUSS_LSN"
 	case domain.DataSourceKingbase:
 		if !kingbaseCDCEnabled() {
-			return nil, errors.New("KingbaseES source CDC requires QMIGRATION_EXPERIMENTAL_KINGBASE_LOGICAL_CDC=1")
+			return nil, errors.New("KingbaseES source CDC requires DTS_EXPERIMENTAL_KINGBASE_LOGICAL_CDC=1")
 		}
 		query = "SELECT sys_current_wal_lsn()::text"
 		positionType = "KINGBASE_LSN"
@@ -1005,15 +1005,15 @@ func (c *Connector) MigrationPrechecks(ctx context.Context, needCDC bool) []doma
 		return items
 	}
 	if c.ds.Type == domain.DataSourceGaussDB && !gaussDBCDCEnabled() {
-		items = append(items, domain.PrecheckItem{Name: "gaussdb_logical_cdc_gate", Level: domain.PrecheckFailed, Message: "set QMIGRATION_EXPERIMENTAL_GAUSSDB_NATIVE=1 and QMIGRATION_EXPERIMENTAL_GAUSSDB_LOGICAL_CDC=1 only after qualification"})
+		items = append(items, domain.PrecheckItem{Name: "gaussdb_logical_cdc_gate", Level: domain.PrecheckFailed, Message: "set DTS_EXPERIMENTAL_GAUSSDB_NATIVE=1 and DTS_EXPERIMENTAL_GAUSSDB_LOGICAL_CDC=1 only after qualification"})
 		return items
 	}
 	if c.ds.Type == domain.DataSourceOpenGauss && !openGaussCDCEnabled() {
-		items = append(items, domain.PrecheckItem{Name: "opengauss_logical_cdc_gate", Level: domain.PrecheckFailed, Message: "set QMIGRATION_EXPERIMENTAL_OPENGAUSS_LOGICAL_CDC=1 only after qualification"})
+		items = append(items, domain.PrecheckItem{Name: "opengauss_logical_cdc_gate", Level: domain.PrecheckFailed, Message: "set DTS_EXPERIMENTAL_OPENGAUSS_LOGICAL_CDC=1 only after qualification"})
 		return items
 	}
 	if c.ds.Type == domain.DataSourceKingbase && !kingbaseCDCEnabled() {
-		items = append(items, domain.PrecheckItem{Name: "kingbase_logical_cdc_gate", Level: domain.PrecheckFailed, Message: "set QMIGRATION_EXPERIMENTAL_KINGBASE_LOGICAL_CDC=1 only after qualification"})
+		items = append(items, domain.PrecheckItem{Name: "kingbase_logical_cdc_gate", Level: domain.PrecheckFailed, Message: "set DTS_EXPERIMENTAL_KINGBASE_LOGICAL_CDC=1 only after qualification"})
 		return items
 	}
 	setting := func(name string) (string, error) {

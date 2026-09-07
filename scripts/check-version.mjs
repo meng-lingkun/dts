@@ -13,7 +13,7 @@ if (web !== version) failures.push(`web package version ${web} != ${version}`)
 
 for (const manifest of readdirSync('deployments/kubernetes').filter(name => name.endsWith('.yaml'))) {
   const kubernetes = read(join('deployments/kubernetes', manifest))
-  for (const match of kubernetes.matchAll(/image:\s+qmigration\/(?:server|web):([^\s]+)/g)) {
+  for (const match of kubernetes.matchAll(/image:\s+dts\/(?:server|web):([^\s]+)/g)) {
     if (match[1] !== version) failures.push(`Kubernetes image tag in ${manifest} ${match[1]} != ${version}`)
   }
 }

@@ -8,8 +8,8 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
-	"qmigration/backend/internal/domain"
-	"qmigration/backend/internal/repository"
+	"dts/backend/internal/domain"
+	"dts/backend/internal/repository"
 	"sort"
 	"strings"
 	"sync"
@@ -697,13 +697,13 @@ func (s *Store) ClaimChunk(_ context.Context, workerID string, lease time.Durati
 			engineName = table.Engine
 		}
 		if engineName == "" || engineName == "auto" {
-			engineName = "qmigration"
+			engineName = "dts"
 		}
 		capable := false
 		for _, cap := range capabilities {
-			if cap == engineName || (engineName == "qmigration" && cap == "native") {
+			if cap == engineName || (engineName == "dts" && cap == "native") {
 				// "native" is accepted only as a rolling-upgrade compatibility
-				// alias for pre-unified Workers. New Workers advertise qmigration.
+				// alias for pre-unified Workers. New Workers advertise dts.
 				capable = true
 				break
 			}
@@ -835,7 +835,7 @@ func (s *Store) ClaimEngineJob(_ context.Context, workerID string, lease time.Du
 	for _, c := range capabilities {
 		caps[c] = true
 		if c == "native" || c == "native-mysql-cdc" || c == "native-postgres-cdc" {
-			caps["qmigration"] = true
+			caps["dts"] = true
 		}
 	}
 	changed := false

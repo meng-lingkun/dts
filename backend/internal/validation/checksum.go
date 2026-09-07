@@ -9,8 +9,8 @@ import (
 	"fmt"
 	"hash/fnv"
 	"math/big"
-	"qmigration/backend/internal/connector"
-	"qmigration/backend/internal/domain"
+	"dts/backend/internal/connector"
+	"dts/backend/internal/domain"
 	"strings"
 )
 

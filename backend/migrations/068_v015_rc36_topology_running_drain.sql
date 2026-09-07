@@ -1,4 +1,4 @@
--- QMigration V0.15.0-rc36: cooperative drain of already-running Full-load
+-- DTS V0.15.0-rc36: cooperative drain of already-running Full-load
 -- chunks after their topology enters CIRCUIT_OPEN. Workers stop only after a
 -- committed batch and durable cursor; pending remainders retain topology
 -- binding and remain blocked until the circuit recovers.

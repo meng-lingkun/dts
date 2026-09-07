@@ -41,14 +41,14 @@ type Provider struct {
 }
 
 func FromEnv() (*Provider, error) {
-	u := strings.TrimRight(strings.TrimSpace(os.Getenv("QMIGRATION_SCHEMA_TRANSLATION_URL")), "/")
+	u := strings.TrimRight(strings.TrimSpace(os.Getenv("DTS_SCHEMA_TRANSLATION_URL")), "/")
 	if u == "" {
 		return nil, nil
 	}
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	if strings.HasPrefix(strings.ToLower(u), "https://") {
-		tc := &tls.Config{MinVersion: tls.VersionTLS12, ServerName: strings.TrimSpace(os.Getenv("QMIGRATION_SCHEMA_TRANSLATION_SERVER_NAME"))}
-		if ca := strings.TrimSpace(os.Getenv("QMIGRATION_SCHEMA_TRANSLATION_CA")); ca != "" {
+		tc := &tls.Config{MinVersion: tls.VersionTLS12, ServerName: strings.TrimSpace(os.Getenv("DTS_SCHEMA_TRANSLATION_SERVER_NAME"))}
+		if ca := strings.TrimSpace(os.Getenv("DTS_SCHEMA_TRANSLATION_CA")); ca != "" {
 			pool, _ := x509.SystemCertPool()
 			if pool == nil {
 				pool = x509.NewCertPool()
@@ -60,7 +60,7 @@ func FromEnv() (*Provider, error) {
 		}
 		tr.TLSClientConfig = tc
 	}
-	return &Provider{url: u, token: strings.TrimSpace(os.Getenv("QMIGRATION_SCHEMA_TRANSLATION_TOKEN")), client: &http.Client{Transport: tr, Timeout: 60 * time.Second}}, nil
+	return &Provider{url: u, token: strings.TrimSpace(os.Getenv("DTS_SCHEMA_TRANSLATION_TOKEN")), client: &http.Client{Transport: tr, Timeout: 60 * time.Second}}, nil
 }
 func digest(s string) string { h := sha256.Sum256([]byte(s)); return hex.EncodeToString(h[:]) }
 func (p *Provider) Translate(ctx context.Context, in Request) (Response, error) {
