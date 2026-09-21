@@ -2,7 +2,32 @@
 
 目标平台：Linux x86_64；运行底座为 Kubernetes + containerd。Docker 仅用于构建机制作、导出镜像。
 
-包内包含三套应用镜像（Server/Worker/全部 CDC Runtime、Web、PostgreSQL 17）、kubectl、Linux CLI、元数据 Migration、Kubernetes 清单及运维文档。不再包含 Docker Engine、Compose 或 Docker systemd 服务。
+**Ansible 统一部署版：** `images/all-images.tar.gz` 是唯一镜像压缩包，解压后得到包含全部 13 个镜像的标准多镜像 `all-images.tar`，含当前源码构建的 DTS Server/Worker、Web。单机使用 `automation/inventory.single-node.example.ini`，多机使用 `automation/inventory.multi-node.example.ini`；复制到包外修改节点 IP 后，通过 `bash deploy.sh /root/dts-hosts.ini` 调用 Ansible。远端目录由 `dts_remote_install_dir` 配置，完整卸载会删除该目录及全部内容。单机模式自动启用控制面调度和本地静态存储，多机模式将同一镜像包同步到各节点并让组件从私有仓库拉取。详见 `CLUSTER_INSTALL.md`；不要直接修改校验保护的包内 inventory。
+
+**完整建群/镜像仓库版：** 如果目录内有 `CLUSTER_INSTALL.md`，请优先按该文档执行。每节点运行 `sh install-cluster.sh prepare`；仓库节点运行 `sh install-registry.sh <本机IP>`；其他节点取得客户端证书后运行 `sh configure-registry.sh <证书目录>`；再执行控制节点 init、工作节点 join，最后安装 DTS。此模式使用 HTTPS/mTLS 私有镜像仓库，工作节点及组件从仓库拉取镜像，不需要运行下面精简版的逐节点镜像导入步骤。
+
+包内包含三套应用镜像（Server/Worker/全部 CDC Runtime、Web、PostgreSQL 17）、同版本 kubectl/kubeadm/kubelet、Linux CLI、元数据 Migration、Kubernetes 清单及运维文档。不再包含 Docker Engine、Compose 或 Docker systemd 服务。
+
+### 麒麟 V10 SP3 2403 工具安装（x86_64）
+
+```bash
+sudo sh install-kubernetes-tools.sh
+export PATH="/opt/dts/kubernetes/1.32.5/bin:$PATH"
+```
+
+安装器先验证完整包的 SHA-256，再安装三个工具到版本目录，保留系统既有命令，打印版本及依赖检查结果。未在麒麟实机运行验证，若报告 GLIBC/内核兼容性问题，应停止并匹配该系统的受支持 Kubernetes 版本。工具与已有集群必须遵守 Kubernetes 版本偏差要求，不能直接用新 kubelet 替换旧集群 kubelet。
+
+若包内包含 `install-cluster.sh` 和 `cluster/`，则为完整建群物料版，已附带 containerd/runc/crictl、CNI 和 Flannel、控制面/etcd/CoreDNS/pause 镜像及麒麟 2403 系统 RPM；请先阅读 `CLUSTER_INSTALL.md`，按 prepare → init/join 建立集群。只有工具的精简版不含这些物料。`install-kubernetes-tools.sh` 仅安装三个工具，不会启动服务或初始化集群；尚未建群时仅安装工具不能解决 localhost:8080 报错。CSI/共享存储需按客户环境配置。
+
+已有 kubeadm 集群的控制节点可先执行：
+
+```bash
+export KUBECONFIG=/etc/kubernetes/admin.conf
+./runtime/kubectl get nodes
+sh install-kubernetes.sh
+```
+
+K3s 使用 `/etc/rancher/k3s/k3s.yaml`。若这些文件不存在，请先完成集群初始化；不要把 API 地址直接改成 localhost 的其他端口。
 
 默认管理员为 `admin` / `Cljslrl0620!`，首次登录后请在“用户与权限”修改。安装器为数据库、加密及 Token 生成独立随机 Secret；重复安装保留既有 Secret。
 
@@ -58,6 +83,8 @@ sh install-kubernetes.sh
 在 kubeconfig 所在控制机执行 `sh verify.sh`，核验包内文件、三组 Deployment、Pod 分布和 Server Readiness。
 
 `sh uninstall.sh` 移除应用 Deployment、入口 Service/Ingress、HPA/PDB 和临时镜像预检。保留 namespace、PostgreSQL、PVC、ConfigMap 和所有 Secret。再次安装请使用相同数据库、存储和入口参数；不提供自动删除数据的 `--purge` 选项。
+
+由本离线包通过 Ansible 创建的专用集群，可在原编排机执行 `sudo bash uninstall-all.sh /root/dts-hosts.ini --yes-destroy-all` 完整拆除。该命令要求每个节点存在 DTS 所有权标记，并按 Worker、控制面的顺序运行 `kubeadm reset`，删除 DTS namespace/PVC/PV API 对象、Registry、containerd、CNI、集群证书和同步目录。外部 NFS/CSI 后端的物理数据以及宿主机全局 iptables/nftables 规则不会盲目删除，需按客户环境单独确认。
 
 旧 Docker 部署升级须先备份元数据、共享 Spool 和所有 Secret，再按恢复流程迁移到 Kubernetes。安装器不会自动搬迁旧容器数据或卸载宿主机已有 Docker。
 

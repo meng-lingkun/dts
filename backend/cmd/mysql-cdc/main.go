@@ -12,14 +12,15 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"strconv"
+	"strings"
+	"time"
+
 	"dts/backend/internal/cdc/mysqlbinlog"
 	cdcruntime "dts/backend/internal/cdc/runtime"
 	"dts/backend/internal/connector"
 	mysqlconnector "dts/backend/internal/connector/mysql"
 	"dts/backend/internal/domain"
-	"strconv"
-	"strings"
-	"time"
 )
 
 func env(k, d string) string {
@@ -118,47 +119,6 @@ func selectedSet(raw string) map[string]bool {
 		}
 	}
 	return out
-}
-
-func ddlQuery(q *mysqlbinlog.Query) bool {
-	if q == nil {
-		return false
-	}
-	sql := strings.ToUpper(strings.TrimSpace(q.SQL))
-	for _, p := range []string{"ALTER ", "CREATE ", "DROP ", "TRUNCATE ", "RENAME "} {
-		if strings.HasPrefix(sql, p) {
-			return true
-		}
-	}
-	return false
-}
-
-func ddlTouchesSelected(q *mysqlbinlog.Query, selected map[string]bool) bool {
-	if q == nil {
-		return false
-	}
-	if len(selected) == 0 {
-		return true
-	}
-	schema := strings.ToLower(strings.TrimSpace(q.Schema))
-	sql := strings.ToLower(q.SQL)
-	for key := range selected {
-		i := strings.LastIndex(key, ".")
-		if i <= 0 {
-			continue
-		}
-		ks, table := key[:i], key[i+1:]
-		if schema != "" && ks != schema {
-			continue
-		}
-		// MySQL DDL commonly quotes identifiers with backticks. Checking both
-		// quoted and bare forms is conservative: false positives stop/replay a DDL
-		// rather than silently skipping a potentially relevant schema change.
-		if strings.Contains(sql, "`"+table+"`") || strings.Contains(sql, table) {
-			return true
-		}
-	}
-	return false
 }
 
 func validateNativeFields(fields []domain.CDCField) error {

@@ -240,5 +240,5 @@ func TestGBaseWriteRejectsHashColumnOutsideMigrationKey(t *testing.T) {
 	}
 	_ = c.Close()
 	stop()
-	_ = <-queryCh
+	<-queryCh
 }

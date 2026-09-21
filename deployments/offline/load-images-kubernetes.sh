@@ -34,6 +34,7 @@ import_archive() {
   fi
 }
 
+if [ -f images/all-images.tar.gz ]; then sh unpack-images.sh; fi
 for archive in images/*.tar; do
   echo "Importing $archive"
   import_archive "$archive"

@@ -21,6 +21,23 @@ EXTERNAL_POSTGRES_DATABASE=${DTS_EXTERNAL_POSTGRES_DATABASE:-dts}
 RWX_STORAGE_CLASS=${DTS_RWX_STORAGE_CLASS:-}
 SPOOL_STORAGE_SIZE=${DTS_SPOOL_STORAGE_SIZE:-200Gi}
 CORS_ORIGIN=${DTS_CORS_ORIGIN:-}
+REGISTRY=${DTS_REGISTRY:-}
+if [ -z "$REGISTRY" ] && [ -r /etc/dts/registry.env ]; then
+  . /etc/dts/registry.env
+  REGISTRY=${DTS_REGISTRY:-}
+fi
+case "$REGISTRY" in *[!A-Za-z0-9.:-]*) echo 'ERROR: invalid DTS_REGISTRY (host:port only)' >&2; exit 1 ;; esac
+if [ -d "$ROOT/cluster" ] && [ -z "$REGISTRY" ]; then
+  echo 'ERROR: this full package requires DTS_REGISTRY. Seed the registry and configure node client certificates before installing DTS (see CLUSTER_INSTALL.md).' >&2
+  exit 1
+fi
+apply_images() {
+  if [ -n "$REGISTRY" ]; then
+    sed -e "s|image: dts/|image: $REGISTRY/dts/|g" -e 's/imagePullPolicy: Never/imagePullPolicy: IfNotPresent/g' "$1" | "$KUBECTL" apply -f -
+  else
+    "$KUBECTL" apply -f "$1"
+  fi
+}
 DNS_PATCH_FILE=${DTS_DNS_PATCH_FILE:-}
 # Relative paths are resolved from the package directory after cd above.
 if [ -n "$DNS_PATCH_FILE" ] && [ ! -r "$DNS_PATCH_FILE" ]; then
@@ -71,7 +88,11 @@ fi
 chmod 0755 "$KUBECTL" load-images-kubernetes.sh 2>/dev/null || true
 sha256sum -c SHA256SUMS >/dev/null
 "$KUBECTL" version --client >/dev/null
-"$KUBECTL" cluster-info >/dev/null
+if ! "$KUBECTL" cluster-info --request-timeout=15s >/dev/null; then
+  echo 'ERROR: Kubernetes API is unavailable. Set KUBECONFIG to a valid cluster config (kubeadm: /etc/kubernetes/admin.conf; K3s: /etc/rancher/k3s/k3s.yaml).' >&2
+  echo 'Installing kubectl/kubeadm/kubelet does not create a cluster. Initialize the cluster before installing DTS.' >&2
+  exit 1
+fi
 
 # Read the runtime reported by kubelet; an unrelated Docker installation
 # must not be mistaken for the Kubernetes runtime.
@@ -132,11 +153,11 @@ else
 fi
 
 echo "[2/7] Verifying offline images on every eligible node"
-"$KUBECTL" apply -f kubernetes/image-preflight.yaml >/dev/null
+apply_images kubernetes/image-preflight.yaml >/dev/null
 preflight_active=true
 if ! "$KUBECTL" -n "$NAMESPACE" rollout status daemonset/image-preflight --timeout=180s; then
   "$KUBECTL" -n "$NAMESPACE" get pods -l app=dts-image-preflight -o wide >&2 || true
-  echo "ERROR: at least one node is missing an offline image. Run 'sudo sh load-images-kubernetes.sh' on every eligible node." >&2
+  echo "ERROR: at least one node cannot start an image. Registry mode: check node certificates, registry connectivity and image tags; archive mode: import images on every eligible node." >&2
   exit 1
 fi
 "$KUBECTL" -n "$NAMESPACE" delete daemonset image-preflight --wait=true >/dev/null
@@ -149,7 +170,7 @@ if [ -n "$EXTERNAL_POSTGRES_HOST" ]; then
     echo "WARNING: an older bundled PostgreSQL StatefulSet still exists but will not be used." >&2
   fi
 else
-  "$KUBECTL" apply -f kubernetes/postgres.yaml
+  apply_images kubernetes/postgres.yaml
   "$KUBECTL" -n "$NAMESPACE" rollout status statefulset/postgres --timeout=300s
 fi
 
@@ -164,7 +185,7 @@ if [ -n "$RWX_STORAGE_CLASS" ]; then
 else
   "$KUBECTL" apply -f kubernetes/spool-pvc.yaml
 fi
-"$KUBECTL" apply -f kubernetes/dts.yaml
+apply_images kubernetes/dts.yaml
 if [ -n "$DNS_PATCH_FILE" ]; then
   # Validate both targets before changing either. Merge replaces hostAliases as
   # a whole, so removed mappings do not survive an update.

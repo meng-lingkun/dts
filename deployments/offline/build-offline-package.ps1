@@ -1,7 +1,8 @@
 param(
     [string]$OutputDirectory = "",
     [ValidateSet("amd64")][string]$Architecture = "amd64",
-    [switch]$FinalizeOnly
+    [switch]$FinalizeOnly,
+    [string]$ClusterPayloadDirectory = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -46,7 +47,7 @@ try {
 
 Write-Host "[2/8] Cross-compiling Linux DTS binaries"
 $commands = @(
-    "server", "worker", "dtsctl", "cdc-bridge", "binlog-inspect",
+    "server", "worker", "dtsctl", "certgen", "cdc-bridge", "binlog-inspect",
     "mysql-cdc", "tidb-cdc", "postgres-cdc", "opengauss-cdc", "gaussdb-cdc",
     "sqlserver-cdc", "oracle-cdc", "db2-cdc", "dameng-cdc", "gbase-cdc", "gbase8s-cdc"
 )
@@ -115,16 +116,21 @@ function Get-VerifiedRuntimeFile {
 }
 
 Get-VerifiedRuntimeFile -Uri "https://dl.k8s.io/release/v$($runtimeValues.KUBECTL_VERSION)/bin/linux/amd64/kubectl" -Destination $kubectlBinary -ExpectedSHA256 $runtimeValues.KUBECTL_SHA256
+foreach ($tool in "kubeadm", "kubelet") {
+    Get-VerifiedRuntimeFile -Uri "https://dl.k8s.io/release/v$($runtimeValues.KUBECTL_VERSION)/bin/linux/amd64/$tool" -Destination (Join-Path $runtimeDirectory $tool) -ExpectedSHA256 $runtimeValues["$($tool.ToUpperInvariant())_SHA256"]
+}
 Write-Host "[5/8] Staging installer and operational material"
-foreach ($file in "install.sh", "install-kubernetes.sh", "load-images-kubernetes.sh", "verify.sh", "uninstall.sh", "README.md") {
+foreach ($file in "install.sh", "install-kubernetes.sh", "install-kubernetes-tools.sh", "load-images-kubernetes.sh", "verify.sh", "uninstall.sh", "uninstall-all.sh", "README.md") {
     Copy-Item -LiteralPath (Join-Path $scriptDirectory $file) -Destination $stage
 }
 Copy-Item -Path (Join-Path $repositoryRoot "deployments\kubernetes\*.yaml") -Destination (Join-Path $stage "kubernetes")
 Copy-Item -LiteralPath (Join-Path $repositoryRoot "VERSION") -Destination $stage
 if (-not $FinalizeOnly) {
-    Copy-Item -LiteralPath (Join-Path $binaryDirectory "dtsctl") -Destination (Join-Path $stage "bin")
-} elseif (-not (Test-Path -LiteralPath (Join-Path $stage "bin/dtsctl"))) {
-    throw "FinalizeOnly requires a staged dtsctl from the matching image release"
+    foreach ($binary in "dtsctl", "dts-certgen") {
+        Copy-Item -LiteralPath (Join-Path $binaryDirectory $binary) -Destination (Join-Path $stage "bin")
+    }
+} elseif (-not (Test-Path -LiteralPath (Join-Path $stage "bin/dtsctl")) -or -not (Test-Path -LiteralPath (Join-Path $stage "bin/dts-certgen"))) {
+    throw "FinalizeOnly requires staged dtsctl and dts-certgen binaries from the matching release"
 }
 Copy-Item -Path (Join-Path $repositoryRoot "backend\migrations\*.sql") -Destination (Join-Path $stage "migrations")
 foreach ($doc in "USER_GUIDE.md", "MAINTENANCE_GUIDE.md", "PROJECT_ARCHITECTURE.md", "ARCHITECTURE_ASSESSMENT.md", "DTS_RENAME_UPGRADE.md") {
@@ -132,7 +138,76 @@ foreach ($doc in "USER_GUIDE.md", "MAINTENANCE_GUIDE.md", "PROJECT_ARCHITECTURE.
 }
 
 Write-Host "[6/8] Writing package manifest"
-$imageFiles = Get-ChildItem -LiteralPath (Join-Path $stage "images") -File | Sort-Object Name
+if ($ClusterPayloadDirectory) {
+    $clusterSource = [System.IO.Path]::GetFullPath($ClusterPayloadDirectory)
+    foreach ($required in "runtime/containerd-static-2.3.5-linux-amd64.tar.gz", "runtime/runc.amd64", "runtime/crictl-v1.32.0-linux-amd64.tar.gz", "runtime/cni-plugins-linux-amd64-v1.9.1.tgz", "network/kube-flannel.yaml", "rpms/repodata/repomd.xml", "kylin-rpms.json", "upstream-tools.json") {
+    if (-not (Test-Path -LiteralPath (Join-Path $clusterSource $required))) { throw "Missing cluster payload: $required" }
+    }
+    if (Get-ChildItem -LiteralPath $clusterSource -Recurse -File | Where-Object { $_.Name -match '\.(download|partial)$' }) { throw "Incomplete cluster payload files" }
+    $repomdText = [System.IO.File]::ReadAllText((Join-Path $clusterSource "rpms/repodata/repomd.xml"))
+    if ($repomdText -notmatch '<repomd\s+xmlns=["'']http://linux\.duke\.edu/metadata/repo["'']' -or $repomdText -match '<ns\d+:repomd') {
+        throw "Kylin RPM repomd.xml must use the canonical default namespace; rebuild the cluster payload"
+    }
+    $clusterStage = Join-Path $stage "cluster"
+    New-Item -ItemType Directory -Path $clusterStage -Force | Out-Null
+    foreach ($directory in "runtime", "network", "rpms", "images") {
+        Copy-Item -LiteralPath (Join-Path $clusterSource $directory) -Destination $clusterStage -Recurse -Force
+    }
+    foreach ($file in "kylin-rpms.json", "upstream-tools.json", "image-provenance.json") { Copy-Item -LiteralPath (Join-Path $clusterSource $file) -Destination $clusterStage }
+    Copy-Item -Path (Join-Path $scriptDirectory "cluster/*") -Destination $clusterStage -Force
+    Copy-Item -LiteralPath (Join-Path $scriptDirectory "cluster-images.txt") -Destination $clusterStage
+    Copy-Item -LiteralPath (Join-Path $scriptDirectory "install-cluster.sh"), (Join-Path $scriptDirectory "configure-kylin-419-cgroup.sh"), (Join-Path $scriptDirectory "restore-kylin-419-cgroup.sh") -Destination $stage
+    Copy-Item -LiteralPath (Join-Path $scriptDirectory "install-registry.sh"), (Join-Path $scriptDirectory "configure-registry.sh") -Destination $stage
+    Copy-Item -LiteralPath (Join-Path $scriptDirectory "deploy.sh"), (Join-Path $scriptDirectory "unpack-images.sh") -Destination $stage
+    Copy-Item -LiteralPath (Join-Path $scriptDirectory "automation") -Destination $stage -Recurse -Force
+    Copy-Item -LiteralPath (Join-Path $scriptDirectory "CLUSTER_INSTALL.md") -Destination $stage
+    $imageRefs = Get-Content -LiteralPath (Join-Path $scriptDirectory "cluster-images.txt")
+    foreach ($ref in $imageRefs) {
+        $file = $ref.Replace('/', '_').Replace(':', '_') + '.tar'
+        if (-not (Test-Path -LiteralPath (Join-Path $clusterStage "images/$file"))) { throw "Missing cluster image $ref" }
+    }
+    $combinedTar = Join-Path $stage "images/all-images.tar"
+    $combinedGzip = "$combinedTar.gz"
+    $mergeInputs = @(Get-ChildItem -LiteralPath (Join-Path $stage "images"), (Join-Path $clusterStage "images") -Filter '*.tar' -File | Where-Object Name -ne 'all-images.tar' | ForEach-Object FullName)
+    $previousTar = Join-Path $stage '.previous-images.tar'
+    if (-not (Get-ChildItem -LiteralPath (Join-Path $stage "images") -Filter 'dts-server-*.tar') -and (Test-Path -LiteralPath $combinedGzip)) {
+        $inputStream = [IO.File]::OpenRead($combinedGzip)
+        $inflate = [IO.Compression.GZipStream]::new($inputStream, [IO.Compression.CompressionMode]::Decompress)
+        $outputStream = [IO.File]::Create($previousTar)
+        try { $inflate.CopyTo($outputStream) } finally { $outputStream.Dispose(); $inflate.Dispose(); $inputStream.Dispose() }
+        $mergeInputs += $previousTar
+    }
+    $mergeList = Join-Path $stage '.merge-inputs.txt'
+    [IO.File]::WriteAllLines($mergeList, $mergeInputs, [Text.UTF8Encoding]::new($false))
+    Push-Location (Join-Path $repositoryRoot 'tools/offline-image-builder')
+    try {
+        go run . --merge-list $mergeList --merged-archive $combinedTar
+        if ($LASTEXITCODE -ne 0) { throw 'Multi-image archive merge failed' }
+    } finally { Pop-Location }
+    if (Test-Path -LiteralPath "$combinedTar.sha256") { Remove-Item -LiteralPath "$combinedTar.sha256" -Force }
+    $inputStream = [IO.File]::OpenRead($combinedTar)
+    $outputStream = [IO.File]::Create($combinedGzip)
+    $deflate = [IO.Compression.GZipStream]::new($outputStream, [IO.Compression.CompressionLevel]::Optimal)
+    try { $inputStream.CopyTo($deflate) } finally { $deflate.Dispose(); $outputStream.Dispose(); $inputStream.Dispose() }
+    foreach ($file in @($mergeInputs) + @($mergeList, $combinedTar)) {
+        if (-not ([IO.Path]::GetFullPath($file)).StartsWith($stage + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw 'Refusing cleanup outside stage' }
+        Remove-Item -LiteralPath $file -Force
+    }
+} elseif ($FinalizeOnly -and (Test-Path -LiteralPath (Join-Path $stage "cluster/runtime/containerd-static-2.3.5-linux-amd64.tar.gz"))) {
+    # Operational-only releases reuse the already verified unified image archive and
+    # cluster payload, but must refresh every script, inventory and configuration file.
+    $clusterStage = Join-Path $stage "cluster"
+    Copy-Item -Path (Join-Path $scriptDirectory "cluster/*") -Destination $clusterStage -Force
+    Copy-Item -LiteralPath (Join-Path $scriptDirectory "cluster-images.txt") -Destination $clusterStage -Force
+    Copy-Item -LiteralPath (Join-Path $scriptDirectory "install-cluster.sh"), (Join-Path $scriptDirectory "configure-kylin-419-cgroup.sh"), (Join-Path $scriptDirectory "restore-kylin-419-cgroup.sh") -Destination $stage -Force
+    Copy-Item -LiteralPath (Join-Path $scriptDirectory "install-registry.sh"), (Join-Path $scriptDirectory "configure-registry.sh") -Destination $stage -Force
+    Copy-Item -LiteralPath (Join-Path $scriptDirectory "deploy.sh"), (Join-Path $scriptDirectory "unpack-images.sh") -Destination $stage -Force
+    if (Test-Path -LiteralPath (Join-Path $stage "automation")) { Remove-Item -LiteralPath (Join-Path $stage "automation") -Recurse -Force }
+    Copy-Item -LiteralPath (Join-Path $scriptDirectory "automation") -Destination $stage -Recurse -Force
+    Copy-Item -LiteralPath (Join-Path $scriptDirectory "CLUSTER_INSTALL.md") -Destination $stage -Force
+}
+$hasClusterPayload = Test-Path -LiteralPath (Join-Path $stage "cluster/runtime/containerd-static-2.3.5-linux-amd64.tar.gz")
+$imageFiles = Get-ChildItem -LiteralPath (Join-Path $stage "images") -File | Where-Object { $_.Extension -in '.tar', '.gz' } | Sort-Object Name
 $manifest = [ordered]@{
     name = "DTS offline installation package"
     version = $version
@@ -141,15 +216,23 @@ $manifest = [ordered]@{
     base_images = @("alpine:3.22", "nginxinc/nginx-unprivileged:1.29-alpine", "postgres:17")
     deployment = "kubernetes"
     node_runtime = "containerd (provided by existing Kubernetes cluster)"
+    cgroup_profiles = @("Kylin 4.19/cgroup v1 compatibility", "kernel 5.10+/cgroup v2")
+    cluster_payload = [bool]$hasClusterPayload
+    target_os = "Kylin V10 SP3 2403 x86_64"
     kubernetes_client = [ordered]@{
         kubectl_version = $runtimeValues.KUBECTL_VERSION
         kubectl_archive = "runtime/kubectl"
         kubectl_sha256 = $runtimeValues.KUBECTL_SHA256
+        kubeadm_archive = "runtime/kubeadm"
+        kubeadm_sha256 = $runtimeValues.KUBEADM_SHA256
+        kubelet_archive = "runtime/kubelet"
+        kubelet_sha256 = $runtimeValues.KUBELET_SHA256
     }
     images = @($imageFiles | ForEach-Object {
         [ordered]@{ archive = "images/$($_.Name)"; bytes = $_.Length; sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() }
     })
 }
+if ($hasClusterPayload) { $manifest.node_runtime = "containerd 2.3.5 bundled; offline kubeadm bootstrap available" }
 $manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $stage "manifest.json") -Encoding utf8
 
 # Fail closed when an old Compose payload is accidentally reused.
@@ -159,7 +242,7 @@ foreach ($obsolete in "docker-compose.offline.yml", "install-container-runtime.s
 if (Get-ChildItem -LiteralPath $runtimeDirectory -Filter "docker-*.tgz") { throw "Docker Engine must not be shipped in the Kubernetes package" }
 # Normalize Linux text assets even when checked out with core.autocrlf=true.
 $utf8 = [System.Text.UTF8Encoding]::new($false)
-Get-ChildItem -LiteralPath $stage -File -Recurse | Where-Object { $_.Extension -in ".sh", ".env", ".yaml", ".yml", ".md", ".sql", ".json" -or $_.Name -eq "VERSION" } | ForEach-Object {
+Get-ChildItem -LiteralPath $stage -File -Recurse | Where-Object { $_.Extension -in ".sh", ".env", ".yaml", ".yml", ".md", ".sql", ".json", ".service", ".toml", ".txt" -or $_.Name -eq "VERSION" } | ForEach-Object {
     $content = [System.IO.File]::ReadAllText($_.FullName).Replace("`r`n", "`n")
     [System.IO.File]::WriteAllText($_.FullName, $content, $utf8)
 }

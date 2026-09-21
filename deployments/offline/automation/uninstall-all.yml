@@ -1,0 +1,215 @@
+---
+- name: Validate destructive request and DTS ownership
+  hosts: nodes
+  become: true
+  gather_facts: false
+  vars:
+    dts_install_root: "{{ dts_remote_install_dir | default('/opt/dts-offline', true) }}"
+    dts_single_node_storage_root: "{{ dts_single_node_storage_dir | default('/var/lib/dts-single-node', true) }}"
+  tasks:
+    - name: Require the explicit destruction token
+      assert:
+        that:
+          - dts_destroy_confirmation | default('') == 'DESTROY_DTS_CLUSTER'
+        fail_msg: Refusing full uninstall without the destruction token
+      run_once: true
+    - name: Check the DTS cluster ownership marker
+      stat:
+        path: /var/lib/dts-cluster-bootstrap/owned
+      register: dts_owned_cluster
+    - name: Refuse to destroy a cluster not created by this installer
+      assert:
+        that:
+          - dts_owned_cluster.stat.exists
+        fail_msg: This node has no DTS ownership marker; refusing to reset it
+    - name: Validate the configured remote installation directory before deletion
+      assert:
+        that:
+          - dts_install_root.startswith('/')
+          - dts_install_root | length > 5
+          - not dts_install_root.endswith('/')
+          - "'..' not in dts_install_root.split('/')"
+          - dts_install_root not in ['/', '/bin', '/boot', '/dev', '/etc', '/home', '/opt', '/proc', '/root', '/run', '/sbin', '/sys', '/usr', '/var']
+        fail_msg: Refusing to delete an unsafe dts_remote_install_dir
+    - name: Validate the single-node data directory before deletion
+      assert:
+        that:
+          - dts_single_node_storage_root.startswith('/')
+          - dts_single_node_storage_root | length > 5
+          - not dts_single_node_storage_root.endswith('/')
+          - "'..' not in dts_single_node_storage_root.split('/')"
+          - dts_single_node_storage_root not in ['/', '/bin', '/boot', '/dev', '/etc', '/home', '/opt', '/proc', '/root', '/run', '/sbin', '/sys', '/usr', '/var', '/var/lib']
+        fail_msg: Refusing to delete an unsafe dts_single_node_storage_dir
+      when:
+        - groups['workers'] | default([]) | length == 0
+        - dts_single_node_local_storage | default(true) | bool
+
+- name: Delete DTS workloads and Kubernetes storage objects
+  hosts: control_plane
+  become: true
+  gather_facts: false
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  tasks:
+    - name: Record persistent volumes claimed by DTS
+      shell: >-
+        /usr/local/bin/kubectl get pv
+        -o jsonpath='{range .items[?(@.spec.claimRef.namespace=="dts")]}{.metadata.name}{"\n"}{end}'
+      register: dts_persistent_volumes
+      changed_when: false
+    - name: Delete the DTS namespace including PostgreSQL and PVCs
+      command: /usr/local/bin/kubectl delete namespace dts --ignore-not-found --wait=true --timeout=300s
+    - name: Delete retained DTS persistent-volume API objects
+      command: "/usr/local/bin/kubectl delete pv {{ item }} --ignore-not-found --wait=true --timeout=120s"
+      loop: "{{ dts_persistent_volumes.stdout_lines }}"
+      when: item | length > 0
+    - name: Explain external storage boundary
+      debug:
+        msg: >-
+          DTS Kubernetes storage objects were deleted. Storage with a Retain reclaim policy,
+          and directories or volumes managed by an external NFS/CSI backend, must be erased
+          on that backend if physical data destruction is required.
+
+- name: Stop the private registry before stopping containerd
+  hosts: registry
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Disable and stop the DTS registry service
+      systemd:
+        name: dts-registry
+        state: stopped
+        enabled: false
+      failed_when: false
+
+- name: Remove Kubernetes tools before resetting the cluster and deleting images
+  hosts: nodes
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Stop and disable kubelet before removing its binary
+      systemd:
+        name: kubelet
+        state: stopped
+        enabled: false
+      failed_when: false
+    - name: Stage a private kubeadm reset helper outside the installation path
+      copy:
+        src: /usr/local/bin/kubeadm
+        dest: /run/dts-kubeadm-reset
+        remote_src: true
+        mode: '0700'
+    - name: Remove kubectl kubelet and kubeadm from their installed paths first
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /usr/local/bin/kubectl
+        - /usr/local/bin/kubelet
+        - /usr/local/bin/kubeadm
+
+- name: Reset worker nodes before the control plane
+  hosts: workers
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Reset kubeadm worker state with the staged helper
+      command: /run/dts-kubeadm-reset reset --force --cri-socket unix:///run/containerd/containerd.sock
+
+- name: Reset the control plane
+  hosts: control_plane
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Reset kubeadm control-plane and stacked-etcd state with the staged helper
+      command: /run/dts-kubeadm-reset reset --force --cri-socket unix:///run/containerd/containerd.sock
+
+- name: Remove DTS-owned Kubernetes and containerd files
+  hosts: nodes
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Restore boot cgroup arguments changed for Kylin 4.19
+      command: "sh {{ dts_remote_install_dir | default('/opt/dts-offline', true) }}/restore-kylin-419-cgroup.sh"
+      register: dts_restore_cgroup
+      changed_when: dts_restore_cgroup.rc == 194
+      failed_when: dts_restore_cgroup.rc not in [0, 194]
+    - name: Disable DTS-owned node services
+      systemd:
+        name: "{{ item }}"
+        state: stopped
+        enabled: false
+      loop: [containerd]
+      failed_when: false
+    - name: Remove Flannel virtual interfaces
+      shell: "ip link show {{ item }} >/dev/null 2>&1 && ip link delete {{ item }} || true"
+      loop: [cni0, flannel.1]
+      changed_when: false
+    - name: Remove DTS-owned node files and runtime data
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/kubernetes
+        - /var/lib/kubelet
+        - /var/lib/etcd
+        - /etc/cni/net.d
+        - /var/lib/cni
+        - /run/flannel
+        - /opt/cni/bin
+        - /etc/containerd
+        - /var/lib/containerd
+        - /run/containerd
+        - /etc/dts
+        - /var/lib/dts-cluster-bootstrap
+        - /etc/modules-load.d/dts-kubernetes.conf
+        - /etc/sysctl.d/99-dts-kubernetes.conf
+        - /etc/systemd/system/kubelet.service
+        - /etc/systemd/system/containerd.service
+        - /etc/yum.repos.d/dts-offline.repo
+        - /usr/local/bin/containerd
+        - /usr/local/bin/containerd-shim-runc-v2
+        - /usr/local/bin/containerd-stress
+        - /usr/local/bin/ctr
+        - /usr/local/bin/crictl
+        - /usr/local/sbin/runc
+        - /run/dts-kubeadm-reset
+        - /root/dts-join.generated.yaml
+        - /root/dts-registry-client
+    - name: Reload systemd after unit removal
+      systemd:
+        daemon_reload: true
+    - name: Remove single-node PostgreSQL and CDC spool data
+      file:
+        path: "{{ dts_single_node_storage_dir | default('/var/lib/dts-single-node', true) }}"
+        state: absent
+      when:
+        - groups['workers'] | default([]) | length == 0
+        - dts_single_node_local_storage | default(true) | bool
+    - name: Remove the configured installation directory and all remaining contents last
+      file:
+        path: "{{ dts_remote_install_dir | default('/opt/dts-offline', true) }}"
+        state: absent
+    - name: Reboot after restoring the original cgroup hierarchy
+      reboot:
+        reboot_timeout: 900
+        connect_timeout: 10
+        post_reboot_delay: 10
+      when: dts_restore_cgroup.rc == 194
+
+- name: Remove private registry data and credentials
+  hosts: registry
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Remove registry service, certificates and image data
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/systemd/system/dts-registry.service
+        - /etc/dts-registry
+        - /var/lib/dts-registry
+    - name: Reload systemd after registry removal
+      systemd:
+        daemon_reload: true

@@ -7,7 +7,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"sort"
 	"strings"
 	"time"
 
@@ -432,13 +431,4 @@ func fatalIf(err error) {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-}
-
-func sortedCaps(in []connector.Capability) []string {
-	out := make([]string, len(in))
-	for i, c := range in {
-		out[i] = string(c)
-	}
-	sort.Strings(out)
-	return out
 }

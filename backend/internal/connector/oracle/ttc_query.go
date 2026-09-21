@@ -472,36 +472,3 @@ func decodeOracleNumberString(b []byte) (string, error) {
 func (c *Connector) executeTTCSelect(ctx context.Context, accepted *acceptedSession, proto ttcProtocolInfo, data ttcDataTypeInfo, sql string) (oracleTTCQueryResult, error) {
 	return c.executeTTCSelectBatched(ctx, accepted, proto, data, sql, 16, 16)
 }
-
-func parseTTCQuerySummary(payload []byte, ttcVersion byte, proto ttcProtocolInfo) error {
-	r := newTTCDecoder(payload)
-	hasEOS := len(proto.CompileTimeCaps) > 15 && proto.CompileTimeCaps[15]&1 != 0
-	hasFSAP := len(proto.CompileTimeCaps) > 16 && proto.CompileTimeCaps[16]&1 != 0
-	if hasEOS {
-		if _, err := r.compactUint(4); err != nil {
-			return err
-		}
-	}
-	if ttcVersion >= 3 && hasFSAP {
-		if _, err := r.compactUint(2); err != nil {
-			return err
-		}
-	}
-	if _, err := r.compactUint(4); err != nil {
-		return err
-	} // current row
-	ret, err := r.compactUint(2)
-	if err != nil {
-		return err
-	}
-	if ret == 1403 { // no more rows
-		return nil
-	}
-	if ret != 0 {
-		return fmt.Errorf("Oracle TTC SELECT failed with ORA-%05d", ret)
-	}
-	// The remaining OER fields vary by TTC version/capabilities. A zero return
-	// is sufficient to terminate this bounded probe, but production execution
-	// remains capability-gated until the complete summary is real-Oracle tested.
-	return nil
-}

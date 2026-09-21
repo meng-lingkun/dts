@@ -175,7 +175,7 @@ func newMux(provider gbase8scdc.Agent, token string) http.Handler {
 		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 		defer cancel()
 		if err := provider.Health(ctx); err != nil {
-			http.Error(w, err.Error(), 503)
+			http.Error(w, err.Error(), http.StatusServiceUnavailable)
 			return
 		}
 		info := gbase8scdc.ProviderInfo{}
@@ -210,7 +210,7 @@ func newMux(provider gbase8scdc.Agent, token string) http.Handler {
 	}))
 	mux.HandleFunc("/v1/checkpoint", auth(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			http.Error(w, "method", 405)
+			http.Error(w, "method", http.StatusMethodNotAllowed)
 			return
 		}
 		var req gbase8scdc.CheckpointRequest
@@ -229,7 +229,7 @@ func newMux(provider gbase8scdc.Agent, token string) http.Handler {
 	}))
 	mux.HandleFunc("/v1/records", auth(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			http.Error(w, "method", 405)
+			http.Error(w, "method", http.StatusMethodNotAllowed)
 			return
 		}
 		var req gbase8scdc.ReadRequest

@@ -4,16 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"dts/backend/internal/connector"
-	"dts/backend/internal/domain"
-	"dts/backend/internal/engine"
-	"dts/backend/internal/repository"
-	"dts/backend/internal/repository/memory"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"dts/backend/internal/connector"
+	"dts/backend/internal/domain"
+	"dts/backend/internal/engine"
+	"dts/backend/internal/repository"
+	"dts/backend/internal/repository/memory"
 )
 
 type rc44ValidationPageRepo struct {
@@ -1091,7 +1092,7 @@ type autoConnector struct {
 }
 
 func (f autoFactory) New(domain.DataSource) (connector.Connector, error) {
-	return autoConnector{numeric: f.numeric, noPK: f.noPK, composite: f.composite}, nil
+	return autoConnector(f), nil
 }
 func (c autoConnector) TestConnection(context.Context) error       { return nil }
 func (c autoConnector) GetVersion(context.Context) (string, error) { return "fake", nil }
@@ -2575,7 +2576,7 @@ type adaptiveBoundaryState struct {
 type adaptiveBoundaryConnector struct{ state *adaptiveBoundaryState }
 
 func (f adaptiveBoundaryFactory) New(domain.DataSource) (connector.Connector, error) {
-	return adaptiveBoundaryConnector{state: f.state}, nil
+	return adaptiveBoundaryConnector(f), nil
 }
 func (c adaptiveBoundaryConnector) TestConnection(context.Context) error       { return nil }
 func (c adaptiveBoundaryConnector) GetVersion(context.Context) (string, error) { return "fake", nil }
@@ -2719,7 +2720,7 @@ type runtimeLoadFactory struct{ state *runtimeLoadState }
 type runtimeLoadConnector struct{ state *runtimeLoadState }
 
 func (f runtimeLoadFactory) New(domain.DataSource) (connector.Connector, error) {
-	return runtimeLoadConnector{state: f.state}, nil
+	return runtimeLoadConnector(f), nil
 }
 func (c runtimeLoadConnector) TestConnection(context.Context) error       { return nil }
 func (c runtimeLoadConnector) GetVersion(context.Context) (string, error) { return "fake", nil }

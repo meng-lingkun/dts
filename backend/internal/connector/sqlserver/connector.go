@@ -6,13 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"dts/backend/internal/connector"
-	"dts/backend/internal/domain"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"dts/backend/internal/connector"
+	"dts/backend/internal/domain"
 )
 
 const (
@@ -1185,19 +1185,6 @@ func buildPreloginPacket() []byte {
 	packet[6] = 1
 	copy(packet[8:], payload)
 	return packet
-}
-func readTDSPacket(r io.Reader) ([]byte, error) {
-	h := make([]byte, 8)
-	if _, e := io.ReadFull(r, h); e != nil {
-		return nil, e
-	}
-	ln := int(binary.BigEndian.Uint16(h[2:4]))
-	if ln < 8 || ln > 1<<20 {
-		return nil, fmt.Errorf("invalid TDS packet length %d", ln)
-	}
-	b := make([]byte, ln-8)
-	_, e := io.ReadFull(r, b)
-	return b, e
 }
 func parsePreloginVersion(body []byte) (string, error) {
 	pi, e := parsePrelogin(body)

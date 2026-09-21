@@ -11,6 +11,14 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
+	"strconv"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"syscall"
+	"time"
+
 	"dts/backend/internal/connector"
 	damengconnector "dts/backend/internal/connector/dameng"
 	db2connector "dts/backend/internal/connector/db2"
@@ -23,13 +31,6 @@ import (
 	"dts/backend/internal/domain"
 	fullpipeline "dts/backend/internal/pipeline"
 	"dts/backend/internal/transform"
-	"runtime"
-	"strconv"
-	"strings"
-	"sync"
-	"sync/atomic"
-	"syscall"
-	"time"
 )
 
 type runtimeWorker struct {
@@ -346,13 +347,6 @@ func post(url string, in, out any) error { _, err := doJSON(http.MethodPost, url
 func credentialToDS(c domain.DataSourceCredential) domain.DataSource {
 	return domain.DataSource{Type: c.Type, Host: c.Host, Port: c.Port, Username: c.Username, Password: c.Password, Database: c.Database, Schema: c.Schema, JDBCURL: c.JDBCURL, DriverClass: c.DriverClass, CDCURL: c.CDCURL, TLSMode: c.TLSMode, TLSServerName: c.TLSServerName, TLSCACert: c.TLSCACert, TLSClientCert: c.TLSClientCert, TLSClientKey: c.TLSClientKey}
 }
-func throttle(bytes int64, mbps int64, started time.Time) {
-	if mbps <= 0 {
-		return
-	}
-	throttleBytesPerSec(bytes, mbps*(1<<20), started)
-}
-
 func throttleBytesPerSec(bytes, bytesPerSec int64, started time.Time) {
 	if bytesPerSec <= 0 || bytes <= 0 {
 		return

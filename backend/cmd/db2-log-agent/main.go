@@ -192,7 +192,7 @@ func (s *server) bootstrap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != http.MethodPost {
-		http.Error(w, "POST required", 405)
+		http.Error(w, "POST required", http.StatusMethodNotAllowed)
 		return
 	}
 	var req db2log.BootstrapRequest
@@ -248,7 +248,7 @@ func (s *server) bootstrap(w http.ResponseWriter, r *http.Request) {
 			scanned++
 			bytesScanned += len(e.RawBase64)
 			if scanned > 2000000 || bytesScanned > 512<<20 {
-				http.Error(w, "descriptor bootstrap scan exceeded safety bound", 422)
+				http.Error(w, "descriptor bootstrap scan exceeded safety bound", http.StatusUnprocessableEntity)
 				return
 			}
 		}

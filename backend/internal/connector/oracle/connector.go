@@ -10,12 +10,13 @@ import (
 	"io"
 	"net"
 	"os"
-	"dts/backend/internal/connector"
-	"dts/backend/internal/domain"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"dts/backend/internal/connector"
+	"dts/backend/internal/domain"
 )
 
 const (
@@ -328,24 +329,6 @@ func (c *Connector) dialEndpoint(ctx context.Context, host string, port int, pro
 		}
 	}
 	return d.DialContext(ctx, "tcp", addr)
-}
-
-func (c *Connector) probeEndpoint(ctx context.Context, host string, port int, service, protocol string) (byte, []byte, error) {
-	nc, err := c.dialEndpoint(ctx, host, port, protocol)
-	if err != nil {
-		return 0, nil, err
-	}
-	defer nc.Close()
-	_ = nc.SetDeadline(time.Now().Add(5 * time.Second))
-	descriptor := fmt.Sprintf("(DESCRIPTION=(CONNECT_DATA=(SERVICE_NAME=%s)(CID=(PROGRAM=DTS)(HOST=dts)(USER=dts))))", sanitizeTNSValue(service))
-	if _, err = nc.Write(buildConnectPacket(descriptor)); err != nil {
-		return 0, nil, fmt.Errorf("TNS CONNECT write: %w", err)
-	}
-	typ, body, err := readTNSPacket(nc)
-	if err != nil {
-		return 0, nil, fmt.Errorf("TNS response: %w", err)
-	}
-	return typ, body, nil
 }
 
 func parseRedirectTarget(v string) (redirectTarget, error) {

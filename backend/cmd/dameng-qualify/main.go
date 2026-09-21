@@ -217,11 +217,7 @@ func main() {
 					if err != nil {
 						return "", nil, err
 					}
-					dc, ok := snapRaw.(connector.DataConnector)
-					if !ok {
-						return "", nil, fmt.Errorf("validation snapshot does not expose data connector")
-					}
-					b, err := dc.ReadBatch(ctx, connector.ReadBatchRequest{Schema: ds.Schema, Table: strings.TrimSpace(*table), PrimaryKey: md.PrimaryKey, PrimaryKeys: md.PrimaryKeys, Columns: md.Columns, UseKeyset: true, Limit: *sampleRows})
+					b, err := snapRaw.ReadBatch(ctx, connector.ReadBatchRequest{Schema: ds.Schema, Table: strings.TrimSpace(*table), PrimaryKey: md.PrimaryKey, PrimaryKeys: md.PrimaryKeys, Columns: md.Columns, UseKeyset: true, Limit: *sampleRows})
 					if err != nil {
 						return "", nil, err
 					}

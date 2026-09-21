@@ -1,0 +1,10 @@
+registry.k8s.io/kube-apiserver:v1.32.5
+registry.k8s.io/kube-controller-manager:v1.32.5
+registry.k8s.io/kube-scheduler:v1.32.5
+registry.k8s.io/kube-proxy:v1.32.5
+registry.k8s.io/etcd:3.5.16-0
+registry.k8s.io/coredns/coredns:v1.11.3
+registry.k8s.io/pause:3.10
+ghcr.io/flannel-io/flannel:v0.28.9
+ghcr.io/flannel-io/flannel-cni-plugin:v1.9.1-flannel3
+docker.io/library/registry:3

@@ -7,16 +7,17 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"dts/backend/internal/domain"
-	"dts/backend/internal/repository"
-	"dts/backend/internal/repository/memory"
-	securerepo "dts/backend/internal/repository/secure"
-	"dts/backend/internal/security"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"dts/backend/internal/domain"
+	"dts/backend/internal/repository"
+	"dts/backend/internal/repository/memory"
+	securerepo "dts/backend/internal/repository/secure"
+	"dts/backend/internal/security"
 )
 
 type fakeS3 struct {
@@ -156,7 +157,7 @@ func (f *fakeS3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		f.objects[key] = append([]byte(nil), b...)
 		f.modified[key] = time.Now().UTC()
-		w.WriteHeader(200)
+		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("<CopyObjectResult/>"))
 		return
 	}
@@ -176,9 +177,9 @@ func (f *fakeS3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write(b)
 	case http.MethodDelete:
 		delete(f.objects, key)
-		w.WriteHeader(204)
+		w.WriteHeader(http.StatusNoContent)
 	default:
-		http.Error(w, "bad method", 405)
+		http.Error(w, "bad method", http.StatusMethodNotAllowed)
 	}
 }
 

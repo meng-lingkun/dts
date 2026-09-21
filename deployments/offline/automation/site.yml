@@ -1,0 +1,354 @@
+---
+- name: Distribute offline payload and prepare nodes
+  hosts: nodes
+  become: true
+  gather_facts: false
+  vars:
+    remote_root: "{{ dts_remote_install_dir | default('/opt/dts-offline', true) }}"
+  tasks:
+    - name: Validate supported topology
+      assert:
+        that:
+          - groups['control_plane'] | length == 1
+          - groups['registry'] | length == 1
+          - groups['control_plane'] | intersect(groups['workers'] | default([])) | length == 0
+          - remote_root.startswith('/')
+          - remote_root | length > 5
+          - not remote_root.endswith('/')
+          - "'..' not in remote_root.split('/')"
+          - remote_root not in ['/', '/bin', '/boot', '/dev', '/etc', '/home', '/opt', '/proc', '/root', '/run', '/sbin', '/sys', '/usr', '/var']
+        fail_msg: >-
+          Use exactly one control_plane and one registry host. For single-node deployment,
+          leave workers empty; for multi-node deployment, workers must not include the
+          control-plane host. dts_remote_install_dir must be a dedicated safe absolute path.
+      run_once: true
+    - name: Validate the single-node local storage directory
+      vars:
+        single_node_storage_root: "{{ dts_single_node_storage_dir | default('/var/lib/dts-single-node', true) }}"
+      assert:
+        that:
+          - single_node_storage_root.startswith('/')
+          - single_node_storage_root | length > 5
+          - not single_node_storage_root.endswith('/')
+          - "'..' not in single_node_storage_root.split('/')"
+          - single_node_storage_root not in ['/', '/bin', '/boot', '/dev', '/etc', '/home', '/opt', '/proc', '/root', '/run', '/sbin', '/sys', '/usr', '/var', '/var/lib']
+        fail_msg: dts_single_node_storage_dir must be a dedicated safe absolute path
+      when:
+        - groups['workers'] | default([]) | length == 0
+        - dts_single_node_local_storage | default(true) | bool
+      run_once: true
+    - name: Bootstrap rsync from bundled RPM repository over SSH copy
+      copy:
+        src: "{{ package_root }}/cluster/rpms/"
+        dest: "{{ remote_root }}/cluster/rpms/"
+        mode: preserve
+    - name: Configure the bundled RPM repository
+      copy:
+        dest: /etc/yum.repos.d/dts-offline.repo
+        mode: '0644'
+        content: |
+          [dts-offline]
+          name=DTS Kylin offline repository
+          baseurl=file://{{ remote_root }}/cluster/rpms
+          enabled=0
+          gpgcheck=1
+          repo_gpgcheck=0
+    - name: Install rsync and boot configuration support with all external repositories disabled
+      shell: |
+        if command -v yum >/dev/null 2>&1; then
+          package_manager=yum
+        elif command -v dnf >/dev/null 2>&1; then
+          package_manager=dnf
+        else
+          echo 'ERROR: yum or dnf from the Kylin base OS is required' >&2
+          exit 1
+        fi
+        "$package_manager" -y --disablerepo='*' --enablerepo=dts-offline --setopt=install_weak_deps=False install rsync grubby
+      args:
+        executable: /bin/sh
+    - name: Synchronize installation files
+      synchronize:
+        src: "{{ package_root }}/"
+        dest: "{{ remote_root }}/"
+        checksum: true
+        rsync_opts:
+          - --exclude=images/all-images.tar.gz
+          - --exclude=images/all-images.tar
+          - --exclude=INITIAL_ADMIN_CREDENTIALS.txt
+    - name: Read the node hostname used by kubelet
+      command: hostname -s
+      register: dts_node_hostname
+      changed_when: false
+    - name: Require a unique hostname on every Kubernetes node
+      assert:
+        that:
+          - groups['nodes'] | map('extract', hostvars) | map(attribute='dts_node_hostname.stdout') | list | unique | length == groups['nodes'] | length
+        fail_msg: "Kubernetes node hostnames must be unique; configure hostnamectl on each node and rerun deployment"
+      run_once: true
+    - name: Add deterministic local resolution for the node hostname
+      blockinfile:
+        path: /etc/hosts
+        create: true
+        marker: "# {mark} DTS KUBERNETES NODE"
+        block: |
+          {{ ansible_host }} {{ dts_node_hostname.stdout }} {{ inventory_hostname }}
+    - name: Configure the Kylin 4.19 cgroup v1 compatibility profile
+      command: "sh {{ remote_root }}/configure-kylin-419-cgroup.sh"
+      register: dts_cgroup_compatibility
+      changed_when: dts_cgroup_compatibility.rc == 194
+      failed_when: dts_cgroup_compatibility.rc not in [0, 194]
+    - name: Reboot after changing the Kylin 4.19 cgroup hierarchy
+      reboot:
+        reboot_timeout: 900
+        connect_timeout: 10
+        post_reboot_delay: 10
+        test_command: stat -fc %T /sys/fs/cgroup/
+      when: dts_cgroup_compatibility.rc == 194
+    - name: Persist required Kubernetes kernel modules
+      copy:
+        dest: /etc/modules-load.d/dts-kubernetes.conf
+        mode: '0644'
+        content: |
+          overlay
+          br_netfilter
+    - name: Load required Kubernetes kernel modules now
+      command: "modprobe {{ item }}"
+      loop: [overlay, br_netfilter]
+      changed_when: false
+    - name: Install the Kubernetes and Flannel sysctl profile
+      copy:
+        src: "{{ package_root }}/cluster/99-dts-kubernetes.conf"
+        dest: /etc/sysctl.d/99-dts-kubernetes.conf
+        mode: '0644'
+    - name: Apply Kubernetes sysctl parameters immediately
+      command: sysctl -p /etc/sysctl.d/99-dts-kubernetes.conf
+    - name: Verify effective Kubernetes sysctl parameters
+      shell: |
+        test "$(sysctl -n net.ipv4.ip_forward)" = 1
+        test "$(sysctl -n net.bridge.bridge-nf-call-iptables)" = 1
+        test "$(sysctl -n net.bridge.bridge-nf-call-ip6tables)" = 1
+      args:
+        executable: /bin/sh
+      changed_when: false
+    - name: Validate kernel and cgroup compatibility before image transfer
+      command: "sh {{ remote_root }}/install-cluster.sh preflight"
+      changed_when: false
+    - name: Synchronize the single compressed image tar to each node
+      synchronize:
+        src: "{{ package_root }}/images/all-images.tar.gz"
+        dest: "{{ remote_root }}/images/all-images.tar.gz"
+        checksum: true
+    - name: Remove an image tar left by an earlier package revision
+      file:
+        path: "{{ remote_root }}/images/all-images.tar"
+        state: absent
+    - name: Validate and decompress the unified image archive
+      command: "sh {{ remote_root }}/unpack-images.sh"
+    - name: Install runtime and OS dependencies
+      command: "sh {{ remote_root }}/install-cluster.sh prepare"
+      args:
+        creates: /var/lib/dts-cluster-bootstrap/prepared
+
+- name: Start and seed the private registry
+  hosts: registry
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Reconcile all required images into the registry
+      command: "sh {{ dts_remote_install_dir | default('/opt/dts-offline', true) }}/install-registry.sh {{ ansible_host }}"
+    - name: Fetch the client identity into the private controller temporary directory
+      fetch:
+        src: "/etc/dts-registry/client/{{ item }}"
+        dest: "{{ registry_client_cache }}/{{ item }}"
+        flat: true
+      loop: [endpoint, ca.crt, client.crt, client.key]
+      no_log: true
+
+- name: Configure authenticated registry access on other nodes
+  hosts: nodes:!registry
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Create private client directory
+      file:
+        path: /root/dts-registry-client
+        state: directory
+        mode: '0700'
+    - name: Copy client identity securely
+      copy:
+        src: "{{ registry_client_cache }}/{{ item }}"
+        dest: "/root/dts-registry-client/{{ item }}"
+        mode: '0600'
+      loop: [endpoint, ca.crt, client.crt, client.key]
+      no_log: true
+    - name: Configure containerd registry access
+      command: "sh {{ dts_remote_install_dir | default('/opt/dts-offline', true) }}/configure-registry.sh /root/dts-registry-client"
+      args:
+        creates: /etc/dts/registry.env
+
+- name: Initialize control plane and create short lived worker credentials
+  hosts: control_plane
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Initialize Kubernetes and Flannel
+      command: "sh {{ dts_remote_install_dir | default('/opt/dts-offline', true) }}/install-cluster.sh init {{ ansible_host }}"
+      args:
+        creates: /etc/kubernetes/admin.conf
+    - name: Allow DTS workloads on the control plane in single-node mode
+      command: /usr/local/bin/kubectl taint nodes --all node-role.kubernetes.io/control-plane-
+      register: dts_single_node_taint
+      changed_when: dts_single_node_taint.rc == 0
+      failed_when: >-
+        dts_single_node_taint.rc != 0 and
+        'not found' not in dts_single_node_taint.stdout and
+        'not found' not in dts_single_node_taint.stderr
+      when: groups['workers'] | default([]) | length == 0
+    - name: Create DTS single-node local storage directories
+      file:
+        path: "{{ dts_single_node_storage_dir | default('/var/lib/dts-single-node', true) }}/{{ item.name }}"
+        state: directory
+        owner: "{{ item.owner }}"
+        group: "{{ item.group }}"
+        mode: "{{ item.mode }}"
+      loop:
+        - {name: postgres, owner: '999', group: '999', mode: '0700'}
+        - {name: spool, owner: '10001', group: '10001', mode: '0770'}
+      when:
+        - groups['workers'] | default([]) | length == 0
+        - dts_single_node_local_storage | default(true) | bool
+        - dts_install_application | default(true) | bool
+    - name: Create pre-bound local persistent volumes for single-node DTS
+      command: /usr/local/bin/kubectl apply -f -
+      args:
+        stdin: |
+          apiVersion: v1
+          kind: PersistentVolume
+          metadata:
+            name: dts-single-postgres
+          spec:
+            capacity:
+              storage: "{{ dts_single_node_postgres_storage_size | default('50Gi', true) }}"
+            accessModes: [ReadWriteOnce]
+            persistentVolumeReclaimPolicy: Retain
+            storageClassName: ""
+            claimRef:
+              namespace: dts
+              name: data-postgres-0
+            nodeAffinity:
+              required:
+                nodeSelectorTerms:
+                - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: In
+                    values: ["{{ dts_node_hostname.stdout }}"]
+            hostPath:
+              path: "{{ dts_single_node_storage_dir | default('/var/lib/dts-single-node', true) }}/postgres"
+              type: Directory
+          ---
+          apiVersion: v1
+          kind: PersistentVolume
+          metadata:
+            name: dts-single-spool
+          spec:
+            capacity:
+              storage: "{{ dts_spool_storage_size | default('200Gi', true) }}"
+            accessModes: [ReadWriteMany]
+            persistentVolumeReclaimPolicy: Retain
+            storageClassName: ""
+            claimRef:
+              namespace: dts
+              name: dts-cdc-spool
+            nodeAffinity:
+              required:
+                nodeSelectorTerms:
+                - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: In
+                    values: ["{{ dts_node_hostname.stdout }}"]
+            hostPath:
+              path: "{{ dts_single_node_storage_dir | default('/var/lib/dts-single-node', true) }}/spool"
+              type: Directory
+      when:
+        - groups['workers'] | default([]) | length == 0
+        - dts_single_node_local_storage | default(true) | bool
+        - dts_install_application | default(true) | bool
+    - name: Create a two hour join token
+      command: /usr/local/bin/kubeadm token create --ttl 2h
+      register: dts_join_token
+      no_log: true
+      when: groups['workers'] | default([]) | length > 0
+    - name: Calculate discovery CA hash
+      shell: >-
+        set -o pipefail;
+        openssl x509 -pubkey -in /etc/kubernetes/pki/ca.crt -noout |
+        openssl rsa -pubin -outform DER 2>/dev/null |
+        openssl dgst -sha256 -hex | awk '{print $NF}'
+      args:
+        executable: /bin/bash
+      register: dts_ca_hash
+      changed_when: false
+      when: groups['workers'] | default([]) | length > 0
+
+- name: Join worker nodes
+  hosts: workers
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Verify the worker can reach the Kubernetes API server
+      wait_for:
+        host: "{{ hostvars[groups['control_plane'][0]].ansible_host }}"
+        port: 6443
+        state: started
+        timeout: 15
+    - name: Join workers with a short lived credential
+      block:
+        - name: Write short lived join config
+          copy:
+            dest: /root/dts-join.generated.yaml
+            mode: '0600'
+            content: |
+              apiVersion: kubeadm.k8s.io/v1beta4
+              kind: JoinConfiguration
+              discovery:
+                bootstrapToken:
+                  apiServerEndpoint: "{{ hostvars[groups['control_plane'][0]].ansible_host }}:6443"
+                  token: "{{ hostvars[groups['control_plane'][0]].dts_join_token.stdout }}"
+                  caCertHashes: ["sha256:{{ hostvars[groups['control_plane'][0]].dts_ca_hash.stdout }}"]
+              nodeRegistration:
+                criSocket: unix:///run/containerd/containerd.sock
+                imagePullPolicy: IfNotPresent
+          no_log: true
+        - name: Join Kubernetes and preserve non-secret diagnostics
+          command: "sh {{ dts_remote_install_dir | default('/opt/dts-offline', true) }}/install-cluster.sh join /root/dts-join.generated.yaml"
+          args:
+            creates: /etc/kubernetes/kubelet.conf
+          # The command line contains only a protected file path. kubeadm errors
+          # are required for support and do not print the bootstrap token.
+          no_log: false
+      always:
+        - name: Remove generated credential file even when join fails
+          file:
+            path: /root/dts-join.generated.yaml
+            state: absent
+
+- name: Verify cluster and install DTS
+  hosts: control_plane
+  become: true
+  gather_facts: false
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  tasks:
+    - name: Wait for nodes
+      command: /usr/local/bin/kubectl wait --for=condition=Ready nodes --all --timeout=300s
+      changed_when: false
+    - name: Install DTS using private registry images
+      command: "sh {{ dts_remote_install_dir | default('/opt/dts-offline', true) }}/install-kubernetes.sh"
+      environment:
+        DTS_RWX_STORAGE_CLASS: "{{ dts_rwx_storage_class | default('') }}"
+        DTS_SERVER_REPLICAS: "{{ dts_server_replicas | default(2 if (groups['workers'] | default([]) | length > 0) else 1) }}"
+        DTS_WORKER_REPLICAS: "{{ dts_worker_replicas | default(3 if (groups['workers'] | default([]) | length > 0) else 1) }}"
+        DTS_WEB_REPLICAS: "{{ dts_web_replicas | default(2 if (groups['workers'] | default([]) | length > 0) else 1) }}"
+        DTS_HPA_MAX_REPLICAS: "{{ dts_hpa_max_replicas | default(50 if (groups['workers'] | default([]) | length > 0) else 1) }}"
+        DTS_SPOOL_STORAGE_SIZE: "{{ dts_spool_storage_size | default('200Gi', true) }}"
+      when: dts_install_application | default(true) | bool

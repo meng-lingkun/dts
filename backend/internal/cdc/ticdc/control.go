@@ -161,10 +161,6 @@ func buildKafkaSinkURIEndpoint(ep Endpoint, topic string) string {
 	return "kafka://" + strings.Join(ep.Brokers, ",") + "/" + url.PathEscape(topic) + "?" + q.Encode()
 }
 
-func sinkMatches(raw, topic string) bool {
-	return sinkMatchesEndpoint(raw, topic, Endpoint{KafkaPartitions: 1})
-}
-
 func sinkMatchesEndpoint(raw, topic string, ep Endpoint) bool {
 	u, err := url.Parse(raw)
 	if err != nil || !strings.EqualFold(u.Scheme, "kafka") {

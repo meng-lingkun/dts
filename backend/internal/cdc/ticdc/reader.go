@@ -518,17 +518,15 @@ func (r *Reader) nextDecoded(ctx context.Context) (*decodedKafkaRecord, error) {
 		return v, nil
 	}
 	r.mu.Unlock()
-	for {
-		rec, err := r.nextRecord(ctx)
-		if err != nil {
-			return nil, err
-		}
-		decoded, err := r.decodeRecord(rec)
-		if err != nil {
-			return nil, fmt.Errorf("TiCDC topic %s offset %d: %w", r.topic, rec.Offset, err)
-		}
-		return decoded, nil
+	rec, err := r.nextRecord(ctx)
+	if err != nil {
+		return nil, err
 	}
+	decoded, err := r.decodeRecord(rec)
+	if err != nil {
+		return nil, fmt.Errorf("TiCDC topic %s offset %d: %w", r.topic, rec.Offset, err)
+	}
+	return decoded, nil
 }
 
 func (r *Reader) nextRecord(ctx context.Context) (KafkaRecord, error) {

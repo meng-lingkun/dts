@@ -13,6 +13,12 @@ import (
 	"log"
 	"math/big"
 	"os"
+	"sort"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
 	"dts/backend/internal/connector"
 	"dts/backend/internal/domain"
 	"dts/backend/internal/engine"
@@ -23,11 +29,6 @@ import (
 	"dts/backend/internal/schematranslate"
 	"dts/backend/internal/transform"
 	validationpkg "dts/backend/internal/validation"
-	"sort"
-	"strconv"
-	"strings"
-	"sync"
-	"time"
 )
 
 type Service struct {
@@ -1190,17 +1191,6 @@ func validateCustomWhere(expr string) error {
 		}
 	}
 	return nil
-}
-
-func copyPlacement(src map[string]string) map[string]string {
-	if len(src) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(src))
-	for k, v := range src {
-		out[k] = v
-	}
-	return out
 }
 
 func validateSelectedCDC(ctx context.Context, src connector.Connector, mappings []domain.TableMapping) error {

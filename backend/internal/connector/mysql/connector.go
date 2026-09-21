@@ -796,9 +796,7 @@ func gbaseTypeArgs(columnType string) []int {
 func gbaseTargetType(col domain.ColumnInfo) string {
 	ct := strings.ToLower(strings.TrimSpace(col.ColumnType))
 	dt := strings.ToLower(strings.TrimSpace(col.DataType))
-	if strings.Contains(ct, "character varying") {
-		ct = strings.Replace(ct, "character varying", "varchar", 1)
-	}
+	ct = strings.Replace(ct, "character varying", "varchar", 1)
 	if strings.HasPrefix(ct, "character(") {
 		ct = strings.Replace(ct, "character", "char", 1)
 	}

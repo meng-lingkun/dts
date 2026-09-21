@@ -126,7 +126,7 @@ func newMux(p gbase8acdc.Agent, token string) http.Handler {
 	auth := func(next http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
 			if token != "" && !bearer(r.Header.Get("Authorization"), token) {
-				http.Error(w, "unauthorized", 401)
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
 			next(w, r)
@@ -137,14 +137,14 @@ func newMux(p gbase8acdc.Agent, token string) http.Handler {
 		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 		defer cancel()
 		if err := p.Health(ctx); err != nil {
-			http.Error(w, err.Error(), 503)
+			http.Error(w, err.Error(), http.StatusServiceUnavailable)
 			return
 		}
 		writeJSON(w, map[string]any{"status": "ok", "api_version": "gbase8a-cdc-agent-v1"})
 	}))
 	m.HandleFunc("/v1/checkpoint", auth(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			http.Error(w, "method", 405)
+			http.Error(w, "method", http.StatusMethodNotAllowed)
 			return
 		}
 		var q gbase8acdc.CheckpointRequest
@@ -173,7 +173,7 @@ func newMux(p gbase8acdc.Agent, token string) http.Handler {
 	}))
 	m.HandleFunc("/v1/read", auth(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			http.Error(w, "method", 405)
+			http.Error(w, "method", http.StatusMethodNotAllowed)
 			return
 		}
 		var q gbase8acdc.ReadRequest
@@ -197,7 +197,7 @@ func newMux(p gbase8acdc.Agent, token string) http.Handler {
 	}))
 	m.HandleFunc("/v1/ack", auth(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			http.Error(w, "method", 405)
+			http.Error(w, "method", http.StatusMethodNotAllowed)
 			return
 		}
 		var q gbase8acdc.AckRequest

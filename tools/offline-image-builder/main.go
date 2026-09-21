@@ -30,7 +30,7 @@ type layerEntry struct {
 }
 
 func main() {
-	var binaryDir, webDir, nginxConfig, outputDir, version, baseWebArchive string
+	var binaryDir, webDir, nginxConfig, outputDir, version, baseWebArchive, imageList, registryPrefix, mergeList, mergedArchive string
 	var serverOnly bool
 	flag.StringVar(&binaryDir, "binary-dir", "", "directory containing linux/amd64 DTS binaries")
 	flag.StringVar(&webDir, "web-dir", "", "built web dist directory")
@@ -39,7 +39,96 @@ func main() {
 	flag.StringVar(&version, "version", "", "DTS version")
 	flag.StringVar(&baseWebArchive, "base-web-archive", "", "existing web Docker archive to refresh without a registry")
 	flag.BoolVar(&serverOnly, "server-only", false, "build only the server image archive")
+	flag.StringVar(&imageList, "image-list", "", "file of exact image references to export without rebuilding applications")
+	flag.StringVar(&registryPrefix, "registry-prefix", "", "optional public mirror prefix for image-list downloads; canonical tags are preserved")
+	flag.StringVar(&mergeList, "merge-list", "", "file of Docker image archive paths to combine")
+	flag.StringVar(&mergedArchive, "merged-archive", "", "output multi-image Docker tar")
 	flag.Parse()
+	if mergeList != "" {
+		if mergedArchive == "" {
+			fatalf("--merged-archive is required")
+		}
+		data, err := os.ReadFile(mergeList)
+		if err != nil {
+			fatalf("%v", err)
+		}
+		images := map[name.Tag]v1.Image{}
+		for _, path := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+			path = strings.TrimSpace(path)
+			manifest, err := tarball.LoadManifest(func() (io.ReadCloser, error) { return os.Open(path) })
+			if err != nil {
+				fatalf("%s: %v", path, err)
+			}
+			for _, entry := range manifest {
+				for _, ref := range entry.RepoTags {
+					tag, err := name.NewTag(ref)
+					if err != nil {
+						fatalf("%v", err)
+					}
+					img, err := tarball.ImageFromPath(path, &tag)
+					if err != nil {
+						fatalf("%v", err)
+					}
+					if old, exists := images[tag]; exists {
+						oldDigest, e1 := old.Digest()
+						newDigest, e2 := img.Digest()
+						if e1 != nil || e2 != nil || oldDigest != newDigest {
+							fatalf("conflicting image tag %s", ref)
+						}
+						continue
+					}
+					images[tag] = img
+				}
+			}
+		}
+		if len(images) == 0 {
+			fatalf("no images to merge")
+		}
+		if err := tarball.MultiWriteToFile(mergedArchive, images); err != nil {
+			fatalf("%v", err)
+		}
+		fmt.Printf("Merged %d image tags into %s\n", len(images), mergedArchive)
+		return
+	}
+	if imageList != "" {
+		if outputDir == "" {
+			fatalf("--output-dir is required")
+		}
+		if err := os.MkdirAll(outputDir, 0o755); err != nil {
+			fatalf("%v", err)
+		}
+		data, err := os.ReadFile(imageList)
+		if err != nil {
+			fatalf("%v", err)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Minute)
+		defer cancel()
+		for _, ref := range strings.Fields(string(data)) {
+			filename := strings.NewReplacer("/", "_", ":", "_").Replace(ref) + ".tar"
+			path := filepath.Join(outputDir, filename)
+			if img, err := tarball.ImageFromPath(path, nil); err == nil {
+				if _, err = img.Digest(); err == nil {
+					fmt.Printf("reusing %s\n", path)
+					continue
+				}
+			}
+			source := ref
+			if registryPrefix != "" {
+				source = strings.TrimSuffix(registryPrefix, "/") + "/" + ref
+			}
+			img, err := pullImage(ctx, source, v1.Platform{OS: "linux", Architecture: "amd64"})
+			if err != nil {
+				fatalf("%s: %v", ref, err)
+			}
+			if err := writeImage(path+".partial", ref, img); err != nil {
+				fatalf("%s: %v", ref, err)
+			}
+			if err := os.Rename(path+".partial", path); err != nil {
+				fatalf("%v", err)
+			}
+		}
+		return
+	}
 	required := map[string]string{"output-dir": outputDir, "version": version}
 	if baseWebArchive == "" {
 		required["binary-dir"] = binaryDir

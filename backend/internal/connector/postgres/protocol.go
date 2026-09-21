@@ -17,10 +17,11 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"dts/backend/internal/domain"
 	"strconv"
 	"strings"
 	"time"
+
+	"dts/backend/internal/domain"
 )
 
 type pgResult struct {
@@ -149,10 +150,6 @@ func (c *pgClient) close() error {
 	return c.conn.Close()
 }
 func cstr(s string) []byte { return append([]byte(s), 0) }
-func (c *pgClient) startup(ctx context.Context, user, password, database string) error {
-	return c.startupWithParams(ctx, user, password, database, nil)
-}
-
 func (c *pgClient) startupWithParams(ctx context.Context, user, password, database string, extra map[string]string) error {
 	var body bytes.Buffer
 	_ = binary.Write(&body, binary.BigEndian, uint32(196608))

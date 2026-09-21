@@ -18,7 +18,8 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/dts-db2-cdc ./cmd/
     CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/dts-dameng-cdc ./cmd/dameng-cdc && \
     CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/dts-gbase-cdc ./cmd/gbase-cdc && \
     CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/dts-gbase8s-cdc ./cmd/gbase8s-cdc
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/dtsctl ./cmd/dtsctl
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/dtsctl ./cmd/dtsctl && \
+    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/dts-certgen ./cmd/certgen
 
 FROM alpine:3.22
 RUN apk add --no-cache ca-certificates zstd && \

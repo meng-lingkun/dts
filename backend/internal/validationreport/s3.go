@@ -172,44 +172,6 @@ func s3HMAC(key []byte, data string) []byte {
 	_, _ = h.Write([]byte(data))
 	return h.Sum(nil)
 }
-func awsEsc(v string) string {
-	x := url.QueryEscape(v)
-	x = strings.ReplaceAll(x, "+", "%20")
-	x = strings.ReplaceAll(x, "%7E", "~")
-	return x
-}
-func canonicalQ(q url.Values) string {
-	keys := make([]string, 0, len(q))
-	for k := range q {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	parts := []string{}
-	for _, k := range keys {
-		vals := append([]string(nil), q[k]...)
-		sort.Strings(vals)
-		if len(vals) == 0 {
-			vals = []string{""}
-		}
-		for _, v := range vals {
-			parts = append(parts, awsEsc(k)+"="+awsEsc(v))
-		}
-	}
-	return strings.Join(parts, "&")
-}
-func uriPath(v string) string {
-	parts := strings.Split(v, "/")
-	for i := range parts {
-		parts[i] = url.PathEscape(parts[i])
-	}
-	out := strings.Join(parts, "/")
-	out = strings.ReplaceAll(out, "+", "%20")
-	if !strings.HasPrefix(out, "/") {
-		out = "/" + out
-	}
-	return out
-}
-
 func (c *reportS3Client) objectURL(key string) (*url.URL, string) {
 	u := *c.endpoint
 	prefix := strings.TrimSuffix(u.Path, "/")
@@ -483,5 +445,3 @@ func ArchiveBundleS3(ctx context.Context, cfg S3Config, b Bundle) (ArchiveResult
 	result.Committed = true
 	return result, nil
 }
-
-func uriEncodeForTest(v string) string { return uriPath(v) }

@@ -1,0 +1,2 @@
+package_root: "{{ lookup('env', 'DTS_PACKAGE_ROOT') }}"
+registry_client_cache: "{{ lookup('env', 'DTS_REGISTRY_CLIENT_CACHE') }}"

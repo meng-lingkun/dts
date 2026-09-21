@@ -1,0 +1,12 @@
+[Unit]
+Description=DTS private image registry (mutual TLS)
+After=containerd.service network-online.target
+Requires=containerd.service
+[Service]
+ExecStart=/usr/local/bin/ctr --namespace dts-registry run --rm --net-host --mount type=bind,src=/var/lib/dts-registry,dst=/var/lib/registry,options=rbind:rw --mount type=bind,src=/etc/dts-registry/server,dst=/etc/distribution,options=rbind:ro docker.io/library/registry:3 dts-registry /entrypoint.sh /etc/distribution/config.yml
+ExecStop=-/usr/local/bin/ctr --namespace dts-registry tasks kill --signal SIGTERM dts-registry
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+[Install]
+WantedBy=multi-user.target

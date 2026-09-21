@@ -549,10 +549,6 @@ func ParseDataManagerWithLOB(e RecordEnvelope, selection *Selection, desc *Table
 	return out, nil
 }
 
-func parseMultiInsertRows(dms []byte, td *TableDescriptor, cols []domain.ColumnInfo, bo binary.ByteOrder) ([]ParsedRow, error) {
-	return parseMultiInsertRowsWithLOB(dms, td, cols, bo, nil)
-}
-
 // parseMultiInsertRowsWithLOB reconstructs DMS 167 while preserving the only
 // row association DTS can prove from the documented format. The multi-
 // insert record has a RID and row image per row, but LOB/XML/VECTOR manager
@@ -780,10 +776,6 @@ func ParseTableDescriptor(b []byte, bo binary.ByteOrder) (*TableDescriptor, erro
 		off += 8
 	}
 	return td, nil
-}
-
-func parseRowAt(dms []byte, pos int, td *TableDescriptor, cols []domain.ColumnInfo, bo binary.ByteOrder) ([]domain.CDCField, int, error) {
-	return parseRowAtWithLOB(dms, pos, td, cols, bo, nil, false)
 }
 
 func parseRowAtWithLOB(dms []byte, pos int, td *TableDescriptor, cols []domain.ColumnInfo, bo binary.ByteOrder, outOfRow map[int][]byte, allowMissingOutOfRow bool) ([]domain.CDCField, int, error) {

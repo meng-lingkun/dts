@@ -7,13 +7,14 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
+	"strings"
+	"time"
+
 	"dts/backend/internal/cdc/mysqlbinlog"
 	"dts/backend/internal/connector"
 	mysqlconnector "dts/backend/internal/connector/mysql"
 	"dts/backend/internal/domain"
-	"strconv"
-	"strings"
-	"time"
 )
 
 type summary struct {
@@ -108,30 +109,6 @@ func summarize(e *mysqlbinlog.Event, a *mysqlbinlog.Assembler) summary {
 	}
 	return out
 }
-
-type eventSource interface {
-	Next(context.Context) ([]byte, error)
-	Close() error
-}
-
-type fileSource struct {
-	f *os.File
-	r *mysqlbinlog.Reader
-}
-
-func (s *fileSource) Next(ctx context.Context) ([]byte, error) {
-	_ = ctx
-	e, err := s.r.Next()
-	if err != nil {
-		return nil, err
-	}
-	raw := make([]byte, e.Header.EventSize)
-	// Reader already parsed the frame; reconstructing would lose checksum. File mode
-	// uses the specialized loop below, so this method is intentionally unused.
-	_ = raw
-	return nil, io.EOF
-}
-func (s *fileSource) Close() error { return s.f.Close() }
 
 func inspectFile(path string, checksum int, limit int, enc *json.Encoder) error {
 	f, err := os.Open(path)

@@ -1,0 +1,38 @@
+{
+  "timeout_seconds": 10,
+  "workers": 6,
+  "recent_minutes": 60,
+  "backup_max_hours": 26,
+  "node_proxy": true,
+  "expected_groups": {
+    "pxc-xdb-m-xxr5a44mk8kh4q34b2": 3,
+    "pxc-xdb-m-xxrn1szq4dqgbb9570": 3,
+    "pxc-xdb-m-xxrrbqd25knyni8d5d": 3,
+    "pxc-xdb-s-xxr5a44mk8kh4q5073": 2,
+    "pxc-xdb-s-xxr5a44mk8kh4q64bc": 3,
+    "pxc-xdb-s-xxrn1szq4dqgbbe45b": 3,
+    "pxc-xdb-s-xxrrbqd25knyni42c8": 3,
+    "pxc-xdb-s-xxrrbqd25knyniceb4": 3,
+    "pxc-xxrn1szq4dqgbbsary-cn": 1
+  },
+  "expected_services": [
+    "dbstack-dbaas/pxc-xxr5a44mk8kh4q",
+    "dbstack-dbaas/pxc-xxrn1szq4dqgbb",
+    "dbstack-dbaas/pxc-xxrrbqd25knyni"
+  ],
+  "http": [
+    {"name":"DBStack OpenAPI Service","url":"http://openapi.dbstack-dbaas.svc.cluster.local/common/healthCheck","json":true},
+    {"name":"DBStack Portal Service","url":"http://dbaas-portal.dbstack-dbaas.svc.cluster.local/common/healthCheck","json":true},
+    {"name":"DBStack OpenAPI Ingress","url":"http://10.10.156.111/common/healthCheck","host":"openapi.dbstack.test.com","json":true},
+    {"name":"DBStack Portal Ingress","url":"http://10.10.156.111/common/healthCheck","host":"dbstack-console.test.com","expected_status":308,"expected_location":"https://dbstack-console.test.com/common/healthCheck"}
+  ],
+  "openapi": {
+    "endpoint":"https://openapi.dbstack.test.com",
+    "region":"cn-hangzhou",
+    "access_key_env":"DBSTACK_ACCESS_KEY_ID",
+    "secret_key_env":"DBSTACK_ACCESS_KEY_SECRET",
+    "max_pages":20,
+    "healthy_status_descriptions":[]
+  },
+  "sql":[]
+}
