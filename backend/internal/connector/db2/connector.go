@@ -581,7 +581,13 @@ func lexicographicPredicate(keys []string, cols []domain.ColumnInfo, vals []conn
 		if e != nil {
 			return "", e
 		}
-		and = append(and, qIdent(keys[i])+op+lit)
+		// Earlier key components decide the order only on a strict difference.
+		// Equality of the complete tuple is decided by its final component.
+		cmp := op
+		if i < len(keys)-1 {
+			cmp = strings.TrimSuffix(op, "=")
+		}
+		and = append(and, qIdent(keys[i])+cmp+lit)
 		arms = append(arms, "("+strings.Join(and, " AND ")+")")
 	}
 	return "(" + strings.Join(arms, " OR ") + ")", nil
@@ -709,7 +715,11 @@ func (c *Connector) ReadBatch(ctx context.Context, req connector.ReadBatchReques
 	}
 	var where []string
 	if strings.TrimSpace(req.CustomWhere) != "" {
-		where = append(where, "("+req.CustomWhere+")")
+		predicate, err := req.CustomPredicate(qIdent, strings.ToUpper)
+		if err != nil {
+			return nil, err
+		}
+		where = append(where, predicate)
 	}
 	if req.UseKeyset && len(req.Cursor) > 0 {
 		q, e := lexicographicPredicate(keys, req.Columns, req.Cursor, ">")
@@ -743,11 +753,8 @@ func (c *Connector) ReadBatch(ctx context.Context, req connector.ReadBatchReques
 		}
 		where = append(where, qIdent(req.PrimaryKey)+">"+lit)
 	}
-	if req.StartPK != 0 && req.PrimaryKey != "" {
-		where = append(where, qIdent(req.PrimaryKey)+">="+strconv.FormatInt(req.StartPK, 10))
-	}
-	if req.EndPK != 0 && req.PrimaryKey != "" {
-		where = append(where, qIdent(req.PrimaryKey)+"<"+strconv.FormatInt(req.EndPK, 10))
+	if bounds := db2RangePredicate(req); bounds != "" {
+		where = append(where, bounds)
 	}
 	sql := "SELECT " + strings.Join(selects, ",") + " FROM " + qName(req.Schema, req.Table)
 	if len(where) > 0 {
@@ -806,6 +813,14 @@ type db2IdentitySpec struct {
 	always    bool
 	seed      string
 	increment string
+}
+
+func db2RangePredicate(req connector.ReadBatchRequest) string {
+	if req.UseKeyset || req.PrimaryKey == "" {
+		return ""
+	}
+	key := qIdent(req.PrimaryKey)
+	return key + " BETWEEN " + strconv.FormatInt(req.StartPK, 10) + " AND " + strconv.FormatInt(req.EndPK, 10)
 }
 
 func db2IdentityInteger(raw, label string) (string, error) {

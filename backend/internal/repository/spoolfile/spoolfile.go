@@ -3,15 +3,15 @@ package spoolfile
 import (
 	"context"
 	"crypto/sha256"
+	"dts/backend/internal/domain"
+	"dts/backend/internal/faultinject"
+	"dts/backend/internal/repository"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
-	"dts/backend/internal/domain"
-	"dts/backend/internal/faultinject"
-	"dts/backend/internal/repository"
 	"strconv"
 	"strings"
 	"sync"
@@ -163,12 +163,9 @@ func New(inner repository.Repository, cfg Config) (*Store, error) {
 func (s *Store) Root() string { return s.cfg.Root }
 
 func (s *Store) AcquireCDCSpoolDrainLease(ctx context.Context, taskID, direction, owner string, ttl time.Duration) (bool, error) {
-	type provider interface {
-		AcquireCDCSpoolDrainLease(context.Context, string, string, string, time.Duration) (bool, error)
-	}
-	p, ok := s.Repository.(provider)
+	p, ok := s.Repository.(repository.CDCExecutionLeaser)
 	if !ok {
-		return true, nil
+		return false, errors.New("repository does not support CDC execution leases")
 	}
 	return p.AcquireCDCSpoolDrainLease(ctx, taskID, direction, owner, ttl)
 }
@@ -438,7 +435,7 @@ func (s *Store) ListCDCSpool(ctx context.Context, taskID, direction string, n in
 }
 func (s *Store) LatestPendingCDCSpool(ctx context.Context, taskID, direction string) (*domain.CDCSpoolRecord, error) {
 	v, err := s.Repository.LatestPendingCDCSpool(ctx, taskID, direction)
-	if err != nil {
+	if err != nil || v == nil {
 		return nil, err
 	}
 	items := []domain.CDCSpoolRecord{*v}

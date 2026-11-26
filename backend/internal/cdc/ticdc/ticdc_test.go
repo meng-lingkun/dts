@@ -457,16 +457,25 @@ func TestReaderMultiPartitionUsesResolvedTSAsFence(t *testing.T) {
 	}
 }
 
-func TestReaderMultiPartitionRejectsTopologyExpansionAfterAck(t *testing.T) {
-	f := &fakePartitionKafka{parts: []int32{0, 1}, records: map[int32][]KafkaRecord{}}
-	r, err := NewReader(f, "topic", "cf", Position{TSO: 1000, Offset: 5, Offsets: map[int32]int64{0: 5}}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+func TestReaderRejectsTopologyChangesAfterAck(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	if _, err := r.Next(ctx); err == nil || !strings.Contains(err.Error(), "changed from a single partition") {
-		t.Fatalf("expected topology-change failure, got %v", err)
+	for _, tc := range []struct {
+		oldOffsets map[int32]int64
+		current    []int32
+	}{
+		{map[int32]int64{0: 5}, []int32{0, 1}},
+		{map[int32]int64{0: 5, 1: 2}, []int32{0}},
+		{map[int32]int64{0: 5, 1: 2}, []int32{0, 1, 2}},
+	} {
+		f := &fakePartitionKafka{parts: tc.current}
+		r, err := NewReader(f, "topic", "cf", Position{TSO: 1000, Offset: 5, Offsets: tc.oldOffsets}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := r.ensureMode(ctx); err == nil || !strings.Contains(err.Error(), "topology changed") {
+			t.Fatalf("checkpoint=%v partitions=%v: expected topology-change error, got %v", tc.oldOffsets, tc.current, err)
+		}
 	}
 }
 

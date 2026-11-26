@@ -16,3 +16,14 @@ func TestMySQLTargetType(t *testing.T) {
 		}
 	}
 }
+
+func TestMySQLTargetPreservesMemberDefinitions(t *testing.T) {
+	for _, col := range []domain.ColumnInfo{
+		{DataType: "enum", ColumnType: "enum('CASE','character varying')"},
+		{DataType: "set", ColumnType: "set('First','Second')"},
+	} {
+		if got := mysqlTargetType(col); got != col.ColumnType {
+			t.Fatalf("column definition %q changed to %q", col.ColumnType, got)
+		}
+	}
+}

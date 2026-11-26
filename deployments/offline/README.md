@@ -2,6 +2,10 @@
 
 目标平台：Linux x86_64；运行底座为 Kubernetes + containerd。Docker 仅用于构建机制作、导出镜像。
 
+Windows 构建机可传入 `-CachedPackageDirectory <已核对来源及 SHA-256 的完整旧包解压目录>`，复用相同 Kubernetes 版本的节点依赖、PostgreSQL 与应用基础镜像层。此模式需要 Python 3.11+，会重编全部 DTS 二进制与前端，生成新镜像。单机 Docker Engine + Compose 离线发行版通过 `deployments/compose-offline/build.py` 从相同版本的完整包构建。
+
+文件 Spool 的停机备份使用包内 `scripts/recovery-set.sh`。暂停任务并停止所有 Server、Worker、CDC 进程，保持各副本停止。将 Spool PVC 挂到有 GNU tar、coreutils 和兼容版本 PostgreSQL 客户端的运维容器，设置 `DTS_CDC_SPOOL_DIR`、`DTS_METADATA_{HOST,PORT,USER,DATABASE,PASSWORD}`、原 `DTS_MASTER_KEY` 和 `DTS_WRITERS_STOPPED=YES` 后运行 `sh scripts/recovery-set.sh backup /backup/new-directory`。脚本检查独占元数据库、归档完整性和 Spool 文件内容，写入 READY。运行 `sh scripts/recovery-set.sh verify /backup/new-directory` 可离线复验。恢复到独立空数据库和空目录时，另设 `DTS_RESTORE_CONFIRM=YES` 并使用 `restore` 子命令。以实际 Spool 用户恢复或按原卷配置恢复权限，复核目标围栏代次、不确定提交和源日志留存后再开放任务。认证、Worker、签名及加密凭据和部署配置由 Secret 管理系统另行保存。
+
 **Ansible 统一部署版：** `images/all-images.tar.gz` 是唯一镜像压缩包，解压后得到包含全部 13 个镜像的标准多镜像 `all-images.tar`，含当前源码构建的 DTS Server/Worker、Web。单机使用 `automation/inventory.single-node.example.ini`，多机使用 `automation/inventory.multi-node.example.ini`；复制到包外修改节点 IP 后，通过 `bash deploy.sh /root/dts-hosts.ini` 调用 Ansible。远端目录由 `dts_remote_install_dir` 配置，完整卸载会删除该目录及全部内容。单机模式自动启用控制面调度和本地静态存储，多机模式将同一镜像包同步到各节点并让组件从私有仓库拉取。详见 `CLUSTER_INSTALL.md`；不要直接修改校验保护的包内 inventory。
 
 **完整建群/镜像仓库版：** 如果目录内有 `CLUSTER_INSTALL.md`，请优先按该文档执行。每节点运行 `sh install-cluster.sh prepare`；仓库节点运行 `sh install-registry.sh <本机IP>`；其他节点取得客户端证书后运行 `sh configure-registry.sh <证书目录>`；再执行控制节点 init、工作节点 join，最后安装 DTS。此模式使用 HTTPS/mTLS 私有镜像仓库，工作节点及组件从仓库拉取镜像，不需要运行下面精简版的逐节点镜像导入步骤。
@@ -29,7 +33,7 @@ sh install-kubernetes.sh
 
 K3s 使用 `/etc/rancher/k3s/k3s.yaml`。若这些文件不存在，请先完成集群初始化；不要把 API 地址直接改成 localhost 的其他端口。
 
-默认管理员为 `admin` / `Cljslrl0620!`，首次登录后请在“用户与权限”修改。安装器为数据库、加密及 Token 生成独立随机 Secret；重复安装保留既有 Secret。
+默认管理员为 `admin`，首次安装随机生成密码并保存至安装目录的 `INITIAL_ADMIN_CREDENTIALS.txt`（权限 600）；也可用 `DTS_ADMIN_PASSWORD` 指定至少 16 字符的独立随机密码。安装器为数据库、加密及 Token 生成独立随机 Secret；重复安装保留既有 Secret 和账号密码。历史部署应主动更换原默认密码。若凭据文件遗失，授权管理员可从 Kubernetes Secret 的 `bootstrap-admin-password` 读取初始值；修改过账号密码后，该初始值不再代表当前密码。
 
 ### Kubernetes 离线安装
 
@@ -89,6 +93,8 @@ sh install-kubernetes.sh
 旧 Docker 部署升级须先备份元数据、共享 Spool 和所有 Secret，再按恢复流程迁移到 Kubernetes。安装器不会自动搬迁旧容器数据或卸载宿主机已有 Docker。
 
 ### 构建与运行边界
+
+发布构建的 Go 补丁版本记录在仓库根目录的 `.go-version`。Windows 打包器和 Linux 的镜像合并工具通过 `GOTOOLCHAIN` 选择该版本，首次联网构建需要下载工具链或预先装好匹配版本。升级时应同步更新 `deployments/Dockerfile.backend` 中的版本和官方多平台镜像摘要。CI 校验两者一致，并对后端及工具运行 Go 漏洞扫描。
 
 联网构建机保留 Dockerfile、docker build/pull/save；Linux 构建脚本仅使用未启动的临时容器从镜像复制 CLI。安装、镜像导入、检查、卸载均不调用 Docker。节点镜像导入必须连接 kubelet 使用的 containerd；不能用 Docker Engine 自带的私有 containerd 替代集群运行时。
 # 客户数据库域名解析

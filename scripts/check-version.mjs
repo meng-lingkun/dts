@@ -5,6 +5,10 @@ const read = path => readFileSync(path, 'utf8')
 const version = read('VERSION').trim()
 const failures = []
 
+const goVersion = read('.go-version').trim()
+const dockerGo = read('deployments/Dockerfile.backend').match(/^FROM golang:(\d+\.\d+\.\d+)-alpine@sha256:[0-9a-f]{64}\s+AS build$/m)?.[1]
+if (goVersion !== dockerGo) failures.push('Go builder image tag/digest must match .go-version')
+
 const backend = read('backend/internal/version/version.go').match(/Version\s*=\s*"([^"]+)"/)?.[1]
 if (backend !== version) failures.push(`backend version ${backend ?? '<missing>'} != ${version}`)
 

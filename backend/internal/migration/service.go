@@ -87,8 +87,10 @@ func (s *Service) runControlOperation(ctx context.Context, taskID, operation str
 	leaser, supportsLease := s.repo.(repository.ControlOperationLeaser)
 	opCtx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
+	heartbeatDone := make(chan struct{})
 	if supportsLease {
 		go func() {
+			defer close(heartbeatDone)
 			ticker := time.NewTicker(controlOperationLeaseTTL() / 3)
 			defer ticker.Stop()
 			for {
@@ -111,6 +113,9 @@ func (s *Service) runControlOperation(ctx context.Context, taskID, operation str
 	close(done)
 	cancel()
 	if supportsLease {
+		// Do not let an in-flight renewal run after release or renew a later
+		// operation owned by this same server.
+		<-heartbeatDone
 		releaseCtx, releaseCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer releaseCancel()
 		_ = leaser.ReleaseControlOperation(releaseCtx, taskID, operation, s.instanceID)
@@ -160,11 +165,9 @@ func (s *Service) startValidation(ctx context.Context, taskID string) error {
 	go func() {
 		defer s.removeRunner(taskID)
 		s.runControlOperation(runCtx, taskID, controlOperationValidation, func(operationCtx context.Context) {
-			if err := s.repo.DeleteValidationResults(operationCtx, taskID); err != nil {
-				s.failTaskUnlessCanceled(operationCtx, taskID, err)
-				return
+			if err := s.validateTask(operationCtx, taskID); err != nil && operationCtx.Err() == nil {
+				s.logTask(operationCtx, taskID, "", "", "", "WARN", "validation interrupted: "+err.Error())
 			}
-			s.validateTask(operationCtx, taskID)
 		})
 	}()
 	return nil
@@ -172,8 +175,9 @@ func (s *Service) startValidation(ctx context.Context, taskID string) error {
 
 // RecoverInterrupted reclaims expired control-plane work after a server
 // restart. Prechecks and validation are safe to replay. Preparation is not
-// replayed after it starts mutating target metadata; it is failed explicitly so
-// operators get an actionable state instead of a permanently stuck task.
+// replayed after it starts mutating target metadata. Interrupted finalization
+// also fails closed rather than guessing whether database side effects finished.
+// Operators get an actionable state instead of a permanently stuck task.
 func (s *Service) RecoverInterrupted(ctx context.Context) error {
 	tasks, err := s.repo.ListMigrations(ctx)
 	if err != nil {
@@ -186,6 +190,20 @@ func (s *Service) RecoverInterrupted(ctx context.Context) error {
 		}
 		task := &tasks[i]
 		switch task.Status {
+		case domain.StatusFinished, domain.StatusRolledBack:
+			direction := "forward"
+			if task.Status == domain.StatusRolledBack {
+				direction = "reverse"
+			}
+			if o := lifecycleOperation(task, direction); o != nil && o.CleanupStatus != "" && o.CleanupStatus != "DONE" {
+				if e := s.exclusiveControlOperation(ctx, task.ID, "cleanup-recovery", func(c context.Context, id string) error { return s.completeLifecycleCleanup(c, id, direction) }); e != nil {
+					recoveryErrors = append(recoveryErrors, e)
+				}
+			}
+		case domain.StatusReadyCutover, domain.StatusRollbackReady, domain.StatusRollbackPreparing:
+			if e := s.recoverLifecycle(ctx, *task); e != nil {
+				recoveryErrors = append(recoveryErrors, e)
+			}
 		case domain.StatusPrechecking:
 			acquired, acquireErr := s.acquireControlOperation(ctx, task.ID, controlOperationPrepare)
 			if acquireErr != nil {
@@ -200,7 +218,7 @@ func (s *Service) RecoverInterrupted(ctx context.Context) error {
 			if startErr := s.startValidation(ctx, task.ID); startErr != nil && !strings.Contains(startErr.Error(), "already running validation") {
 				recoveryErrors = append(recoveryErrors, fmt.Errorf("recover task %s validation: %w", task.ID, startErr))
 			}
-		case domain.StatusPrecheckSuccess, domain.StatusPreparing:
+		case domain.StatusPrecheckSuccess, domain.StatusPreparing, domain.StatusCutoverRunning, domain.StatusRollbackRunning:
 			acquired, acquireErr := s.acquireControlOperation(ctx, task.ID, "recovery")
 			if acquireErr != nil {
 				recoveryErrors = append(recoveryErrors, fmt.Errorf("recover task %s preparation: %w", task.ID, acquireErr))
@@ -209,7 +227,23 @@ func (s *Service) RecoverInterrupted(ctx context.Context) error {
 			if !acquired {
 				continue
 			}
-			s.failTask(task.ID, fmt.Errorf("server restarted during %s; automatic replay is unsafe after target preparation may have begun; inspect target objects, then repair or recreate the task", task.Status))
+			// The list can predate the active owner's last status update. Never
+			// fail a task that completed between listing and lease acquisition.
+			current, readErr := s.repo.GetMigration(ctx, task.ID)
+			if readErr != nil {
+				recoveryErrors = append(recoveryErrors, readErr)
+			} else if current.Status == task.Status {
+				_, _ = s.mutateMigration(ctx, task.ID, func(m *domain.MigrationTask) error {
+					for _, o := range []*domain.LifecycleOperation{m.CutoverOperation, m.RollbackOperation} {
+						if o != nil && o.Phase != "COMPLETED" {
+							o.Phase = "NEEDS_REVIEW"
+							o.LastError = "interrupted database finalization; automatic replay forbidden"
+						}
+					}
+					return nil
+				})
+				s.failTask(task.ID, fmt.Errorf("server restarted during %s; automatic replay is unsafe after database side effects may have begun; inspect database objects, CDC jobs and final checkpoints before manual recovery", task.Status))
+			}
 			if leaser, ok := s.repo.(repository.ControlOperationLeaser); ok {
 				_ = leaser.ReleaseControlOperation(ctx, task.ID, "recovery", s.instanceID)
 			}
@@ -256,6 +290,9 @@ func (s *Service) Logs(ctx context.Context, taskID string, limit int) ([]domain.
 	return s.repo.ListTaskLogs(ctx, taskID, limit)
 }
 func (s *Service) Create(ctx context.Context, m *domain.MigrationTask) error {
+	m.Revision = 0
+	m.CutoverOperation = nil
+	m.RollbackOperation = nil
 	now := time.Now()
 	m.ID = newID("mig")
 	m.Status = domain.StatusCreated
@@ -345,14 +382,12 @@ func (s *Service) Create(ctx context.Context, m *domain.MigrationTask) error {
 		if st != "AUTO" && st != "PRIMARY_KEY_RANGE" && st != "UNIQUE_KEY_RANGE" && st != "HASH" && st != "PARTITION" && st != "CUSTOM_SQL" {
 			return fmt.Errorf("table %s.%s unsupported split_strategy %q", m.Tables[i].SourceSchema, m.Tables[i].SourceTable, st)
 		}
-		if st == "CUSTOM_SQL" {
-			if err := validateCustomWhere(m.Tables[i].CustomWhere); err != nil {
-				return fmt.Errorf("table mapping %d: %w", i, err)
-			}
-		}
 		if m.Tables[i].HashBuckets < 0 || m.Tables[i].HashBuckets > 256 {
 			return fmt.Errorf("table mapping %d hash_buckets must be 0..256", i)
 		}
+	}
+	if err := validateRowFilters(m); err != nil {
+		return err
 	}
 	if m.ValidationMode == "" {
 		m.ValidationMode = "CHUNK_CHECKSUM"
@@ -405,6 +440,9 @@ func (s *Service) Start(ctx context.Context, id string) error {
 	if m.Status != domain.StatusCreated && m.Status != domain.StatusPaused {
 		return fmt.Errorf("task cannot start from %s", m.Status)
 	}
+	if err := validateRowFilters(m); err != nil {
+		return err
+	}
 	if m.Status == domain.StatusPaused {
 		resume := m.PausedFromStatus
 		if resume == "" {
@@ -430,9 +468,6 @@ func (s *Service) Start(ctx context.Context, id string) error {
 		}
 		return nil
 	}
-	if err := s.validateExecutionPlan(ctx, m); err != nil {
-		return err
-	}
 	acquired, err := s.acquireControlOperation(ctx, id, controlOperationPrepare)
 	if err != nil {
 		return err
@@ -451,6 +486,18 @@ func (s *Service) Start(ctx context.Context, id string) error {
 			_ = leaser.ReleaseControlOperation(releaseCtx, id, controlOperationPrepare, s.instanceID)
 		}
 	}()
+	// Another server may have finished preparation between the initial read
+	// and acquisition. Never restart a task from a stale CREATED snapshot.
+	m, err = s.repo.GetMigration(ctx, id)
+	if err != nil {
+		return err
+	}
+	if m.Status != domain.StatusCreated {
+		return fmt.Errorf("task cannot start from %s", m.Status)
+	}
+	if err := s.validateExecutionPlan(ctx, m); err != nil {
+		return err
+	}
 	// The execution engine is fixed to DTS. Protocol/table strategy is
 	// selected internally and is never delegated to a third-party runtime.
 	m.FullEngine = unifiedEngineName
@@ -717,6 +764,9 @@ func (s *Service) prepare(ctx context.Context, id string) {
 func (s *Service) prepareTask(ctx context.Context, id string) error {
 	m, err := s.repo.GetMigration(ctx, id)
 	if err != nil {
+		return err
+	}
+	if err := validateRowFilters(m); err != nil {
 		return err
 	}
 	sourceDS, err := s.repo.GetDataSource(ctx, m.SourceID)
@@ -1086,9 +1136,6 @@ func (s *Service) prepareTask(ctx context.Context, id string) error {
 					chunks = append(chunks, c)
 				}
 			case "CUSTOM_SQL":
-				if err := validateCustomWhere(mapping.CustomWhere); err != nil {
-					return fmt.Errorf("table %s.%s: %w", mapping.SourceSchema, mapping.SourceTable, err)
-				}
 				t.CustomWhere = strings.TrimSpace(mapping.CustomWhere)
 				if numericPK {
 					chunks = []domain.MigrationChunk{{ID: newID("chk"), TaskID: id, TableID: t.ID, ChunkNo: 1, SplitType: "CUSTOM_SQL_RANGE", PrimaryKey: meta.PrimaryKey, Start: meta.MinPK, End: meta.MaxPK, CustomWhere: t.CustomWhere, Status: domain.ChunkPending}}
@@ -1177,20 +1224,6 @@ func normalizedSplitStrategy(v string) string {
 	default:
 		return v
 	}
-}
-
-func validateCustomWhere(expr string) error {
-	x := strings.TrimSpace(expr)
-	if x == "" {
-		return errors.New("CUSTOM_SQL split requires custom_where")
-	}
-	lower := strings.ToLower(x)
-	for _, bad := range []string{";", "--", "/*", "*/", " union ", " into outfile", " copy ", " drop ", " alter ", " truncate ", " insert ", " update ", " delete "} {
-		if strings.Contains(lower, bad) {
-			return fmt.Errorf("custom_where contains unsafe token %q", strings.TrimSpace(bad))
-		}
-	}
-	return nil
 }
 
 func validateSelectedCDC(ctx context.Context, src connector.Connector, mappings []domain.TableMapping) error {
@@ -1443,21 +1476,19 @@ func (s *Service) setStatus(id string, to domain.MigrationStatus) error {
 	return nil
 }
 func (s *Service) failTask(id string, cause error) {
-	m, err := s.repo.GetMigration(context.Background(), id)
+	ctx := context.Background()
+	_, err := s.mutateMigration(ctx, id, func(m *domain.MigrationTask) error {
+		switch m.Status {
+		case domain.StatusCancelled, domain.StatusPaused, domain.StatusFinished, domain.StatusRolledBack, domain.StatusFailed:
+			return fmt.Errorf("cannot fail migration in state %s", m.Status)
+		}
+		m.Status = domain.StatusFailed
+		m.LastError = cause.Error()
+		return nil
+	})
 	if err != nil {
 		return
 	}
-	if m.Status == domain.StatusCancelled || m.Status == domain.StatusPaused || m.Status == domain.StatusFinished {
-		return
-	}
-	if CanTransition(m.Status, domain.StatusFailed) {
-		m.Status = domain.StatusFailed
-	} else {
-		m.Status = domain.StatusFailed
-	}
-	m.LastError = cause.Error()
-	m.UpdatedAt = time.Now()
-	_ = s.repo.UpdateMigration(context.Background(), m)
 	_ = s.repo.CreateAlert(context.Background(), &domain.Alert{ID: newID("alt"), Severity: "critical", Title: "Migration failed", Message: cause.Error(), TaskID: id, CreatedAt: time.Now()})
 	s.logTask(context.Background(), id, "", "", "", "ERROR", "migration failed: "+cause.Error())
 }
@@ -1906,13 +1937,7 @@ func desiredTaskWorkers(task *domain.MigrationTask) int {
 }
 
 func numericResumeCursor(raw string) (int64, bool) {
-	var v struct {
-		AfterPK int64 `json:"after_pk"`
-	}
-	if json.Unmarshal([]byte(strings.TrimSpace(raw)), &v) != nil {
-		return 0, false
-	}
-	return v.AfterPK, true
+	return connector.DecodeAfterPK(raw)
 }
 
 func numericRangeSplit(splitType string) bool {
@@ -2848,21 +2873,9 @@ func remainderChunkBase(c *domain.MigrationChunk, no int) domain.MigrationChunk 
 	}
 }
 
-func boundedPieceCount(task *domain.MigrationTask, remaining int64) int {
-	pieces := desiredTaskWorkers(task)
-	if pieces < 1 {
-		pieces = 1
-	}
-	if hard := intEnv("DTS_RUNNING_CHUNK_REBALANCE_MAX_PIECES", 16); pieces > hard {
-		pieces = hard
-	}
-	if remaining > 0 && int64(pieces) > remaining {
-		pieces = int(remaining)
-	}
-	if pieces < 1 {
-		pieces = 1
-	}
-	return pieces
+func boundedPieceCount(task *domain.MigrationTask) int {
+	hard := intEnv("DTS_RUNNING_CHUNK_REBALANCE_MAX_PIECES", 16)
+	return max(1, min(desiredTaskWorkers(task), hard, maxInitialRangeChunks))
 }
 
 func (s *Service) buildYieldRemainders(ctx context.Context, task *domain.MigrationTask, table *domain.MigrationTable, c *domain.MigrationChunk, cursorJSON string, maxChunkNo int) ([]domain.MigrationChunk, error) {
@@ -2876,27 +2889,13 @@ func (s *Service) buildYieldRemainders(ctx context.Context, task *domain.Migrati
 		c.End = after
 		c.CursorJSON = cursorJSON
 		c.SplitType = "PK_RANGE_REBALANCED"
-		remaining := oldEnd - after
-		pieces := boundedPieceCount(task, remaining)
-		base, extra := remaining/int64(pieces), remaining%int64(pieces)
-		start := after + 1
-		created := make([]domain.MigrationChunk, 0, pieces)
-		for i := 0; i < pieces; i++ {
-			sz := base
-			if int64(i) < extra {
-				sz++
-			}
-			end := start + sz - 1
+		ranges := balancedIntegerRanges(after+1, oldEnd, boundedPieceCount(task))
+		created := make([]domain.MigrationChunk, 0, len(ranges))
+		for _, r := range ranges {
 			ch := remainderChunkBase(c, nextNo)
 			nextNo++
-			ch.SplitType = "PK_RANGE_REBALANCED"
-			ch.Start = start
-			ch.End = end
+			ch.Start, ch.End = r.start, r.end
 			created = append(created, ch)
-			start = end + 1
-		}
-		if start != oldEnd+1 {
-			return nil, fmt.Errorf("running numeric yield produced a gap for chunk %s", c.ID)
 		}
 		return created, nil
 	}
@@ -2911,9 +2910,13 @@ func (s *Service) buildYieldRemainders(ctx context.Context, task *domain.Migrati
 		return nil, nil
 	}
 	oldEnd := c.EndCursorJSON
+	upper, err := connector.DecodeKeysetBound(oldEnd, len(cursor))
+	if err != nil {
+		return nil, fmt.Errorf("invalid upper bound for chunk %s: %w", c.ID, err)
+	}
 	c.EndCursorJSON = cursorJSON
 	c.CursorJSON = cursorJSON
-	pieces := boundedPieceCount(task, 0)
+	pieces := boundedPieceCount(task)
 	boundsJSON := []string{}
 	if pieces > 1 && s.connectors != nil {
 		if source, e := s.repo.GetDataSource(ctx, task.SourceID); e == nil {
@@ -2924,7 +2927,6 @@ func (s *Service) buildYieldRemainders(ctx context.Context, task *domain.Migrati
 					if len(keys) == 0 && table.PrimaryKey != "" {
 						keys = []string{table.PrimaryKey}
 					}
-					upper, _ := decodeKeysetBound(oldEnd)
 					if len(keys) > 0 {
 						if bounds, e := splitter.PlanKeysetBoundaries(ctx, connector.KeysetBoundaryRequest{Schema: table.SourceSchema, Table: table.SourceTable, Keys: keys, Columns: table.Columns, Partitions: pieces, LowerBound: cursor, UpperBound: upper}); e == nil {
 							seen := map[string]bool{strings.TrimSpace(cursorJSON): true, strings.TrimSpace(oldEnd): true}
@@ -3001,7 +3003,7 @@ func (s *Service) completeYieldedChunk(ctx context.Context, workerID string, c *
 	if len(created) == 0 {
 		finishedAtCursor := false
 		if numericRangeSplit(c.SplitType) {
-			if after, ok := numericResumeCursor(cursor); ok && after >= c.End {
+			if after, ok := numericResumeCursor(cursor); ok && after == c.End {
 				finishedAtCursor = true
 			}
 		} else if strings.Contains(strings.ToUpper(c.SplitType), "KEYSET") {
@@ -3014,7 +3016,7 @@ func (s *Service) completeYieldedChunk(ctx context.Context, workerID string, c *
 		completed.WorkerID = ""
 		completed.LeaseUntil = time.Time{}
 		completed.FinishedAt = time.Now()
-		if err := s.repo.UpdateChunk(ctx, &completed); err != nil {
+		if err := s.repo.UpdateOwnedChunk(ctx, workerID, &completed); err != nil {
 			return err
 		}
 		return s.refreshProgress(ctx, c.TaskID, result)
@@ -3055,7 +3057,7 @@ func (s *Service) CompleteChunk(ctx context.Context, workerID, chunkID string, r
 	if err != nil {
 		return err
 	}
-	if c.Status != domain.ChunkRunning || c.WorkerID != workerID {
+	if c.Status != domain.ChunkRunning || c.WorkerID != workerID || !repository.WorkerLeaseValid(ctx, c.LeaseGeneration, c.LeaseUntil) {
 		return repository.ErrLeaseOwner
 	}
 	if err := s.recordTablePerformance(ctx, c, result); err != nil {
@@ -3071,11 +3073,11 @@ func (s *Service) CompleteChunk(ctx context.Context, workerID, chunkID string, r
 	c.BytesWritten = result.BytesWritten
 	c.FinishedAt = time.Now()
 	c.LeaseUntil = time.Time{}
-	if err := s.repo.UpdateChunk(ctx, c); err != nil {
+	if err := s.repo.UpdateOwnedChunk(ctx, workerID, c); err != nil {
 		return err
 	}
 	if err := s.adaptPendingChunks(ctx, c, result); err != nil {
-		return err
+		s.logTask(ctx, c.TaskID, workerID, c.TableID, c.ID, "WARN", fmt.Sprintf("adaptive chunk refinement failed: %v", err))
 	}
 	s.logTask(ctx, c.TaskID, workerID, c.TableID, c.ID, "INFO", fmt.Sprintf("chunk #%d completed rows=%d bytes=%d duration_ms=%d", c.ChunkNo, result.RowsWritten, result.BytesWritten, result.DurationMS))
 	return s.refreshProgress(ctx, c.TaskID, result)
@@ -3098,15 +3100,7 @@ func intEnv(name string, fallback int) int {
 // the existing [lower, upper) boundary. Running/completed chunks are immutable,
 // so durable checkpoints remain gap-free and resumable.
 func decodeKeysetBound(raw string) ([]connector.Value, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return nil, nil
-	}
-	var values []connector.Value
-	if err := json.Unmarshal([]byte(raw), &values); err != nil {
-		return nil, err
-	}
-	return values, nil
+	return connector.DecodeKeysetBound(raw, 0)
 }
 
 func profileTargetSeconds() int { return intEnv("DTS_ADAPTIVE_CHUNK_TARGET_SECONDS", 30) }
@@ -3164,12 +3158,24 @@ func estimateNumericChunkRows(table *domain.MigrationTable, chunk *domain.Migrat
 	if table == nil || chunk == nil || table.EstimatedRows <= 0 || table.MaxPK < table.MinPK || chunk.End < chunk.Start {
 		return 0
 	}
-	totalSpan := table.MaxPK - table.MinPK + 1
-	if totalSpan <= 0 {
+	low, high := max(table.MinPK, chunk.Start), min(table.MaxPK, chunk.End)
+	if low > high {
 		return 0
 	}
-	span := chunk.End - chunk.Start + 1
-	return (table.EstimatedRows*span + totalSpan - 1) / totalSpan
+	if low == table.MinPK && high == table.MaxPK {
+		return table.EstimatedRows
+	}
+	one := big.NewInt(1)
+	cardinality := func(low, high int64) *big.Int {
+		distance := new(big.Int).SetUint64(uint64(high) - uint64(low))
+		return distance.Add(distance, one)
+	}
+	// The inclusive table width can be 2^64 and the product up to 127 bits.
+	total := cardinality(table.MinPK, table.MaxPK)
+	rows := cardinality(low, high)
+	rows.Mul(rows, big.NewInt(table.EstimatedRows))
+	rows.Sub(rows, one)
+	return rows.Quo(rows, total).Int64() + 1
 }
 
 func (s *Service) recordTablePerformance(ctx context.Context, chunk *domain.MigrationChunk, result domain.ChunkResult) error {
@@ -3349,7 +3355,7 @@ func (s *Service) adaptPendingChunks(ctx context.Context, completed *domain.Migr
 	if maxSplits > baseSplits {
 		maxSplits = baseSplits
 	}
-	hardMax := intEnv("DTS_ADAPTIVE_CHUNK_HARD_MAX_SPLITS", 16)
+	hardMax := max(1, min(intEnv("DTS_ADAPTIVE_CHUNK_HARD_MAX_SPLITS", 16), maxInitialRangeChunks-1))
 	if envDefaultOn("DTS_PREDICTIVE_CHUNK_SIZING") {
 		for i := range chunks {
 			ch := &chunks[i]
@@ -3372,7 +3378,6 @@ func (s *Service) adaptPendingChunks(ctx context.Context, completed *domain.Migr
 	if maxSplits > baseSplits && baseSplits > 0 {
 		maxSplits = baseSplits
 	}
-	created := make([]domain.MigrationChunk, 0, maxSplits)
 	splits := 0
 
 	// Numeric ranges can be repartitioned into multiple gap-free pieces in one
@@ -3383,7 +3388,7 @@ func (s *Service) adaptPendingChunks(ctx context.Context, completed *domain.Migr
 			break
 		}
 		ch := &chunks[i]
-		if ch.TableID != completed.TableID || ch.Status != domain.ChunkPending || (ch.SplitType != "PRIMARY_KEY_RANGE" && ch.SplitType != "PK_RANGE" && ch.SplitType != "PK_RANGE_ADAPTIVE") || ch.End <= ch.Start {
+		if ch.TableID != completed.TableID || !repository.PendingChunkSplittable(*ch) || !numericRangeSplit(ch.SplitType) || ch.End <= ch.Start {
 			continue
 		}
 		remainingSplits := maxSplits - splits
@@ -3394,48 +3399,33 @@ func (s *Service) adaptPendingChunks(ctx context.Context, completed *domain.Migr
 		if pieces < 2 {
 			pieces = 2
 		}
-		span := ch.End - ch.Start + 1
-		if int64(pieces) > span {
-			pieces = int(span)
-		}
-		if pieces < 2 {
+		ranges := balancedIntegerRanges(ch.Start, ch.End, pieces)
+		if len(ranges) < 2 {
 			continue
 		}
-		originalStart, originalEnd := ch.Start, ch.End
-		base := span / int64(pieces)
-		extra := span % int64(pieces)
-		cursor := originalStart
-		for piece := 0; piece < pieces; piece++ {
-			size := base
-			if int64(piece) < extra {
-				size++
-			}
-			end := cursor + size - 1
-			if piece == 0 {
-				ch.Start, ch.End, ch.SplitType = cursor, end, "PK_RANGE_ADAPTIVE"
-				if err := s.repo.UpdateChunk(ctx, ch); err != nil {
-					return err
-				}
-			} else {
-				maxNo++
-				created = append(created, domain.MigrationChunk{ID: newID("chk"), TaskID: ch.TaskID, TableID: ch.TableID, ChunkNo: maxNo, SplitType: "PK_RANGE_ADAPTIVE", PrimaryKey: ch.PrimaryKey, Start: cursor, End: end, Status: domain.ChunkPending})
-				splits++
-			}
-			cursor = end + 1
+		head := *ch
+		head.Start, head.End, head.SplitType = ranges[0].start, ranges[0].end, "PK_RANGE_ADAPTIVE"
+		partition := []domain.MigrationChunk{head}
+		for _, r := range ranges[1:] {
+			maxNo++
+			piece := remainderChunkBase(&head, maxNo)
+			piece.Start, piece.End = r.start, r.end
+			partition = append(partition, piece)
 		}
-		if cursor != originalEnd+1 {
-			return fmt.Errorf("adaptive numeric split produced a gap for chunk %s", ch.ID)
-		}
-		runnable += pieces - 1
-	}
-	if len(created) > 0 {
-		if err := s.repo.CreateChunks(ctx, created); err != nil {
+		if err := s.repo.SplitPendingChunk(ctx, *ch, partition); err != nil {
+			if errors.Is(err, repository.ErrConflict) {
+				continue
+			}
 			return err
 		}
-		task.AdaptiveHotspotSplits += int64(len(created))
+		splits += len(partition) - 1
+		runnable += len(partition) - 1
+	}
+	if splits > 0 {
+		task.AdaptiveHotspotSplits += int64(splits)
 		task.UpdatedAt = time.Now()
 		_ = s.repo.UpdateMigration(ctx, task)
-		s.logTask(ctx, task.ID, "", table.ID, completed.ID, "INFO", fmt.Sprintf("adaptive hotspot rebalance created=%d chunk_bps=%d task_bps=%d runnable=%d desired=%d", len(created), chunkBPS, task.SpeedBytesSec, runnable, desiredWorkers))
+		s.logTask(ctx, task.ID, "", table.ID, completed.ID, "INFO", fmt.Sprintf("adaptive hotspot rebalance created=%d chunk_bps=%d task_bps=%d runnable=%d desired=%d", splits, chunkBPS, task.SpeedBytesSec, runnable, desiredWorkers))
 		return nil
 	}
 
@@ -3465,13 +3455,12 @@ func (s *Service) adaptPendingChunks(ctx context.Context, completed *domain.Migr
 	if len(keys) == 0 {
 		return nil
 	}
-	created = created[:0]
 	for i := range chunks {
 		if splits >= maxSplits {
 			break
 		}
 		ch := &chunks[i]
-		if ch.TableID != completed.TableID || ch.Status != domain.ChunkPending || ch.SplitType != "PRIMARY_KEY_KEYSET" || strings.TrimSpace(ch.CursorJSON) != "" || ch.RowsRead > 0 || ch.RowsWritten > 0 {
+		if ch.TableID != completed.TableID || !repository.PendingChunkSplittable(*ch) || ch.SplitType != "PRIMARY_KEY_KEYSET" {
 			continue
 		}
 		remainingSplits := maxSplits - splits
@@ -3482,11 +3471,11 @@ func (s *Service) adaptPendingChunks(ctx context.Context, completed *domain.Migr
 		if pieces < 2 {
 			pieces = 2
 		}
-		lower, e := decodeKeysetBound(ch.StartCursorJSON)
+		lower, e := connector.DecodeKeysetBound(ch.StartCursorJSON, len(keys))
 		if e != nil {
 			return fmt.Errorf("decode adaptive keyset lower bound: %w", e)
 		}
-		upper, e := decodeKeysetBound(ch.EndCursorJSON)
+		upper, e := connector.DecodeKeysetBound(ch.EndCursorJSON, len(keys))
 		if e != nil {
 			return fmt.Errorf("decode adaptive keyset upper bound: %w", e)
 		}
@@ -3494,16 +3483,18 @@ func (s *Service) adaptPendingChunks(ctx context.Context, completed *domain.Migr
 		if e != nil || len(bounds) == 0 {
 			continue
 		}
-		oldEnd := ch.EndCursorJSON
 		boundaryJSON := make([]string, 0, len(bounds))
 		seen := map[string]bool{strings.TrimSpace(ch.StartCursorJSON): true, strings.TrimSpace(ch.EndCursorJSON): true}
 		for _, b := range bounds {
+			if len(b) != len(keys) {
+				continue
+			}
 			raw, e := json.Marshal(b)
 			if e != nil {
 				return e
 			}
 			v := string(raw)
-			if seen[v] {
+			if _, e := connector.DecodeKeysetBound(v, len(keys)); e != nil || seen[v] {
 				continue
 			}
 			seen[v] = true
@@ -3515,27 +3506,28 @@ func (s *Service) adaptPendingChunks(ctx context.Context, completed *domain.Migr
 		if len(boundaryJSON) == 0 {
 			continue
 		}
-		ch.EndCursorJSON = boundaryJSON[0]
-		if err := s.repo.UpdateChunk(ctx, ch); err != nil {
-			return err
-		}
-		points := append(boundaryJSON, oldEnd)
+		head := *ch
+		head.EndCursorJSON = boundaryJSON[0]
+		partition := []domain.MigrationChunk{head}
+		points := append(boundaryJSON, ch.EndCursorJSON)
 		for j := 0; j < len(points)-1; j++ {
 			maxNo++
 			base := remainderChunkBase(ch, maxNo)
-			base.SplitType = "PRIMARY_KEY_KEYSET"
 			base.StartCursorJSON = points[j]
 			base.EndCursorJSON = points[j+1]
-			created = append(created, base)
-			splits++
-			runnable++
+			partition = append(partition, base)
 		}
-	}
-	if len(created) > 0 {
-		if err := s.repo.CreateChunks(ctx, created); err != nil {
+		if err := s.repo.SplitPendingChunk(ctx, *ch, partition); err != nil {
+			if errors.Is(err, repository.ErrConflict) {
+				continue
+			}
 			return err
 		}
-		task.AdaptiveHotspotSplits += int64(len(created))
+		splits += len(partition) - 1
+		runnable += len(partition) - 1
+	}
+	if splits > 0 {
+		task.AdaptiveHotspotSplits += int64(splits)
 		task.UpdatedAt = time.Now()
 		_ = s.repo.UpdateMigration(ctx, task)
 	}
@@ -3549,7 +3541,7 @@ func (s *Service) FailChunk(ctx context.Context, workerID, chunkID string, resul
 	if err != nil {
 		return err
 	}
-	if c.Status != domain.ChunkRunning || c.WorkerID != workerID {
+	if c.Status != domain.ChunkRunning || c.WorkerID != workerID || !repository.WorkerLeaseValid(ctx, c.LeaseGeneration, c.LeaseUntil) {
 		return repository.ErrLeaseOwner
 	}
 	task, err := s.repo.GetMigration(ctx, c.TaskID)
@@ -3561,7 +3553,7 @@ func (s *Service) FailChunk(ctx context.Context, workerID, chunkID string, resul
 	c.WorkerID = ""
 	if task.Status == domain.StatusPaused || task.Status == domain.StatusCancelled {
 		c.Status = domain.ChunkPending
-		return s.repo.UpdateChunk(ctx, c)
+		return s.repo.UpdateOwnedChunk(ctx, workerID, c)
 	}
 	c.RetryCount++
 	if c.RetryCount <= task.MaxRetries {
@@ -3572,10 +3564,15 @@ func (s *Service) FailChunk(ctx context.Context, workerID, chunkID string, resul
 		task.Status = domain.StatusFailed
 		task.LastError = fmt.Sprintf("chunk %s failed after %d attempts: %s", c.ID, c.RetryCount, result.Error)
 		task.UpdatedAt = time.Now()
-		_ = s.repo.UpdateMigration(ctx, task)
+
 	}
-	if err := s.repo.UpdateChunk(ctx, c); err != nil {
+	if err := s.repo.UpdateOwnedChunk(ctx, workerID, c); err != nil {
 		return err
+	}
+	if c.Status == domain.ChunkFailed {
+		if err := s.repo.UpdateMigration(ctx, task); err != nil {
+			return err
+		}
 	}
 	level := "WARN"
 	if c.Status == domain.ChunkFailed {
@@ -4971,9 +4968,11 @@ func (s *Service) ValidateNow(ctx context.Context, id string) error {
 	// that redirects new source transactions into the durable spool.
 	var unlock func()
 	if m.Mode != domain.ModeFull && m.Status != domain.StatusValidating {
-		lock := s.cdcSpoolLock(id, "forward")
-		lock.Lock()
-		unlock = lock.Unlock
+		var lockErr error
+		ctx, unlock, lockErr = s.lockCDCExecution(ctx, id, "forward")
+		if lockErr != nil {
+			return lockErr
+		}
 		defer unlock()
 		m, err = s.repo.GetMigration(ctx, id)
 		if err != nil {
@@ -5015,15 +5014,27 @@ func validationPageSize() int {
 	return v
 }
 
-func complexValidationReadRequest(tbl domain.MigrationTable, piece domain.MigrationChunk, primaryKeys []string) connector.ReadBatchRequest {
+func complexValidationReadRequest(tbl domain.MigrationTable, piece domain.MigrationChunk, primaryKeys []string) (connector.ReadBatchRequest, error) {
+	if len(primaryKeys) == 0 {
+		return connector.ReadBatchRequest{}, errors.New("validation requires a migration key")
+	}
 	req := connector.ReadBatchRequest{Schema: tbl.SourceSchema, Table: tbl.SourceTable, PrimaryKey: primaryKeys[0], PrimaryKeys: primaryKeys, StartPK: piece.Start, EndPK: piece.End, Partition: piece.PartitionName, HashBucket: piece.HashBucket, HashBuckets: piece.HashBuckets, CustomWhere: piece.CustomWhere}
 	if strings.Contains(piece.SplitType, "KEYSET") {
 		req.UseKeyset = true
-		req.LowerBound, _ = decodeKeysetBound(piece.StartCursorJSON)
-		req.UpperBound, _ = decodeKeysetBound(piece.EndCursorJSON)
+		var err error
+		req.LowerBound, err = connector.DecodeKeysetBound(piece.StartCursorJSON, len(primaryKeys))
+		if err != nil {
+			return req, fmt.Errorf("chunk %s lower bound: %w", piece.ID, err)
+		}
+		req.UpperBound, err = connector.DecodeKeysetBound(piece.EndCursorJSON, len(primaryKeys))
+		if err != nil {
+			return req, fmt.Errorf("chunk %s upper bound: %w", piece.ID, err)
+		}
 	}
-	return req
+	return req, nil
 }
+
+var errValidationChunkMetadata = errors.New("read validation chunk metadata")
 
 func streamComplexValidationSourceChecksum(ctx context.Context, repo repository.Repository, taskID string, src connector.DataConnector, tbl domain.MigrationTable, primaryKeys []string, batchRows, pageSize int) (validationpkg.Checksum, error) {
 	acc := validationpkg.NewUnorderedAccumulator()
@@ -5031,13 +5042,17 @@ func streamComplexValidationSourceChecksum(ctx context.Context, repo repository.
 	for {
 		page, err := repository.ListTableChunksPage(ctx, repo, taskID, tbl.ID, afterNo, afterID, pageSize)
 		if err != nil {
-			return validationpkg.Checksum{}, err
+			return validationpkg.Checksum{}, fmt.Errorf("%w: %w", errValidationChunkMetadata, err)
 		}
 		if len(page) == 0 {
 			break
 		}
 		for _, piece := range page {
-			if err := acc.AddRequest(ctx, src, complexValidationReadRequest(tbl, piece, primaryKeys), tbl.Columns, tbl.Columns, batchRows); err != nil {
+			req, err := complexValidationReadRequest(tbl, piece, primaryKeys)
+			if err != nil {
+				return validationpkg.Checksum{}, err
+			}
+			if err := acc.AddRequest(ctx, src, req, tbl.Columns, tbl.Columns, batchRows); err != nil {
 				return validationpkg.Checksum{}, err
 			}
 		}
@@ -5050,87 +5065,95 @@ func streamComplexValidationSourceChecksum(ctx context.Context, repo repository.
 	return acc.Checksum(), nil
 }
 
-func (s *Service) validateTask(ctx context.Context, id string) {
+func (s *Service) validateTask(ctx context.Context, id string) error {
 	if ctx.Err() != nil {
-		return
+		return nil
 	}
 	task, err := s.repo.GetMigration(ctx, id)
 	if err != nil {
-		return
+		return err
+	}
+	if task.Status != domain.StatusValidating {
+		return nil
+	}
+	if err := s.repo.DeleteValidationResults(ctx, id); err != nil {
+		return fmt.Errorf("reset validation results: %w", err)
 	}
 	srcDS, err := s.repo.GetDataSource(ctx, task.SourceID)
 	if err != nil {
-		s.failTaskUnlessCanceled(ctx, id, err)
-		return
+		return s.failValidation(ctx, task, err)
 	}
 	dstDS, err := s.repo.GetDataSource(ctx, task.TargetID)
 	if err != nil {
-		s.failTaskUnlessCanceled(ctx, id, err)
-		return
+		return s.failValidation(ctx, task, err)
 	}
 	sr, err := s.connectors.New(*srcDS)
 	if err != nil {
-		s.failTaskUnlessCanceled(ctx, id, err)
-		return
+		return s.failValidation(ctx, task, err)
 	}
 	defer sr.Close()
 	dr, err := s.connectors.New(*dstDS)
 	if err != nil {
-		s.failTaskUnlessCanceled(ctx, id, err)
-		return
+		return s.failValidation(ctx, task, err)
 	}
 	defer dr.Close()
 	src, ok := sr.(connector.DataConnector)
 	if !ok {
-		s.failTaskUnlessCanceled(ctx, id, errors.New("source cannot validate data"))
-		return
+		return s.failValidation(ctx, task, errors.New("source cannot validate data"))
 	}
 	dst, ok := dr.(connector.DataConnector)
 	if !ok {
-		s.failTaskUnlessCanceled(ctx, id, errors.New("target cannot validate data"))
-		return
+		return s.failValidation(ctx, task, errors.New("target cannot validate data"))
 	}
 	if task.Mode != domain.ModeFull && strings.TrimSpace(task.ValidationBarrierPositionValue) != "" {
 		barrier := domain.CDCPosition{TaskID: id, Direction: "forward", DatabaseType: string(srcDS.Type), PositionType: task.ValidationBarrierPositionType, PositionValue: task.ValidationBarrierPositionValue, Resource: task.ValidationBarrierResource}
 		if snapper, supported := sr.(connector.ValidationSnapshotConnector); supported {
 			snapshot, snapErr := snapper.OpenValidationSnapshot(ctx, barrier)
 			if snapErr != nil {
-				s.failTaskUnlessCanceled(ctx, id, fmt.Errorf("open exact validation snapshot at %s=%s: %w", barrier.PositionType, barrier.PositionValue, snapErr))
-				return
+				return s.failValidation(ctx, task, fmt.Errorf("open exact validation snapshot at %s=%s: %w", barrier.PositionType, barrier.PositionValue, snapErr))
 			}
 			defer snapshot.Close()
 			src = snapshot
 			s.logTask(ctx, id, "", "", "", "INFO", fmt.Sprintf("validation source pinned to exact %s=%s snapshot", barrier.PositionType, barrier.PositionValue))
 		} else if validationRequireExactWatermark() {
-			s.failTaskUnlessCanceled(ctx, id, fmt.Errorf("source %s does not implement exact validation snapshots required by DTS_VALIDATION_REQUIRE_EXACT_WATERMARK", srcDS.Type))
-			return
+			return s.failValidation(ctx, task, fmt.Errorf("source %s does not implement exact validation snapshots required by DTS_VALIDATION_REQUIRE_EXACT_WATERMARK", srcDS.Type))
 		}
 	}
 
 	tables, err := s.repo.ListMigrationTables(ctx, id)
 	if err != nil {
-		s.failTaskUnlessCanceled(ctx, id, err)
-		return
+		return fmt.Errorf("list validation tables: %w", err)
 	}
-	mismatch := 0
+	mismatch, covered := 0, 0
 	pageSize := validationPageSize()
 	for _, tbl := range tables {
 		if ctx.Err() != nil {
-			return
+			return nil
 		}
 		first, err := repository.ListTableChunksPage(ctx, s.repo, id, tbl.ID, -1, "", 1)
 		if err != nil {
-			s.failTaskUnlessCanceled(ctx, id, err)
-			return
+			return fmt.Errorf("list chunks for validation table %s: %w", tbl.ID, err)
 		}
 		if len(first) == 0 {
+			if tbl.TotalChunks > 0 {
+				return s.failValidation(ctx, task, fmt.Errorf("validation found no chunks for table %s (planned %d)", tbl.ID, tbl.TotalChunks))
+			}
 			continue
 		}
-		complexSplit := first[0].SplitType != "PRIMARY_KEY_RANGE" && first[0].SplitType != "PK_RANGE" && first[0].SplitType != "PK_RANGE_ADAPTIVE"
+		if err := s.checkTableRangeCoverage(ctx, tbl, first[0].SplitType); err != nil {
+			if errors.Is(err, errIncompleteRangeCoverage) {
+				return s.failValidation(ctx, task, err)
+			}
+			return fmt.Errorf("check validation ranges for table %s: %w", tbl.ID, err)
+		}
+		complexSplit := !numericRangeSplit(first[0].SplitType)
 		if complexSplit {
 			current, e := s.repo.GetMigration(ctx, id)
-			if e != nil || current.Status == domain.StatusPaused || current.Status == domain.StatusCancelled {
-				return
+			if e != nil {
+				return e
+			}
+			if current.Status != domain.StatusValidating {
+				return nil
 			}
 			targetCols := tbl.TargetColumns
 			if len(targetCols) == 0 {
@@ -5153,7 +5176,15 @@ func (s *Service) validateTask(ctx context.Context, id string) {
 				// Stream source descriptors page-by-page. Large HASH/PARTITION tables can
 				// contain hundreds of thousands of physical chunks; retaining every
 				// ReadBatchRequest here would make validation heap scale with table size.
-				a, e1 = streamComplexValidationSourceChecksum(ctx, s.repo, id, src, tbl, sourcePKs, task.BatchRows, pageSize)
+				if first[0].SplitType == "PRIMARY_KEY_KEYSET" && plainTableRanges(tbl) {
+					request := connector.ReadBatchRequest{Schema: tbl.SourceSchema, Table: tbl.SourceTable, PrimaryKey: sourcePKs[0], PrimaryKeys: sourcePKs, UseKeyset: true}
+					a, e1 = validationpkg.UnorderedCanonicalRequests(ctx, src, []connector.ReadBatchRequest{request}, tbl.Columns, tbl.Columns, task.BatchRows)
+				} else {
+					a, e1 = streamComplexValidationSourceChecksum(ctx, s.repo, id, src, tbl, sourcePKs, task.BatchRows, pageSize)
+				}
+				if errors.Is(e1, errValidationChunkMetadata) {
+					return e1
+				}
 				targetRequests := []connector.ReadBatchRequest{{Schema: tbl.TargetSchema, Table: tbl.TargetTable, PrimaryKey: targetPKs[0], PrimaryKeys: targetPKs, UseKeyset: true}}
 				b, e2 = validationpkg.UnorderedCanonicalRequests(ctx, dst, targetRequests, targetCols, tbl.Columns, task.BatchRows)
 			}
@@ -5178,22 +5209,24 @@ func (s *Service) validateTask(ctx context.Context, id string) {
 			afterNo, afterID := -1, ""
 			for {
 				if ctx.Err() != nil {
-					return
+					return nil
 				}
 				page, pageErr := repository.ListTableChunksPage(ctx, s.repo, id, tbl.ID, afterNo, afterID, pageSize)
 				if pageErr != nil {
-					s.failTaskUnlessCanceled(ctx, id, pageErr)
-					return
+					return fmt.Errorf("list coverage chunks for table %s: %w", tbl.ID, pageErr)
 				}
 				if len(page) == 0 {
 					break
 				}
 				for _, piece := range page {
 					if piece.Status != domain.ChunkSuccess {
-						continue
+						return s.failValidation(ctx, task, fmt.Errorf("validation requires successful chunk %s, got %s", piece.ID, piece.Status))
 					}
 					vr := domain.ValidationResult{ID: newID("val"), TaskID: id, TableID: tbl.ID, ChunkID: piece.ID, Status: status, SourceRows: a.Rows, TargetRows: b.Rows, SourceChecksum: a.Hash, TargetChecksum: b.Hash, LastError: lastErr, StartedAt: started, FinishedAt: finished}
-					_ = s.repo.CreateValidationResult(ctx, &vr)
+					if err := s.repo.CreateValidationResult(ctx, &vr); err != nil {
+						return fmt.Errorf("persist validation result for chunk %s: %w", vr.ChunkID, err)
+					}
+					covered++
 				}
 				last := page[len(page)-1]
 				afterNo, afterID = last.ChunkNo, last.ID
@@ -5207,23 +5240,25 @@ func (s *Service) validateTask(ctx context.Context, id string) {
 		afterNo, afterID := -1, ""
 		for {
 			if ctx.Err() != nil {
-				return
+				return nil
 			}
 			page, err := repository.ListTableChunksPage(ctx, s.repo, id, tbl.ID, afterNo, afterID, pageSize)
 			if err != nil {
-				s.failTaskUnlessCanceled(ctx, id, err)
-				return
+				return fmt.Errorf("list validation chunks for table %s: %w", tbl.ID, err)
 			}
 			if len(page) == 0 {
 				break
 			}
 			for _, ch := range page {
 				if ch.Status != domain.ChunkSuccess {
-					continue
+					return s.failValidation(ctx, task, fmt.Errorf("validation requires successful chunk %s, got %s", ch.ID, ch.Status))
 				}
 				current, e := s.repo.GetMigration(ctx, id)
-				if e != nil || current.Status == domain.StatusPaused || current.Status == domain.StatusCancelled {
-					return
+				if e != nil {
+					return e
+				}
+				if current.Status != domain.StatusValidating {
+					return nil
 				}
 				vr := domain.ValidationResult{ID: newID("val"), TaskID: id, TableID: tbl.ID, ChunkID: ch.ID, Status: domain.ValidationRunning, StartedAt: time.Now()}
 				targetCols := tbl.TargetColumns
@@ -5257,7 +5292,10 @@ func (s *Service) validateTask(ctx context.Context, id string) {
 						mismatch++
 					}
 				}
-				_ = s.repo.CreateValidationResult(ctx, &vr)
+				if err := s.repo.CreateValidationResult(ctx, &vr); err != nil {
+					return fmt.Errorf("persist validation result for chunk %s: %w", vr.ChunkID, err)
+				}
+				covered++
 			}
 			last := page[len(page)-1]
 			afterNo, afterID = last.ChunkNo, last.ID
@@ -5268,17 +5306,27 @@ func (s *Service) validateTask(ctx context.Context, id string) {
 	}
 
 	if ctx.Err() != nil {
-		return
+		return nil
 	}
-	task, _ = s.repo.GetMigration(ctx, id)
-	if task != nil && task.Mode != domain.ModeFull {
+	task, err = s.repo.GetMigration(ctx, id)
+	if err != nil {
+		return err
+	}
+	if task.Status != domain.StatusValidating {
+		return nil
+	}
+	if covered != task.TotalChunks {
+		return s.failValidation(ctx, task, fmt.Errorf("validation covered %d of %d planned chunks", covered, task.TotalChunks))
+	}
+	if task.Mode != domain.ModeFull {
 		latest, latestErr := s.latestCDC(ctx, id, "forward")
 		if latestErr != nil {
-			s.failTaskUnlessCanceled(ctx, id, fmt.Errorf("validation barrier verification: %w", latestErr))
-			return
+			return fmt.Errorf("validation barrier verification: %w", latestErr)
 		}
 		if !validationBarrierMatches(task, latest) {
-			_ = s.repo.DeleteValidationResults(ctx, id)
+			if err := s.repo.DeleteValidationResults(ctx, id); err != nil {
+				return fmt.Errorf("discard drifted validation results: %w", err)
+			}
 			old := task.ValidationBarrierPositionValue
 			current := ""
 			if latest != nil {
@@ -5291,40 +5339,59 @@ func (s *Service) validateTask(ctx context.Context, id string) {
 			task.ValidationBarrierResource = ""
 			task.ValidationBarrierCapturedAt = time.Time{}
 			task.UpdatedAt = time.Now()
-			_ = s.repo.UpdateMigration(ctx, task)
+			if err := s.repo.UpdateMigration(ctx, task); err != nil {
+				return err
+			}
 			s.logTask(ctx, id, "", "", "", "WARN", fmt.Sprintf("validation barrier drifted from %s to %s; discarded validation results and returned to CDC catch-up", old, current))
 			s.scheduleCDCSpoolDrain(id, "forward")
-			return
+			return nil
 		}
 	}
 	if mismatch > 0 {
-		task.Status = domain.StatusFailed
-		task.LastError = fmt.Sprintf("validation found %d mismatched/error groups", mismatch)
-		_ = s.repo.CreateAlert(ctx, &domain.Alert{ID: newID("alt"), Severity: "critical", Title: "Data validation failed", Message: task.LastError, TaskID: id, CreatedAt: time.Now()})
+		return s.failValidation(ctx, task, fmt.Errorf("validation found %d mismatched/error groups", mismatch))
+	}
+	if err := s.applyPostLoadForeignKeys(ctx, task, tables); err != nil {
+		return s.failValidation(ctx, task, fmt.Errorf("post-load foreign key creation failed: %w", err))
+	}
+	if task.Mode == domain.ModeFull {
+		task.Status = domain.StatusFinished
+		task.Progress = 100
 	} else {
-		if err := s.applyPostLoadForeignKeys(ctx, task, tables); err != nil {
-			task.Status = domain.StatusFailed
-			task.LastError = "post-load foreign key creation failed: " + err.Error()
-			_ = s.repo.CreateAlert(ctx, &domain.Alert{ID: newID("alt"), Severity: "critical", Title: "Post-load DDL failed", Message: task.LastError, TaskID: id, CreatedAt: time.Now()})
-		} else if task.Mode == domain.ModeFull {
-			task.Status = domain.StatusFinished
-			task.Progress = 100
-		} else {
-			task.Status = domain.StatusCDCCatchingUp
-		}
+		task.Status = domain.StatusCDCCatchingUp
 	}
 	task.UpdatedAt = time.Now()
-	_ = s.repo.UpdateMigration(ctx, task)
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if err := s.repo.UpdateMigration(ctx, task); err != nil {
+		return err
+	}
 	if task.Status == domain.StatusFinished || task.Status == domain.StatusRolledBack {
 		s.archiveValidationBestEffort(ctx, task.ID)
 	}
 	if task.Status == domain.StatusCDCCatchingUp {
 		s.scheduleCDCSpoolDrain(task.ID, "forward")
 	}
+	return nil
+}
+
+// Use the validating revision so a concurrent pause or cancellation wins.
+func (s *Service) failValidation(ctx context.Context, task *domain.MigrationTask, cause error) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	task.Status = domain.StatusFailed
+	task.LastError = cause.Error()
+	task.UpdatedAt = time.Now()
+	if err := s.repo.UpdateMigration(ctx, task); err != nil {
+		return err
+	}
+	_ = s.repo.CreateAlert(ctx, &domain.Alert{ID: newID("alt"), Severity: "critical", Title: "Data validation failed", Message: cause.Error(), TaskID: task.ID, CreatedAt: task.UpdatedAt})
+	return nil
 }
 
 func (s *Service) MarkCDCStarted(ctx context.Context, id string, p *domain.CDCPosition) error {
-	task, err := s.repo.GetMigration(ctx, id)
+	task, err := s.unfilteredCDCTask(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -5404,33 +5471,6 @@ func reverseMigrationTable(t domain.MigrationTable) domain.MigrationTable {
 	return r
 }
 
-type cdcSpoolDrainLeaseRepository interface {
-	AcquireCDCSpoolDrainLease(context.Context, string, string, string, time.Duration) (bool, error)
-	ReleaseCDCSpoolDrainLease(context.Context, string, string, string) error
-}
-
-func (s *Service) acquireCDCSpoolDrainLease(ctx context.Context, taskID, direction string) (bool, error) {
-	p, ok := s.repo.(cdcSpoolDrainLeaseRepository)
-	if !ok {
-		return true, nil
-	}
-	ttl := time.Duration(envInt64("DTS_CDC_SPOOL_DRAIN_LEASE_SECONDS", 300)) * time.Second
-	if ttl < 30*time.Second {
-		ttl = 30 * time.Second
-	}
-	return p.AcquireCDCSpoolDrainLease(ctx, taskID, direction, s.instanceID, ttl)
-}
-
-func (s *Service) releaseCDCSpoolDrainLease(taskID, direction string) {
-	p, ok := s.repo.(cdcSpoolDrainLeaseRepository)
-	if !ok {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	_ = p.ReleaseCDCSpoolDrainLease(ctx, taskID, direction, s.instanceID)
-}
-
 func (s *Service) cdcSpoolLock(taskID, direction string) *sync.Mutex {
 	key := taskID + "\x00" + direction
 	s.cdcSpoolMu.Lock()
@@ -5444,7 +5484,7 @@ func (s *Service) cdcSpoolLock(taskID, direction string) *sync.Mutex {
 }
 
 func cdcApplyReady(task *domain.MigrationTask, direction string) bool {
-	if task == nil {
+	if task == nil || hasCDCRowFilter(task) {
 		return false
 	}
 	if direction == "reverse" {
@@ -5457,7 +5497,7 @@ func cdcApplyReady(task *domain.MigrationTask, direction string) bool {
 }
 
 func cdcCaptureReady(task *domain.MigrationTask, direction string) bool {
-	if task == nil {
+	if task == nil || hasCDCRowFilter(task) {
 		return false
 	}
 	if direction == "reverse" {
@@ -5466,6 +5506,10 @@ func cdcCaptureReady(task *domain.MigrationTask, direction string) bool {
 	switch task.Status {
 	case domain.StatusFullMigrating, domain.StatusFullFinished, domain.StatusValidating, domain.StatusCDCCatchingUp, domain.StatusReadyCutover:
 		return true
+	case domain.StatusPaused:
+		// Pausing full-load chunks or validation must not interrupt durable
+		// capture for a full+CDC task. Apply remains frozen in PAUSED.
+		return task.Mode == domain.ModeFullAndIncremental && (task.PausedFromStatus == domain.StatusFullMigrating || task.PausedFromStatus == domain.StatusValidating)
 	default:
 		return false
 	}
@@ -5549,14 +5593,6 @@ func (s *Service) drainCDCSpoolLocked(ctx context.Context, taskID, direction str
 	if maxTransactions <= 0 {
 		maxTransactions = 1000
 	}
-	acquired, err := s.acquireCDCSpoolDrainLease(ctx, taskID, direction)
-	if err != nil {
-		return domain.CDCSpoolStats{}, err
-	}
-	if !acquired {
-		return s.repo.CDCSpoolStats(ctx, taskID, direction)
-	}
-	defer s.releaseCDCSpoolDrainLease(taskID, direction)
 	task, err := s.repo.GetMigration(ctx, taskID)
 	if err != nil {
 		return domain.CDCSpoolStats{}, err
@@ -5570,10 +5606,8 @@ func (s *Service) drainCDCSpoolLocked(ctx context.Context, taskID, direction str
 		if batch > 100 {
 			batch = 100
 		}
-		if renewed, renewErr := s.acquireCDCSpoolDrainLease(ctx, taskID, direction); renewErr != nil {
-			return domain.CDCSpoolStats{}, renewErr
-		} else if !renewed {
-			return s.repo.CDCSpoolStats(ctx, taskID, direction)
+		if err := checkCDCExecution(ctx); err != nil {
+			return domain.CDCSpoolStats{}, err
 		}
 		items, e := s.repo.ListCDCSpool(ctx, taskID, direction, batch)
 		if e != nil {
@@ -5587,7 +5621,7 @@ func (s *Service) drainCDCSpoolLocked(ctx context.Context, taskID, direction str
 				return domain.CDCSpoolStats{}, e
 			}
 			applyReq := domain.CDCApplyRequest{Direction: direction, Events: item.Events}
-			if _, e := s.ApplyCDCEvents(ctx, taskID, applyReq); e != nil {
+			if _, e := s.applyCDCEvents(ctx, taskID, applyReq); e != nil {
 				// The durable spool item being drained is the ordering gap. Record that
 				// exact retained transaction, not a newer request that happened to
 				// trigger the drain. This is also the only path used by background
@@ -5596,6 +5630,9 @@ func (s *Service) drainCDCSpoolLocked(ctx context.Context, taskID, direction str
 				return domain.CDCSpoolStats{}, fmt.Errorf("drain CDC spool sequence %d position %s: %w", item.Sequence, item.PositionValue, e)
 			}
 			if e := faultinject.Check("cdc.spool.after_target_apply_before_mark"); e != nil {
+				return domain.CDCSpoolStats{}, e
+			}
+			if e := checkCDCExecution(ctx); e != nil {
 				return domain.CDCSpoolStats{}, e
 			}
 			if e := s.repo.MarkCDCSpoolApplied(ctx, item.ID, time.Now()); e != nil {
@@ -5621,13 +5658,20 @@ func (s *Service) drainCDCSpoolLocked(ctx context.Context, taskID, direction str
 }
 
 func (s *Service) DrainCDCSpool(ctx context.Context, taskID, direction string, maxTransactions int) (domain.CDCSpoolStats, error) {
-	if direction == "" {
-		direction = "forward"
+	var err error
+	direction, err = cdcDirection(direction)
+	if err != nil {
+		return domain.CDCSpoolStats{}, err
 	}
-	lock := s.cdcSpoolLock(taskID, direction)
-	lock.Lock()
-	stats, err := s.drainCDCSpoolLocked(ctx, taskID, direction, maxTransactions)
-	lock.Unlock()
+	opCtx, release, err := s.lockCDCExecution(ctx, taskID, direction)
+	if errors.Is(err, ErrCDCExecutionBusy) {
+		return s.repo.CDCSpoolStats(ctx, taskID, direction)
+	}
+	if err != nil {
+		return domain.CDCSpoolStats{}, err
+	}
+	stats, err := s.drainCDCSpoolLocked(opCtx, taskID, direction, maxTransactions)
+	release()
 	if err == nil && direction == "forward" {
 		s.maybeStartValidationAfterCatchup(ctx, taskID)
 	}
@@ -5709,12 +5753,20 @@ func (s *Service) maybeStartValidationAfterCatchup(ctx context.Context, taskID s
 	// Serialize the empty-spool check, barrier capture and VALIDATING transition
 	// with CDC apply. This closes the old race where a target transaction could
 	// commit after barrier capture but before the task became VALIDATING.
-	lock := s.cdcSpoolLock(taskID, "forward")
-	lock.Lock()
-	defer lock.Unlock()
+	opCtx, release, err := s.lockCDCExecution(ctx, taskID, "forward")
+	if err != nil {
+		return false
+	}
+	defer release()
+	ctx = opCtx
 
 	task, err := s.repo.GetMigration(ctx, taskID)
 	if err != nil || task.Status != domain.StatusCDCCatchingUp || task.Mode != domain.ModeFullAndIncremental || !task.ValidationEnabled {
+		return false
+	}
+	// Empty plans produce no per-chunk records. Their completed validation
+	// retains the captured barrier, while the drift/retry path clears it.
+	if task.TotalChunks == 0 && !task.ValidationBarrierCapturedAt.IsZero() {
 		return false
 	}
 	hasResults, err := repository.HasValidationResults(ctx, s.repo, taskID)
@@ -5773,28 +5825,54 @@ func (s *Service) scheduleCDCSpoolDrain(taskID, direction string) {
 // table mapping, delete handling and durable CDC checkpoint path.
 // INSERT/UPDATE events must contain a full after-image for all migrated columns.
 func (s *Service) ApplyEngineJobCDCEvents(ctx context.Context, workerID, jobID string, req domain.CDCApplyRequest) (result *domain.CDCApplyResult, retErr error) {
+	callerCtx := ctx
 	job, err := s.repo.GetEngineJob(ctx, jobID)
 	if err != nil {
 		return nil, err
 	}
-	if job.WorkerID != workerID {
+	if job.WorkerID != workerID || !repository.WorkerLeaseValid(ctx, job.LeaseGeneration, job.LeaseUntil) {
 		return nil, repository.ErrLeaseOwner
 	}
 	if job.Status != domain.EngineJobRunning && job.Status != domain.EngineJobStopRequested {
 		return nil, fmt.Errorf("engine job %s cannot apply CDC from %s", jobID, job.Status)
 	}
-	req.Direction = job.Direction
-	lock := s.cdcSpoolLock(job.TaskID, job.Direction)
-	lock.Lock()
+	direction, err := cdcDirection(job.Direction)
+	if err != nil {
+		return nil, err
+	}
+	taskID := job.TaskID
+	req.Direction = direction
+	opCtx, release, err := s.lockCDCExecution(ctx, taskID, direction)
+	if err != nil {
+		return nil, err
+	}
 	defer func() {
-		lock.Unlock()
-		if retErr == nil && job.Direction == "forward" {
-			s.maybeStartValidationAfterCatchup(ctx, job.TaskID)
+		release()
+		if retErr == nil && direction == "forward" {
+			s.maybeStartValidationAfterCatchup(callerCtx, taskID)
 		}
 	}()
+	ctx = opCtx
+	// Ownership may change while waiting for the execution gate.
+	job, err = s.repo.GetEngineJob(ctx, jobID)
+	if err != nil {
+		return nil, err
+	}
+	if job.WorkerID != workerID || !repository.WorkerLeaseValid(ctx, job.LeaseGeneration, job.LeaseUntil) || (job.Status != domain.EngineJobRunning && job.Status != domain.EngineJobStopRequested) {
+		return nil, repository.ErrLeaseOwner
+	}
+	currentDirection, directionErr := cdcDirection(job.Direction)
+	if directionErr != nil || currentDirection != direction || job.TaskID != taskID {
+		return nil, repository.ErrLeaseOwner
+	}
+	job.Direction = direction
+	ctx = s.withManagedLeaseGuard(ctx, workerID, job)
 	task, err := s.repo.GetMigration(ctx, job.TaskID)
 	if err != nil {
 		return nil, err
+	}
+	if !cdcCaptureReady(task, job.Direction) {
+		return nil, fmt.Errorf("%s CDC capture is unsafe from %s; source position is not acknowledged", job.Direction, task.Status)
 	}
 	if !cdcApplyReady(task, job.Direction) {
 		return s.stageCDCEvents(ctx, job.TaskID, job.Direction, req.Events)
@@ -5821,7 +5899,7 @@ func (s *Service) ApplyEngineJobCDCEvents(ctx context.Context, workerID, jobID s
 		}
 		return staged, nil
 	}
-	result, applyErr := s.ApplyCDCEvents(ctx, job.TaskID, req)
+	result, applyErr := s.applyCDCEvents(ctx, job.TaskID, req)
 	if applyErr != nil {
 		s.recordCDCDeadLetter(ctx, job.TaskID, job.Direction, req, applyErr)
 	}
@@ -5937,6 +6015,9 @@ type cdcBlockedByCommitUncertainError struct {
 type cdcReplayDLQContextKey struct{}
 
 func (e *cdcBlockedByCommitUncertainError) Error() string {
+	if e.status == domain.CDCDeadLetterOpen {
+		return fmt.Sprintf("CDC is blocked by earlier unresolved DLQ %s at %s (%s); replay that transaction before applying newer events", e.dlqID, e.positionValue, e.positionType)
+	}
 	if e.status == domain.CDCDeadLetterReplayRequired {
 		return fmt.Sprintf("CDC is blocked by retained target COMMIT recovery at %s (%s); explicit replay of DLQ %s is required before later source events", e.positionValue, e.positionType, e.dlqID)
 	}
@@ -5948,18 +6029,34 @@ func (e *cdcCommitOutcomeUnknownError) Error() string {
 }
 func (e *cdcCommitOutcomeUnknownError) Unwrap() error { return e.cause }
 
-func (s *Service) unresolvedCommitRecovery(ctx context.Context, taskID, direction string) (*domain.CDCDeadLetter, error) {
+func (s *Service) unresolvedCommitRecovery(ctx context.Context, taskID, direction string, incoming domain.CDCEvent) (*domain.CDCDeadLetter, error) {
 	items, err := s.repo.ListCDCDeadLetters(ctx, taskID)
 	if err != nil {
 		return nil, err
 	}
+	var firstOpen *domain.CDCDeadLetter
 	for i := range items {
-		if !strings.EqualFold(items[i].Direction, direction) {
+		itemDirection, directionErr := cdcDirection(items[i].Direction)
+		if directionErr != nil || itemDirection != direction {
 			continue
+		}
+		if items[i].Status == domain.CDCDeadLetterOpen {
+			if firstOpen == nil || items[i].CreatedAt.Before(firstOpen.CreatedAt) || (items[i].CreatedAt.Equal(firstOpen.CreatedAt) && items[i].ID < firstOpen.ID) {
+				v := items[i]
+				firstOpen = &v
+			}
 		}
 		if items[i].Status == domain.CDCDeadLetterCommitUncertain || items[i].Status == domain.CDCDeadLetterReplayRequired {
 			v := items[i]
 			return &v, nil
+		}
+	}
+	if firstOpen != nil {
+		// Resolve the oldest retained gap first. Scanning for any *other* OPEN
+		// item would make multiple historical dead letters block one another.
+		bypassID, _ := ctx.Value(cdcReplayDLQContextKey{}).(string)
+		if bypassID != firstOpen.ID && !(strings.EqualFold(firstOpen.PositionType, incoming.PositionType) && firstOpen.PositionValue == incoming.PositionValue && firstOpen.Resource == incoming.Resource) {
+			return firstOpen, nil
 		}
 	}
 	return nil, nil
@@ -6020,7 +6117,7 @@ func (s *Service) CDCDeadLetters(ctx context.Context, taskID string) ([]domain.C
 	return s.repo.ListCDCDeadLetters(ctx, taskID)
 }
 
-func (s *Service) ReplayCDCDeadLetter(ctx context.Context, taskID, id string) (*domain.CDCApplyResult, error) {
+func (s *Service) replayCDCDeadLetter(ctx context.Context, taskID, id string) (*domain.CDCApplyResult, error) {
 	dlq, err := s.repo.GetCDCDeadLetter(ctx, id)
 	if err != nil {
 		return nil, err
@@ -6031,8 +6128,11 @@ func (s *Service) ReplayCDCDeadLetter(ctx context.Context, taskID, id string) (*
 	if dlq.Status == domain.CDCDeadLetterCommitUncertain {
 		return nil, errors.New("CDC dead letter has COMMIT_UNCERTAIN status; automatic replay is forbidden until the target commit outcome is resolved")
 	}
+	if dlq.Status == domain.CDCDeadLetterResolved {
+		return nil, errors.New("CDC dead letter is already RESOLVED; replaying an older committed transaction is forbidden")
+	}
 	replayCtx := context.WithValue(ctx, cdcReplayDLQContextKey{}, id)
-	result, applyErr := s.ApplyCDCEvents(replayCtx, taskID, domain.CDCApplyRequest{Direction: dlq.Direction, Events: append([]domain.CDCEvent(nil), dlq.Events...)})
+	result, applyErr := s.applyCDCEvents(replayCtx, taskID, domain.CDCApplyRequest{Direction: dlq.Direction, Events: append([]domain.CDCEvent(nil), dlq.Events...)})
 	now := time.Now()
 	dlq.UpdatedAt = now
 	if applyErr != nil {
@@ -6057,7 +6157,7 @@ func (s *Service) ReplayCDCDeadLetter(ctx context.Context, taskID, id string) (*
 	return result, nil
 }
 
-func (s *Service) ResolveCDCCommitUncertain(ctx context.Context, taskID, id, decision string) (*domain.CDCApplyResult, error) {
+func (s *Service) resolveCDCCommitUncertain(ctx context.Context, taskID, id, decision string) (*domain.CDCApplyResult, error) {
 	dlq, err := s.repo.GetCDCDeadLetter(ctx, id)
 	if err != nil {
 		return nil, err
@@ -6114,7 +6214,7 @@ func (s *Service) ResolveCDCCommitUncertain(ctx context.Context, taskID, id, dec
 		if err := s.repo.UpdateCDCDeadLetter(ctx, dlq); err != nil {
 			return nil, err
 		}
-		return s.ReplayCDCDeadLetter(ctx, taskID, id)
+		return s.replayCDCDeadLetter(ctx, taskID, id)
 	default:
 		return nil, errors.New("decision must be COMMITTED or NOT_COMMITTED")
 	}
@@ -6148,6 +6248,9 @@ func cdcDDLIdentitySafe(tables []domain.MigrationTable, direction string) error 
 }
 
 func (s *Service) persistCDCApplyResult(ctx context.Context, id, direction string, sourceDS *domain.DataSource, result *domain.CDCApplyResult, last domain.CDCEvent) (*domain.CDCApplyResult, error) {
+	if err := checkCDCExecution(ctx); err != nil {
+		return result, err
+	}
 	positionType := last.PositionType
 	if positionType == "" {
 		positionType = "EVENT_BRIDGE"
@@ -6163,7 +6266,7 @@ func (s *Service) persistCDCApplyResult(ctx context.Context, id, direction strin
 	}
 	var err error
 	if direction == "reverse" {
-		err = s.RecordRollbackCDCProgress(ctx, id, position)
+		err = s.recordRollbackCDCProgress(ctx, id, position)
 	} else {
 		err = s.recordCDCProgress(ctx, id, position, false)
 	}
@@ -6309,10 +6412,16 @@ func valuesEqual(a, b []connector.Value) bool {
 	return true
 }
 
-func (s *Service) ApplyCDCEvents(ctx context.Context, id string, req domain.CDCApplyRequest) (*domain.CDCApplyResult, error) {
+func (s *Service) applyCDCEvents(ctx context.Context, id string, req domain.CDCApplyRequest) (*domain.CDCApplyResult, error) {
+	if err := checkCDCExecution(ctx); err != nil {
+		return nil, err
+	}
 	task, err := s.repo.GetMigration(ctx, id)
 	if err != nil {
 		return nil, err
+	}
+	if hasCDCRowFilter(task) {
+		return nil, errors.New("cannot apply CDC to a row-filtered migration")
 	}
 	direction := strings.ToLower(strings.TrimSpace(req.Direction))
 	if direction == "" {
@@ -6336,21 +6445,24 @@ func (s *Service) ApplyCDCEvents(ctx context.Context, id string, req domain.CDCA
 	}
 
 	lastIncoming := req.Events[len(req.Events)-1]
-	if positions, listErr := s.repo.ListCDCPositions(ctx, id, 50); listErr == nil {
-		for _, p := range positions {
-			if p.Direction != direction {
-				continue
+	position, positionErr := s.latestCDC(ctx, id, direction)
+	if positionErr != nil {
+		return nil, fmt.Errorf("read durable CDC checkpoint before target apply: %w", positionErr)
+	}
+	if position != nil {
+		p := position
+		positionType := lastIncoming.PositionType
+		if positionType == "" {
+			positionType = "EVENT_BRIDGE"
+		}
+		if strings.EqualFold(p.PositionType, positionType) && p.PositionValue == lastIncoming.PositionValue && p.Resource == lastIncoming.Resource {
+			if err := s.cleanupTransientCDCCommitFence(ctx, id, direction, lastIncoming); err != nil {
+				return nil, fmt.Errorf("cleanup checkpointed CDC commit fence: %w", err)
 			}
-			if strings.EqualFold(p.PositionType, lastIncoming.PositionType) && p.PositionValue == lastIncoming.PositionValue {
-				if err := s.cleanupTransientCDCCommitFence(ctx, id, direction, lastIncoming); err != nil {
-					return nil, fmt.Errorf("cleanup checkpointed CDC commit fence: %w", err)
-				}
-				return &domain.CDCApplyResult{Applied: 0, LastEventID: lastIncoming.ID, PositionType: p.PositionType, PositionValue: p.PositionValue, Duplicate: true}, nil
-			}
-			break
+			return &domain.CDCApplyResult{Applied: 0, LastEventID: lastIncoming.ID, PositionType: p.PositionType, PositionValue: p.PositionValue, Duplicate: true}, nil
 		}
 	}
-	if recovery, e := s.unresolvedCommitRecovery(ctx, id, direction); e != nil {
+	if recovery, e := s.unresolvedCommitRecovery(ctx, id, direction, lastIncoming); e != nil {
 		return nil, fmt.Errorf("check unresolved CDC commit outcome: %w", e)
 	} else if recovery != nil {
 		bypassID, _ := ctx.Value(cdcReplayDLQContextKey{}).(string)
@@ -6421,6 +6533,9 @@ func (s *Service) ApplyCDCEvents(ctx context.Context, id string, req domain.CDCA
 		if err := cdcDDLIdentitySafe(tables, direction); err != nil {
 			return nil, err
 		}
+		if _, fenced := repository.CDCFenceFrom(ctx); fenced {
+			return nil, errors.New("automatic CDC DDL requires manual review: DDL cannot preserve the target transaction fence on every supported database")
+		}
 		ddlTarget, ok := targetRaw.(connector.DDLApplyConnector)
 		if !ok {
 			return nil, fmt.Errorf("target connector %s does not support CDC DDL apply", targetDS.Type)
@@ -6463,6 +6578,10 @@ func (s *Service) ApplyCDCEvents(ctx context.Context, id string, req domain.CDCA
 	}
 	var tx connector.TransactionalCDCApplyConnector
 	txOpen := false
+	installFence, err := prepareTargetFence(ctx, targetRaw)
+	if err != nil {
+		return nil, fmt.Errorf("prepare target fence: %w", err)
+	}
 	if transactional, ok := targetRaw.(connector.TransactionalCDCApplyConnector); ok {
 		tx = transactional
 		if err := tx.BeginCDCTransaction(ctx); err != nil {
@@ -6474,6 +6593,9 @@ func (s *Service) ApplyCDCEvents(ctx context.Context, id string, req domain.CDCA
 				_ = tx.RollbackCDCTransaction(context.Background())
 			}
 		}()
+		if err := installFence(); err != nil {
+			return nil, fmt.Errorf("target fence: %w", err)
+		}
 	}
 	tables, err := s.repo.ListMigrationTables(ctx, id)
 	if err != nil {
@@ -6485,6 +6607,11 @@ func (s *Service) ApplyCDCEvents(ctx context.Context, id string, req domain.CDCA
 			table = reverseMigrationTable(table)
 		}
 		byName[objectName(table.SourceSchema, table.SourceTable)] = table
+		if _, required := repository.CDCFenceFrom(ctx); required {
+			if err := targetRaw.(connector.TransactionFencer).VerifyFencedTable(ctx, table.TargetSchema, table.TargetTable); err != nil {
+				return nil, err
+			}
+		}
 	}
 	defaultSourceSchema := defaultSchema(*sourceDS)
 	result := &domain.CDCApplyResult{}
@@ -6696,6 +6823,9 @@ func (s *Service) ApplyCDCEvents(ctx context.Context, id string, req domain.CDCA
 		if err != nil {
 			return result, fmt.Errorf("persist pre-COMMIT CDC ambiguity fence: %w", err)
 		}
+		if err := checkCDCExecution(ctx); err != nil {
+			return result, err
+		}
 		if err := tx.CommitCDCTransaction(ctx); err != nil {
 			// Once COMMIT has been sent, an error cannot prove whether the target
 			// committed and only the response was lost. Never issue an automatic
@@ -6753,10 +6883,6 @@ func (s *Service) maybeAlertCDCLag(ctx context.Context, taskID, direction string
 	_ = s.repo.CreateAlert(ctx, &domain.Alert{ID: newID("alt"), Severity: "warning", Title: title, Message: fmt.Sprintf("%s CDC lag is %dms (threshold %dms)", direction, lagMS, threshold), TaskID: taskID, CreatedAt: time.Now()})
 }
 
-func (s *Service) RecordCDCProgress(ctx context.Context, id string, p *domain.CDCPosition) error {
-	return s.recordCDCProgress(ctx, id, p, true)
-}
-
 // recordCDCProgress persists the target-applied forward checkpoint. Internal
 // target-apply paths pass triggerValidation=false because they already hold the
 // per-task CDC spool/apply lock; their outer operation triggers validation only
@@ -6766,6 +6892,9 @@ func (s *Service) recordCDCProgress(ctx context.Context, id string, p *domain.CD
 	task, err := s.repo.GetMigration(ctx, id)
 	if err != nil {
 		return err
+	}
+	if hasCDCRowFilter(task) {
+		return errors.New("cannot advance CDC progress for a row-filtered migration")
 	}
 	if task.Status != domain.StatusCDCCatchingUp && task.Status != domain.StatusReadyCutover {
 		return fmt.Errorf("task cannot accept CDC progress from %s", task.Status)
@@ -6847,13 +6976,16 @@ func (s *Service) requireFreshSequenceSync(ctx context.Context, task *domain.Mig
 	return nil
 }
 
-func (s *Service) ReadyForCutover(ctx context.Context, id string, maxLagMS int64) error {
-	task, err := s.repo.GetMigration(ctx, id)
+func (s *Service) readyForCutover(ctx context.Context, id string, maxLagMS int64) error {
+	task, err := s.unfilteredCDCTask(ctx, id)
 	if err != nil {
 		return err
 	}
 	if task.Status != domain.StatusCDCCatchingUp {
 		return fmt.Errorf("task cannot enter cutover from %s", task.Status)
+	}
+	if err := s.requireResolvedCDCDeadLetters(ctx, id, "forward"); err != nil {
+		return err
 	}
 	if maxLagMS <= 0 {
 		maxLagMS = 5000
@@ -6900,25 +7032,42 @@ func (s *Service) ReadyForCutover(ctx context.Context, id string, maxLagMS int64
 }
 
 func (s *Service) latestCDC(ctx context.Context, taskID, direction string) (*domain.CDCPosition, error) {
-	items, err := s.repo.ListCDCPositions(ctx, taskID, 200)
-	if err != nil {
-		return nil, err
-	}
-	for i := range items {
-		if items[i].Direction == direction || (direction == "forward" && items[i].Direction == "") {
-			v := items[i]
-			return &v, nil
-		}
-	}
-	return nil, nil
+	return s.repo.LatestCDCPosition(ctx, taskID, direction)
 }
 
 func (s *Service) requireSuccessfulValidation(ctx context.Context, task *domain.MigrationTask) error {
+	summary, err := repository.SummarizeChunks(ctx, s.repo, task.ID)
+	if err != nil {
+		return err
+	}
+	if summary.Total != task.TotalChunks || summary.Success != summary.Total {
+		return fmt.Errorf("validation needs all planned chunks to be successful (planned %d, present %d, successful %d)", task.TotalChunks, summary.Total, summary.Success)
+	}
 	chunkID, status, err := repository.FirstInvalidSuccessfulChunk(ctx, s.repo, task.ID)
 	if err != nil {
 		return err
 	}
 	if chunkID == "" {
+		tables, err := s.repo.ListMigrationTables(ctx, task.ID)
+		if err != nil {
+			return err
+		}
+		for _, t := range tables {
+			if !plainTableRanges(t) {
+				continue
+			}
+			first, err := repository.ListTableChunksPage(ctx, s.repo, task.ID, t.ID, -1, "", 1)
+			if err != nil {
+				return err
+			}
+			if len(first) > 0 {
+				if err := s.checkTableRangeCoverage(ctx, t, first[0].SplitType); err != nil {
+					return err
+				}
+			} else if t.TotalChunks > 0 {
+				return fmt.Errorf("%w for table %s: no chunk descriptors", errIncompleteRangeCoverage, t.ID)
+			}
+		}
 		return nil
 	}
 	if status == "" {
@@ -6952,7 +7101,7 @@ func (s *Service) waitEngineJobsStopped(ctx context.Context, taskID, direction s
 			}
 			switch job.Status {
 			case domain.EngineJobFailed:
-				return fmt.Errorf("CDC engine job %s failed while stopping for cutover: %s", job.ID, job.LastError)
+				return fmt.Errorf("%s CDC engine job %s failed while stopping: %s", direction, job.ID, job.LastError)
 			case domain.EngineJobPending, domain.EngineJobRunning, domain.EngineJobStopRequested:
 				active++
 			}
@@ -6961,7 +7110,7 @@ func (s *Service) waitEngineJobsStopped(ctx context.Context, taskID, direction s
 			return nil
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("timed out stopping %d forward CDC engine job(s) before cutover", active)
+			return fmt.Errorf("timed out stopping %d %s CDC engine job(s)", active, direction)
 		}
 		select {
 		case <-ctx.Done():
@@ -6971,25 +7120,28 @@ func (s *Service) waitEngineJobsStopped(ctx context.Context, taskID, direction s
 	}
 }
 
-func (s *Service) drainFinalCutoverSpool(ctx context.Context, taskID string) error {
+func (s *Service) drainFinalCDCSpool(ctx context.Context, taskID, direction string) error {
 	for pass := 0; pass < 100; pass++ {
-		stats, err := s.DrainCDCSpool(ctx, taskID, "forward", 10000)
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		stats, err := s.DrainCDCSpool(ctx, taskID, direction, 10000)
 		if err != nil {
 			return err
 		}
 		if stats.PendingTransactions == 0 && stats.PendingEvents == 0 {
-			return nil
+			return s.requireResolvedCDCDeadLetters(ctx, taskID, direction)
 		}
 	}
-	stats, err := s.repo.CDCSpoolStats(ctx, taskID, "forward")
+	stats, err := s.repo.CDCSpoolStats(ctx, taskID, direction)
 	if err != nil {
 		return err
 	}
-	return fmt.Errorf("final cutover CDC spool did not drain: %d transactions / %d events remain", stats.PendingTransactions, stats.PendingEvents)
+	return fmt.Errorf("final %s CDC spool did not drain: %d transactions / %d events remain", direction, stats.PendingTransactions, stats.PendingEvents)
 }
 
-func (s *Service) Cutover(ctx context.Context, id string) error {
-	task, err := s.repo.GetMigration(ctx, id)
+func (s *Service) cutover(ctx context.Context, id string) (retErr error) {
+	task, err := s.unfilteredCDCTask(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -7001,18 +7153,51 @@ func (s *Service) Cutover(ctx context.Context, id string) error {
 	// so any final transactions already staged in the durable spool can still be
 	// applied safely. External CDC users are responsible for quiescing their
 	// source before invoking cutover, as before.
-	if err := s.requestStopEngineJobs(ctx, id, "forward"); err != nil {
-		return fmt.Errorf("request forward CDC stop for cutover: %w", err)
-	}
-	if err := s.waitEngineJobsStopped(ctx, id, "forward"); err != nil {
+	if err := s.verifyFinalWatermark(ctx, id, "forward"); err != nil {
 		return err
 	}
-	if err := s.drainFinalCutoverSpool(ctx, id); err != nil {
+	if err := s.lifecycleStep(ctx, id, "forward", "STOP_READER", func() error {
+		if err := s.requestStopEngineJobs(ctx, id, "forward"); err != nil {
+			return err
+		}
+		return s.waitEngineJobsStopped(ctx, id, "forward")
+	}); err != nil {
+		return err
+	}
+	if err := s.lifecycleStep(ctx, id, "forward", "DRAIN_SPOOL", func() error { return s.drainFinalCDCSpool(ctx, id, "forward") }); err != nil {
 		return fmt.Errorf("drain final CDC spool for cutover: %w", err)
+	}
+	opCtx, release, err := s.lockCDCExecution(ctx, id, "forward")
+	if err != nil {
+		return err
+	}
+	defer release()
+	ctx = opCtx
+	// Exclude external writers between the final empty-spool check and the
+	// durable status transition. Never finalize using the pre-drain snapshot.
+	task, err = s.repo.GetMigration(ctx, id)
+	if err != nil {
+		return err
+	}
+	if task.Status != domain.StatusReadyCutover {
+		return fmt.Errorf("task cannot cut over from %s", task.Status)
+	}
+	if err := s.requireFinalCDCState(ctx, id, "forward"); err != nil {
+		return err
+	}
+	if err := s.verifyFinalWatermarkLocked(ctx, id, "forward"); err != nil {
+		return err
+	}
+	task, err = s.repo.GetMigration(ctx, id)
+	if err != nil {
+		return err
 	}
 
 	// Once CUTOVER_RUNNING is durable, new ApplyCDCEvents calls are rejected.
 	// This forms the connector-finalization critical section.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := Transition(task, domain.StatusCutoverRunning); err != nil {
 		return err
 	}
@@ -7020,6 +7205,11 @@ func (s *Service) Cutover(ctx context.Context, id string) error {
 	if err := s.repo.UpdateMigration(ctx, task); err != nil {
 		return err
 	}
+	defer func() {
+		if retErr != nil {
+			s.failTaskUnlessCanceled(ctx, id, fmt.Errorf("cutover finalization failed; inspect database state before manual recovery: %w", retErr))
+		}
+	}()
 
 	tables, err := s.repo.ListMigrationTables(ctx, id)
 	if err != nil {
@@ -7028,28 +7218,59 @@ func (s *Service) Cutover(ctx context.Context, id string) error {
 	// Re-sync after the last drained CDC transaction, then restore production
 	// generated-column modes (for Db2 LUW this changes migration-stage BY
 	// DEFAULT identity columns back to their original GENERATED ALWAYS mode).
-	if err := s.syncGeneratedValueState(ctx, task, tables); err != nil {
-		task.Status = domain.StatusFailed
-		task.LastError = "cutover generated-value state synchronization failed: " + err.Error()
-		_ = s.repo.UpdateMigration(ctx, task)
-		return errors.New(task.LastError)
+	if err := s.lifecycleStep(ctx, id, "forward", "SYNC_GENERATED_STATE", func() error {
+		current, e := s.repo.GetMigration(ctx, id)
+		if e != nil {
+			return e
+		}
+		return s.syncGeneratedValueState(ctx, current, tables)
+	}); err != nil {
+		return fmt.Errorf("cutover generated-value state synchronization failed: %w", err)
 	}
-	if err := s.finalizeGeneratedValueModes(ctx, task, tables); err != nil {
-		task.Status = domain.StatusFailed
-		task.LastError = "cutover generated-value mode finalization failed: " + err.Error()
-		_ = s.repo.UpdateMigration(ctx, task)
-		return errors.New(task.LastError)
+	if err := s.lifecycleStep(ctx, id, "forward", "FINALIZE_GENERATED_MODES", func() error {
+		current, e := s.repo.GetMigration(ctx, id)
+		if e != nil {
+			return e
+		}
+		return s.finalizeGeneratedValueModes(ctx, current, tables)
+	}); err != nil {
+		return fmt.Errorf("cutover generated-value mode finalization failed: %w", err)
 	}
 
+	task, err = s.repo.GetMigration(ctx, id)
+	if err != nil {
+		return err
+	}
+	if op := task.CutoverOperation; op != nil && op.TableLockProof != "" {
+		// Target finalization can take time. Recheck the source transaction
+		// after those side effects, before publishing a successful cutover.
+		if err := s.verifyFinalWatermarkLocked(ctx, id, "forward"); err != nil {
+			return err
+		}
+		task, err = s.repo.GetMigration(ctx, id)
+		if err != nil {
+			return err
+		}
+	}
 	if err := Transition(task, domain.StatusFinished); err != nil {
 		return err
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	task.Progress = 100
+	if task.CutoverOperation != nil {
+		task.CutoverOperation.Phase = "COMPLETED"
+		task.CutoverOperation.CleanupStatus = "PENDING"
+	}
 	task.UpdatedAt = time.Now()
 	if err := s.repo.UpdateMigration(ctx, task); err != nil {
 		return err
 	}
 	s.archiveValidationBestEffort(ctx, task.ID)
+	if err := s.completeLifecycleCleanup(ctx, id, "forward"); err != nil {
+		s.logTask(ctx, id, "", "", "", "WARN", err.Error())
+	}
 	return nil
 }
 
@@ -7128,8 +7349,8 @@ func (s *Service) chooseRollbackCDCEngine(_ *domain.MigrationTask, reverseSource
 
 // PrepareRollback records the current position on the post-cutover target. An external
 // reverse CDC engine can then start at this exact position and stream target -> source.
-func (s *Service) PrepareRollback(ctx context.Context, id string) error {
-	task, err := s.repo.GetMigration(ctx, id)
+func (s *Service) prepareRollback(ctx context.Context, id string) error {
+	task, err := s.unfilteredCDCTask(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -7153,6 +7374,12 @@ func (s *Service) PrepareRollback(ctx context.Context, id string) error {
 		return err
 	}
 	defer target.Close()
+	// Persist step intent before a source-side replication resource may be
+	// created. A restart can now identify the exact uncertain preparation step.
+	task.RollbackOperation = &domain.LifecycleOperation{ID: newID("rollback"), Direction: "reverse", Phase: "CAPTURE_REVERSE_START", Steps: []domain.ControlStep{{Name: "CAPTURE_REVERSE_START", Status: "RUNNING", StartedAt: time.Now().UTC()}}}
+	if err := s.repo.UpdateMigration(ctx, task); err != nil {
+		return err
+	}
 	var pos *domain.CDCPosition
 	if selectedSource, ok := target.(connector.CDCSelectionPositionSource); ok {
 		tables, listErr := s.repo.ListMigrationTables(ctx, task.ID)
@@ -7193,10 +7420,20 @@ func (s *Service) PrepareRollback(ctx context.Context, id string) error {
 	pos.TaskID = id
 	pos.Direction = "reverse"
 	pos.RecordedAt = time.Now()
+	task.RollbackOperation.RollbackStart = *pos
+	task.RollbackOperation.Steps[0].Status = "DONE"
+	task.RollbackOperation.Steps[0].FinishedAt = time.Now().UTC()
+	task.RollbackOperation.Phase = "RECORD_REVERSE_START"
+	if err := s.repo.UpdateMigration(ctx, task); err != nil {
+		return err
+	}
 	if err := s.repo.CreateCDCPosition(ctx, pos); err != nil {
 		return err
 	}
 	task.CDCLagMS = 0
+	if task.RollbackOperation != nil {
+		task.RollbackOperation.Phase = "REVERSE_CAPTURE_READY"
+	}
 	task.UpdatedAt = time.Now()
 	if err := s.repo.UpdateMigration(ctx, task); err != nil {
 		return err
@@ -7205,7 +7442,7 @@ func (s *Service) PrepareRollback(ctx context.Context, id string) error {
 }
 
 func (s *Service) MarkRollbackCDCStarted(ctx context.Context, id string, p *domain.CDCPosition) error {
-	task, err := s.repo.GetMigration(ctx, id)
+	task, err := s.unfilteredCDCTask(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -7228,8 +7465,8 @@ func (s *Service) MarkRollbackCDCStarted(ctx context.Context, id string, p *doma
 	return s.repo.UpdateMigration(ctx, task)
 }
 
-func (s *Service) RecordRollbackCDCProgress(ctx context.Context, id string, p *domain.CDCPosition) error {
-	task, err := s.repo.GetMigration(ctx, id)
+func (s *Service) recordRollbackCDCProgress(ctx context.Context, id string, p *domain.CDCPosition) error {
+	task, err := s.unfilteredCDCTask(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -7249,13 +7486,16 @@ func (s *Service) RecordRollbackCDCProgress(ctx context.Context, id string, p *d
 	return s.repo.UpdateMigration(ctx, task)
 }
 
-func (s *Service) ReadyForRollback(ctx context.Context, id string, maxLagMS int64) error {
-	task, err := s.repo.GetMigration(ctx, id)
+func (s *Service) readyForRollback(ctx context.Context, id string, maxLagMS int64) error {
+	task, err := s.unfilteredCDCTask(ctx, id)
 	if err != nil {
 		return err
 	}
 	if task.Status != domain.StatusRollbackSyncing {
 		return fmt.Errorf("task cannot enter rollback-ready from %s", task.Status)
+	}
+	if err := s.requireResolvedCDCDeadLetters(ctx, id, "reverse"); err != nil {
+		return err
 	}
 	if maxLagMS <= 0 {
 		maxLagMS = 5000
@@ -7293,13 +7533,55 @@ func (s *Service) ReadyForRollback(ctx context.Context, id string, maxLagMS int6
 	return s.repo.UpdateMigration(ctx, task)
 }
 
-func (s *Service) Rollback(ctx context.Context, id string) error {
-	task, err := s.repo.GetMigration(ctx, id)
+func (s *Service) rollback(ctx context.Context, id string) error {
+	task, err := s.unfilteredCDCTask(ctx, id)
 	if err != nil {
 		return err
 	}
 	if task.Status != domain.StatusRollbackReady {
 		return fmt.Errorf("task cannot roll back from %s", task.Status)
+	}
+	// Keep reverse apply open until the reader has flushed its final events.
+	// An error leaves ROLLBACK_READY so the operator can fix it and retry.
+	if err := s.verifyFinalWatermark(ctx, id, "reverse"); err != nil {
+		return err
+	}
+	if err := s.lifecycleStep(ctx, id, "reverse", "STOP_READER", func() error {
+		if err := s.requestStopEngineJobs(ctx, id, "reverse"); err != nil {
+			return err
+		}
+		return s.waitEngineJobsStopped(ctx, id, "reverse")
+	}); err != nil {
+		return err
+	}
+	if err := s.lifecycleStep(ctx, id, "reverse", "DRAIN_SPOOL", func() error { return s.drainFinalCDCSpool(ctx, id, "reverse") }); err != nil {
+		return fmt.Errorf("drain final CDC spool for rollback: %w", err)
+	}
+	opCtx, release, err := s.lockCDCExecution(ctx, id, "reverse")
+	if err != nil {
+		return err
+	}
+	defer release()
+	ctx = opCtx
+	task, err = s.repo.GetMigration(ctx, id)
+	if err != nil {
+		return err
+	}
+	if task.Status != domain.StatusRollbackReady {
+		return fmt.Errorf("task cannot roll back from %s", task.Status)
+	}
+	if err := s.requireFinalCDCState(ctx, id, "reverse"); err != nil {
+		return err
+	}
+	if err := s.verifyFinalWatermarkLocked(ctx, id, "reverse"); err != nil {
+		return err
+	}
+	task, err = s.repo.GetMigration(ctx, id)
+	if err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	if err := Transition(task, domain.StatusRollbackRunning); err != nil {
 		return err
@@ -7311,12 +7593,18 @@ func (s *Service) Rollback(ctx context.Context, id string) error {
 	if err := Transition(task, domain.StatusRolledBack); err != nil {
 		return err
 	}
+	if task.RollbackOperation != nil {
+		task.RollbackOperation.Phase = "COMPLETED"
+		task.RollbackOperation.CleanupStatus = "PENDING"
+	}
 	task.UpdatedAt = time.Now()
 	if err := s.repo.UpdateMigration(ctx, task); err != nil {
 		return err
 	}
 	s.archiveValidationBestEffort(ctx, task.ID)
-	_ = s.requestStopEngineJobs(ctx, id, "reverse")
+	if err := s.completeLifecycleCleanup(ctx, id, "reverse"); err != nil {
+		s.logTask(ctx, id, "", "", "", "WARN", err.Error())
+	}
 	return nil
 }
 
@@ -7392,9 +7680,13 @@ func (s *Service) cdcRenderTask(ctx context.Context, task *domain.MigrationTask,
 	// Managed CDC jobs may be reclaimed by another Worker after a crash. Render
 	// from the newest durable apply checkpoint, not always the original task
 	// start, so native GTID/LSN/file-position readers resume close to the last
-	// committed target transaction. Replaying from the initial start is safe but
-	// can be prohibitively expensive after a long-running migration.
-	if latest, e := s.latestCDC(ctx, task.ID, direction); e == nil && latest != nil &&
+	// committed target transaction. A metadata read failure must not silently
+	// fall back to the initial start and replay already committed transactions.
+	latest, err := s.latestCDC(ctx, task.ID, direction)
+	if err != nil {
+		return nil, domain.DataSource{}, domain.DataSource{}, nil, fmt.Errorf("read CDC resume checkpoint: %w", err)
+	}
+	if latest != nil &&
 		strings.TrimSpace(latest.PositionValue) != "" && latest.PositionType != "EXTERNAL_MANAGED" {
 		copyTask.CDCStartTimestampMS = latest.SourceTimestampMS
 		copyTask.CDCStartPositionType = latest.PositionType
@@ -7406,7 +7698,11 @@ func (s *Service) cdcRenderTask(ctx context.Context, task *domain.MigrationTask,
 	// On Worker failover resume from the newest pending spool position instead
 	// of the older target-apply checkpoint, otherwise source retention gains are
 	// lost and the same already-spooled range is decoded again.
-	if staged, e := s.repo.LatestPendingCDCSpool(ctx, task.ID, direction); e == nil && staged != nil && strings.TrimSpace(staged.PositionValue) != "" {
+	staged, err := s.repo.LatestPendingCDCSpool(ctx, task.ID, direction)
+	if err != nil {
+		return nil, domain.DataSource{}, domain.DataSource{}, nil, fmt.Errorf("read CDC resume spool: %w", err)
+	}
+	if staged != nil && strings.TrimSpace(staged.PositionValue) != "" {
 		copyTask.CDCStartTimestampMS = staged.SourceTimestampMS
 		copyTask.CDCStartPositionType = staged.PositionType
 		copyTask.CDCStartPositionValue = staged.PositionValue
@@ -7455,7 +7751,7 @@ func (s *Service) StartEngineJob(ctx context.Context, workerID, jobID string) er
 	if err != nil {
 		return err
 	}
-	if j.Status != domain.EngineJobRunning || j.WorkerID != workerID {
+	if j.Status != domain.EngineJobRunning || j.WorkerID != workerID || !repository.WorkerLeaseValid(ctx, j.LeaseGeneration, j.LeaseUntil) {
 		return repository.ErrLeaseOwner
 	}
 	task, err := s.repo.GetMigration(ctx, j.TaskID)
@@ -7463,7 +7759,7 @@ func (s *Service) StartEngineJob(ctx context.Context, workerID, jobID string) er
 		return err
 	}
 	j.UpdatedAt = time.Now()
-	if err = s.repo.UpdateEngineJob(ctx, j); err != nil {
+	if err = s.repo.UpdateOwnedEngineJob(ctx, workerID, j); err != nil {
 		return err
 	}
 	if j.Direction == "reverse" {
@@ -7485,7 +7781,7 @@ func (s *Service) EngineJobControl(ctx context.Context, workerID, jobID string) 
 	if err != nil {
 		return false, err
 	}
-	if j.WorkerID != workerID {
+	if j.WorkerID != workerID || !repository.WorkerLeaseValid(ctx, j.LeaseGeneration, j.LeaseUntil) {
 		return false, repository.ErrLeaseOwner
 	}
 	return j.Status == domain.EngineJobStopRequested, nil
@@ -7501,7 +7797,7 @@ func (s *Service) EngineJobCDCReady(ctx context.Context, workerID, jobID string)
 	if err != nil {
 		return false, "", err
 	}
-	if j.WorkerID != workerID {
+	if j.WorkerID != workerID || !repository.WorkerLeaseValid(ctx, j.LeaseGeneration, j.LeaseUntil) {
 		return false, "", repository.ErrLeaseOwner
 	}
 	if j.Status != domain.EngineJobRunning && j.Status != domain.EngineJobStopRequested {
@@ -7525,34 +7821,33 @@ func (s *Service) CompleteEngineJob(ctx context.Context, workerID, jobID string,
 	if err != nil {
 		return err
 	}
-	if j.WorkerID != workerID {
+	if j.WorkerID != workerID || !repository.WorkerLeaseValid(ctx, j.LeaseGeneration, j.LeaseUntil) {
 		return repository.ErrLeaseOwner
 	}
 	j.WorkerID = ""
 	j.LeaseUntil = time.Time{}
 	j.FinishedAt = time.Now()
 	j.UpdatedAt = time.Now()
-	wasStopRequested := j.Status == domain.EngineJobStopRequested
-	if wasStopRequested || result.Error == "" {
+	if result.Error == "" {
 		j.Status = domain.EngineJobStopped
 	} else {
 		j.Status = domain.EngineJobFailed
 		j.LastError = result.Error
 	}
-	if err := s.repo.UpdateEngineJob(ctx, j); err != nil {
+	if err := s.repo.UpdateOwnedEngineJob(ctx, workerID, j); err != nil {
 		return err
 	}
-	if wasStopRequested {
-		_ = s.cleanupCDCCheckpoint(ctx, j.TaskID, j.Direction)
-	}
+	// Stopping a process may be a pause or a retryable failed cutover. Keep
+	// source log retention until the lifecycle operation durably succeeds.
 	return nil
 }
+
 func (s *Service) FailEngineJob(ctx context.Context, workerID, jobID string, result domain.EngineJobResult) error {
 	j, err := s.repo.GetEngineJob(ctx, jobID)
 	if err != nil {
 		return err
 	}
-	if j.WorkerID != workerID {
+	if j.WorkerID != workerID || !repository.WorkerLeaseValid(ctx, j.LeaseGeneration, j.LeaseUntil) {
 		return repository.ErrLeaseOwner
 	}
 	j.RetryCount++
@@ -7570,11 +7865,15 @@ func (s *Service) FailEngineJob(ctx context.Context, workerID, jobID string, res
 	} else {
 		j.Status = domain.EngineJobFailed
 		j.FinishedAt = time.Now()
-		if task != nil {
-			s.failTask(task.ID, fmt.Errorf("managed %s CDC engine failed after %d attempts: %s", j.Engine, j.RetryCount, result.Error))
-		}
+
 	}
-	return s.repo.UpdateEngineJob(ctx, j)
+	if err := s.repo.UpdateOwnedEngineJob(ctx, workerID, j); err != nil {
+		return err
+	}
+	if j.Status == domain.EngineJobFailed && task != nil {
+		s.failTask(task.ID, fmt.Errorf("managed %s CDC engine failed after %d attempts: %s", j.Engine, j.RetryCount, result.Error))
+	}
+	return nil
 }
 func (s *Service) cleanupCDCCheckpoint(ctx context.Context, taskID, direction string) error {
 	task, err := s.repo.GetMigration(ctx, taskID)
@@ -7586,12 +7885,15 @@ func (s *Service) cleanupCDCCheckpoint(ctx context.Context, taskID, direction st
 	if direction == "reverse" {
 		dsID = task.TargetID
 		resource = ""
-		positions, _ := s.repo.ListCDCPositions(ctx, taskID, 200)
-		for _, p := range positions {
-			if p.Direction == "reverse" && p.Resource != "" {
-				resource = p.Resource
-				break
-			}
+		if task.RollbackOperation != nil {
+			resource = task.RollbackOperation.RollbackStart.Resource
+		}
+		position, err := s.latestCDC(ctx, taskID, "reverse")
+		if err != nil {
+			return err
+		}
+		if resource == "" && position != nil {
+			resource = position.Resource
 		}
 	}
 	if resource == "" {

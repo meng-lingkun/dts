@@ -37,6 +37,9 @@ func addAuth(req *http.Request, token string) {
 	if v := strings.TrimSpace(os.Getenv("DTS_WORKER_TOKEN")); v != "" {
 		req.Header.Set("X-DTS-Worker-Token", v)
 	}
+	if generation := os.Getenv("DTS_LEASE_GENERATION"); generation != "" {
+		req.Header.Set("X-DTS-Lease-Generation", generation)
+	}
 }
 func waitReady(ctx context.Context, client *http.Client, endpoint, token string) error {
 	if endpoint == "" {

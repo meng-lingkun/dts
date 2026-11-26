@@ -15,24 +15,49 @@ spec:
       automountServiceAccountToken: false
       securityContext:
         seccompProfile: {type: RuntimeDefault}
+        fsGroup: 999
+        fsGroupChangePolicy: OnRootMismatch
       containers:
       - name: postgres
         image: dts/postgres:17
         imagePullPolicy: Never
+        command: ["/bin/sh", "-ec"]
+        args:
+        - |
+          mount=/var/lib/postgresql/data
+          if [ -s "$mount/PG_VERSION" ]; then
+            [ ! -e "$mount/pgdata/PG_VERSION" ] || { echo "Two PostgreSQL clusters on one volume" >&2; exit 1; }
+            export PGDATA="$mount"
+          else
+            for entry in "$mount"/* "$mount"/.[!.]* "$mount"/..?*; do
+              [ -e "$entry" ] || [ -L "$entry" ] || continue
+              case "$entry" in "$mount/lost+found"|"$mount/pgdata") ;; *)
+                echo "Unexpected data on PostgreSQL volume. Check PG_VERSION before starting." >&2; exit 1;;
+              esac
+            done
+            export PGDATA="$mount/pgdata"
+          fi
+          exec docker-entrypoint.sh postgres
         env:
         - {name: POSTGRES_USER, value: dts}
         - {name: POSTGRES_DB, value: dts}
+        - {name: POSTGRES_INITDB_ARGS, value: "--auth-host=scram-sha-256"}
+        - name: POD_IP
+          valueFrom: {fieldRef: {fieldPath: status.podIP}}
         - name: POSTGRES_PASSWORD
           valueFrom: {secretKeyRef: {name: dts-secrets, key: metadata-password}}
         ports: [{containerPort: 5432, name: postgres}]
         readinessProbe:
-          exec: {command: ["pg_isready","-U","dts","-d","dts"]}
+          exec: {command: ["/bin/sh","-ec","PGREQUIREAUTH=scram-sha-256,md5 PGPASSWORD=\"$POSTGRES_PASSWORD\" exec psql -w -h \"$POD_IP\" -U dts -d dts -Atqc 'SELECT 1'"]}
           initialDelaySeconds: 5
           periodSeconds: 5
         resources:
           requests: {cpu: "500m", memory: "1Gi"}
           limits: {cpu: "2", memory: "4Gi"}
         securityContext:
+          runAsNonRoot: true
+          runAsUser: 999
+          runAsGroup: 999
           allowPrivilegeEscalation: false
           capabilities: {drop: ["ALL"]}
         volumeMounts: [{name: data, mountPath: /var/lib/postgresql/data}]

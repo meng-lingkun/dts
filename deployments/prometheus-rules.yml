@@ -1,6 +1,10 @@
 groups:
 - name: dts
   rules:
+  - alert: DTSCDCCommitUncertain
+    expr: dts_cdc_commit_uncertain > 0
+    labels: {severity: critical}
+    annotations: {summary: "Target COMMIT outcome is uncertain. Inspect the target before resolving the DLQ entry."}
   - alert: DTSTaskFailed
     expr: dts_migrations_failed > 0
     for: 1m

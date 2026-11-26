@@ -65,9 +65,20 @@ func (t *TokenSet) Authenticate(token string) (Role, bool) {
 }
 
 func Allowed(role Role, method, path string) bool {
+	switch role {
+	case RoleAdmin, RoleDBA, RoleOperator, RoleViewer:
+	default:
+		return false
+	}
 	// User administration is intentionally admin-only, including reads.
 	if strings.HasPrefix(path, "/api/v1/users") {
 		return role == RoleAdmin
+	}
+	if method == "DELETE" && strings.HasPrefix(path, "/api/v1/auth/sessions/") {
+		return true // The handler restricts the operation to the signed-in user.
+	}
+	if path == "/api/v1/auth/personal-tokens" || method == "DELETE" && strings.HasPrefix(path, "/api/v1/auth/personal-tokens/") {
+		return true // A signed user session and ownership are checked in the handler.
 	}
 	// Validation-report signing-key lifecycle issues organization trust certificates.
 	// Keep transition/revocation signing admin-only even though ordinary report reads are public to authenticated roles.
@@ -101,16 +112,29 @@ func Allowed(role Role, method, path string) bool {
 	// Operator can operate ordinary migration lifecycle and validation but cannot
 	// change datasource credentials or perform cutover/rollback.
 	if role == RoleOperator {
-		if strings.HasPrefix(path, "/api/v1/datasources") {
+		if method != "POST" || !strings.HasPrefix(path, "/api/v1/") {
 			return false
 		}
-		if strings.Contains(path, "/cutover") || strings.Contains(path, "/rollback") {
-			return false
-		}
-		if strings.HasPrefix(path, "/api/v1/alerts/") {
+		parts := strings.Split(strings.TrimPrefix(path, "/api/v1/"), "/")
+		if len(parts) == 3 && parts[0] == "alerts" && parts[1] != "" && parts[2] == "ack" {
 			return true
 		}
-		return strings.HasPrefix(path, "/api/v1/migrations")
+		if parts[0] != "migrations" {
+			return false
+		}
+		if len(parts) == 1 {
+			return true // Create a migration; starting it remains a separate action.
+		}
+		if len(parts) < 3 || parts[1] == "" {
+			return false
+		}
+		// Explicitly allow ordinary lifecycle actions. A prefix policy also
+		// allowed ready-cutover and arbitrary CDC row/checkpoint injection.
+		switch strings.Join(parts[2:], "/") {
+		case "start", "pause", "resume", "cancel", "validate", "repair", "cdc/spool/drain", "validation-report/archive":
+			return true
+		}
+		return false
 	}
 	return false
 }

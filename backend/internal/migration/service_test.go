@@ -192,7 +192,12 @@ func (c fakeConnector) CreateCDCCheckpoint(_ context.Context, resource string) (
 	p.Resource = resource
 	return p, nil
 }
-func (fakeConnector) DropCDCCheckpoint(context.Context, string) error { return nil }
+func (fakeConnector) DropCDCCheckpoint(context.Context, string) error   { return nil }
+func (fakeConnector) VerifyCDCQuiescence(context.Context) error         { return nil }
+func (fakeConnector) CDCSourceIdentity(context.Context) (string, error) { return "test-cluster", nil }
+func (c fakeConnector) CaptureFreezeBarrier(ctx context.Context) (*domain.CDCPosition, error) {
+	return c.CurrentCDCPosition(ctx)
+}
 
 func TestServiceIncrementalOnlyCDCBridge(t *testing.T) {
 	ctx := context.Background()
@@ -317,10 +322,13 @@ func TestRollbackControlPlane(t *testing.T) {
 	if err := svc.MarkRollbackCDCStarted(ctx, m.ID, &domain.CDCPosition{PositionType: "LSN", PositionValue: "0/456"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.RecordRollbackCDCProgress(ctx, m.ID, &domain.CDCPosition{LagMS: 100}); err != nil {
+	if err := svc.RecordRollbackCDCProgress(ctx, m.ID, &domain.CDCPosition{PositionType: "LSN", PositionValue: "0/456", LagMS: 100}); err != nil {
 		t.Fatal(err)
 	}
 	if err := svc.ReadyForRollback(ctx, m.ID, 1000); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ConfirmWriteFreeze(ctx, m.ID, "reverse", "test-admin", domain.WriteFreezeRequest{WritesFrozen: true, Evidence: "test business write freeze", IdempotencyKey: "rollback-freeze-test"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := svc.Rollback(ctx, m.ID); err != nil {
@@ -634,7 +642,10 @@ func (c *cdcApplyConnector) TruncateTable(context.Context, string, string) error
 	c.state.truncates++
 	return nil
 }
-func (c *cdcApplyConnector) BeginCDCTransaction(context.Context) error { c.state.begins++; return nil }
+func (c *cdcApplyConnector) BeginCDCTransaction(context.Context) error               { c.state.begins++; return nil }
+func (c *cdcApplyConnector) EnsureExecutionFence(context.Context) error              { return nil }
+func (c *cdcApplyConnector) VerifyFencedTable(context.Context, string, string) error { return nil }
+func (c *cdcApplyConnector) FenceTransaction(context.Context, string, int64) error   { return nil }
 func (c *cdcApplyConnector) CommitCDCTransaction(context.Context) error {
 	c.state.commits++
 	return nil
@@ -1764,7 +1775,7 @@ func (c *recordingDDLConnector) ExecDDL(_ context.Context, schema, ddl string) e
 	return nil
 }
 
-func TestApplySameFamilyDDLAndCheckpoint(t *testing.T) {
+func TestFencedCDCRejectsAutoDDLWithoutCheckpoint(t *testing.T) {
 	ctx := context.Background()
 	repo := memory.New()
 	rec := &recordingDDLConnector{}
@@ -1787,17 +1798,14 @@ func TestApplySameFamilyDDLAndCheckpoint(t *testing.T) {
 	}
 	svc := NewService(repo, reg)
 	res, err := svc.ApplyCDCEvents(ctx, task.ID, domain.CDCApplyRequest{Events: []domain.CDCEvent{{Operation: domain.CDCDDL, SourceSchema: "app", SQL: "ALTER TABLE orders ADD COLUMN note varchar(32)", PositionType: "GTID", PositionValue: "24bc7850-2c16-11e6-a073-0242ac110002:1-9", SourceTimestampMS: time.Now().UnixMilli()}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if res.Applied != 1 || len(rec.executed) != 1 || !strings.Contains(rec.executed[0], "ALTER TABLE") {
+	if err == nil || !strings.Contains(err.Error(), "manual review") || len(rec.executed) != 0 {
 		t.Fatalf("result=%+v executed=%v", res, rec.executed)
 	}
 	positions, err := repo.ListCDCPositions(ctx, task.ID, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(positions) == 0 || positions[0].PositionType != "GTID" {
+	if len(positions) != 0 {
 		t.Fatalf("positions=%+v", positions)
 	}
 }
@@ -2871,10 +2879,7 @@ func TestApplyGaussDBSameFamilyDDL(t *testing.T) {
 	}
 	svc := NewService(repo, reg)
 	res, err := svc.ApplyCDCEvents(ctx, task.ID, domain.CDCApplyRequest{Events: []domain.CDCEvent{{Operation: domain.CDCDDL, SourceSchema: "public", SQL: "ALTER TABLE public.orders ADD COLUMN note varchar(32)", PositionType: "GAUSSDB_LSN", PositionValue: "0/700"}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if res.Applied != 1 || len(rec.executed) != 1 {
+	if err == nil || !strings.Contains(err.Error(), "manual review") || len(rec.executed) != 0 {
 		t.Fatalf("result=%+v executed=%v", res, rec.executed)
 	}
 }

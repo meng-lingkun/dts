@@ -1,6 +1,6 @@
 # DTS 维护手册
 
-适用版本：`0.15.0-rc49`
+适用源码版本为 `0.15.0-rc50`。
 
 ## 1. 维护原则
 
@@ -47,10 +47,11 @@ File Spool 已按 Build Tag 拆分：Linux 使用 `statfs`，Windows 开发测�
 ```bash
 cd web
 npm ci
+npm test
 npm run build
 ```
 
-仓库已提交 `package-lock.json`，CI 使用 `npm ci`、`vue-tsc --noEmit` 和 Vite 生产构建。前端单元/E2E 测试和 Lint 配置仍待补充。
+CI 使用 `package-lock.json` 安装依赖，执行依赖审计、前端单测、类型检查和 Vite 生产构建。
 
 ### 部署文件
 
@@ -97,7 +98,7 @@ DTS_METADATA_PASSWORD='...' deployments/scripts/backup.sh
 DTS_METADATA_PASSWORD='...' deployments/scripts/migrate-metadata.sh
 ```
 
-脚本按文件名顺序、单文件事务执行 `backend/migrations/*.sql`。迁移完成后确认：
+脚本在一个事务内执行与 Server 相同的 `schema.sql`。数据库事务级 advisory lock 将并发的 Schema 初始化串行化。迁移完成后确认：
 
 ```sql
 SELECT schema_version, updated_at
@@ -105,9 +106,9 @@ FROM metadata_schema_state
 WHERE id = 1;
 ```
 
-应与二进制版本完全一致，否则 `/readyz` 会失败。
+应与二进制版本完全一致，否则 `/readyz` 会失败。若由 DBA 先执行迁移，可在所有 Server 上设 `DTS_METADATA_AUTO_MIGRATE=false`，服务将核对现有版本再启动。
 
-Server 启动时也会应用嵌入的幂等 `schema.sql`。维护时必须保证独立 Migration 集合与嵌入 Schema 的最终状态一致，避免“两套迁移事实源”漂移。
+运行时和运维脚本共用 `backend/internal/repository/postgres/schema.sql`，离线副本位于 `migrations/schema.sql`。编号 SQL 保留为各版本升级记录。Server 元数据连接池默认每副本最多 4 条连接，`DTS_METADATA_POOL_SIZE` 可设为 1 到 128。数据库连接预算需计入全部 Server 副本。
 
 ## 6. 离线包构建与验证
 
@@ -119,7 +120,9 @@ sh deployments/offline/build-offline-package.sh
 
 Windows 构建机可运行 `deployments/offline/build-offline-package.ps1`；该流程使用 Go 直接组装标准 Docker image archive，不要求本机 Docker daemon。两种构建方式都会产出 `dist/dts-kubernetes-offline-<版本>-linux-amd64.tar.gz`、外层 SHA-256 文件和包内 `SHA256SUMS`。
 
-发布前必须检查：所有镜像均为 `linux/amd64`；Server 镜像包含 Server、Worker、CLI、所有 CDC Runtime、`zstd` 和 CA 根证书；kubectl 二进制与 `runtime/versions.env` 固定哈希一致；Kubernetes 只引用包内 Tag；`SHA256SUMS` 使用 LF；在隔离网络的多节点 Linux 集群完整执行逐节点镜像导入、DaemonSet Image Preflight、跨节点调度、节点排空、外部 HA PostgreSQL、登录、迁移冒烟和重启恢复。离线包包含应用镜像和 kubectl，但不替代 Kubernetes 控制面、containerd、CNI、CSI、Ingress、宿主机内核、cgroup、iptables、磁盘及网络驱动的运维基线。
+设置 `CLUSTER_PAYLOAD_DIR` 后，Linux 构建器会同时打入控制面镜像、Registry、containerd、CNI 和麒麟 RPM。完整包应包含 `images/all-images.tar.gz`。精简包面向已有 Kubernetes 集群，分别存放应用镜像归档。
+
+验收时核对镜像架构为 `linux/amd64`，检查 Server/Worker、CLI、CDC Runtime、`zstd` 和 CA 根证书，并按 `runtime/versions.env` 核对三个 Kubernetes 工具。完整包须在断网节点验证私有仓库拉取、跨节点调度、持久存储和重启恢复。精简包另需验证各可调度节点的镜像导入。两种包均使用 LF 换行的 `SHA256SUMS`。
 
 ## 6. 备份与恢复
 
@@ -220,7 +223,11 @@ S3 完整契约见 `docs/SPOOL_STORAGE.md`。报告归档、HSM/KMS、Ed25519 �
 - 元数据表大小、Dead Ratio、Maintenance Failures；
 - Validation Mismatch 和报告归档失败。
 
-`deployments/prometheus-rules.yml` 提供基础告警。当前告警只在产品内展示/确认，没有邮件、短信、Webhook、值班平台路由和静默策略。
+### 遥测和通知
+
+Server 与 Worker 支持 OpenTelemetry OTLP/HTTP。将 `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` 指向采集器的完整 `/v1/traces` 地址。Worker 调用控制面时传递 W3C Trace Context，Server 设置 `DTS_LOG_FORMAT=json` 可在 HTTP 日志中按 trace ID 和请求 ID 检索。含查询参数的请求（包括 OIDC 授权码回调）会跳过 HTTP 跟踪。
+
+Prometheus 加载 `deployments/prometheus-rules.yml` 并配置已有 Alertmanager 地址。Alertmanager 可使用 `deployments/alertmanager.example.yml`，两个 Secret 文件分别保存接收标准 Alertmanager Webhook 的运维入口和当班告警入口。严重告警在持续期间每 30 分钟重发，恢复时发送解除通知。静默通过 Alertmanager 的 Silence 界面管理。正式上线前在现场验证接收端的触发和解除。
 
 ## 9. 日常巡检
 
@@ -256,7 +263,9 @@ S3 完整契约见 `docs/SPOOL_STORAGE.md`。报告归档、HSM/KMS、Ed25519 �
 
 ### Server 宕机
 
-Worker 的 Chunk/Engine Job 依赖持久 Lease 恢复。Server 的 Precheck/Validation 使用 PostgreSQL `control_operation_leases`，每 30 秒巡检：Precheck 可安全重启，Validation 会删除本轮不完整结果后重跑。Prepare 在可能修改目标 Schema 后不可证明幂等，因此租约过期时失败关闭；按错误提示核查目标对象后修复或重建任务。Cutover/Rollback 仍应避免与 Server 滚动发布重叠，后续需改为持久 Saga。
+Worker 的 Chunk/Engine Job 依赖持久 Lease 恢复。Server 的 Precheck/Validation 使用 PostgreSQL `control_operation_leases`，每 30 秒巡检：Precheck 可安全重启，Validation 会删除本轮不完整结果后重跑。Prepare 在可能修改目标 Schema 后不可证明幂等，因此租约过期时失败关闭；按错误提示核查目标对象后修复或重建任务。Cutover/Rollback 已增加控制面租约，最终 RUNNING 状态中断后失败关闭，仍应避免与 Server 滚动发布重叠，后续需改为持久 Saga。当前修复与剩余门禁见[企业就绪度复查](ENTERPRISE_READINESS.md)。
+
+暂停 CDC 不再删除源端复制槽；全量/校验暂停时 Full+CDC 可以继续缓冲捕获的数据。须监控 WAL/Spool 增长及源日志保留，只有成功割接/回切后才清理对应方向 Checkpoint。清理警告需要人工复查；取消/失败任务的源资源清理策略仍需单独设计，不要直接删除尚需恢复的复制槽。
 
 ### Spool CRITICAL
 
@@ -269,6 +278,26 @@ Worker 的 Chunk/Engine Job 依赖持久 Lease 恢复。Server 的 Precheck/Vali
 - 已提交：选择 `COMMITTED`，只推进位点；
 - 未提交：选择 `NOT_COMMITTED`，进入受控重放；
 - 无法确认：保持阻塞并升级处理。
+
+### MySQL Binlog 校验失败
+
+MySQL 原生 CDC 在每次 binlog 轮转后读取文件的格式描述，自动识别 OFF 或 CRC32。出现 `invalid binlog CRC32` 时，记录日志文件和最近已确认的位点，用 `dts-binlog-inspect -file <binlog副本>` 核对源文件。修复源文件或切换到包含同一事务的健康副本后，从已确认位点恢复，以保留出错事务。
+
+MySQL 压缩事务的解码上限为 128 MiB，单个压缩容器最多包含 100,000 个 binlog 事件。达到错误条件时读取器报错，保留最近已确认的位点。处理超限事务前应核对原事务及目标写入情况。
+
+### 旧版本的分片与行过滤任务
+
+旧版本的 DB2 全量读取曾跳过整数分片末行，也可能读入相邻复合键分片的数据。升级后应按源表重新核对边界键、行数和校验结果。旧报告使用了当时的读取逻辑，不能据此排除漏行。
+
+对已经运行过的 `CUSTOM_SQL` 全量加增量任务，先核对目标表是否包含过滤范围外的数据，并保留最后确认的 CDC 位点。当前行过滤只支持 `FULL`。重新规划前，应由业务方确认目标数据范围。
+
+### CDC 并发冲突与租约丢失
+
+同一任务、方向的 Apply、Spool 排空、死信处置及校验屏障共享持久租约。HTTP 409 携带 `Retry-After: 1` 表示争用：保留源事务并退避重试，不可 ACK。默认租期 300 秒，每 TTL/3 续期；`DTS_CDC_SPOOL_DRAIN_LEASE_SECONDS` 限制在 30–3600 秒。
+
+元数据 Checkpoint 或 Pending Spool 读取失败会阻止 Apply/恢复，不再静默回到初始位点。先恢复元数据/Spool 访问，再重试。OPEN 死信应先重放原事务；RESOLVED 历史死信不能再次重放。
+
+本次补丁升级要求暂停迁移/桥接写入并更新全部 Server/Worker，避免新旧二进制混跑绕过门禁。租约不是目标库原子 fencing，剩余门禁与验证证据见[企业就绪度续查](ENTERPRISE_READINESS.md#6-2026-10-30-续查与修复)。
 
 ### Schema Version Mismatch
 

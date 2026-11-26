@@ -5,7 +5,7 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 cd "$ROOT"
 KUBECTL=${KUBECTL:-$ROOT/runtime/kubectl}
 NAMESPACE=dts
-ADMIN_PASSWORD=${DTS_ADMIN_PASSWORD:-Cljslrl0620!}
+ADMIN_PASSWORD=${DTS_ADMIN_PASSWORD:-}
 SERVER_REPLICAS=${DTS_SERVER_REPLICAS:-2}
 WORKER_REPLICAS=${DTS_WORKER_REPLICAS:-3}
 WEB_REPLICAS=${DTS_WEB_REPLICAS:-2}
@@ -130,7 +130,8 @@ trap cleanup EXIT INT TERM
 echo "[1/7] Creating namespace and runtime secrets"
 "$KUBECTL" create namespace "$NAMESPACE" --dry-run=client -o yaml | "$KUBECTL" apply -f - >/dev/null
 secret_created=false
-if "$KUBECTL" -n "$NAMESPACE" get secret dts-secrets >/dev/null 2>&1; then
+secret_name=$("$KUBECTL" -n "$NAMESPACE" get secret dts-secrets --ignore-not-found -o name)
+if [ -n "$secret_name" ]; then
   echo "Keeping existing dts-secrets; reruns never rotate database or encryption keys."
 else
   if [ -n "$EXTERNAL_POSTGRES_HOST" ] && [ -z "${DTS_METADATA_PASSWORD:-}" ]; then
@@ -138,6 +139,12 @@ else
     exit 1
   fi
   random_hex() { od -An -N48 -tx1 /dev/urandom | tr -d ' \n'; }
+  if [ -z "$ADMIN_PASSWORD" ]; then ADMIN_PASSWORD=$(random_hex); fi
+  if [ "${#ADMIN_PASSWORD}" -lt 16 ]; then
+    echo 'ERROR: DTS_ADMIN_PASSWORD must contain at least 16 characters' >&2
+    exit 1
+  fi
+  case "$ADMIN_PASSWORD" in *change-me*|*replace-with*|*example*) echo 'ERROR: DTS_ADMIN_PASSWORD must not be a placeholder' >&2; exit 1 ;; esac
   metadata_password=${DTS_METADATA_PASSWORD:-$(random_hex)}
   master_key=${DTS_MASTER_KEY:-$(random_hex)}
   worker_token=${DTS_WORKER_TOKEN:-$(random_hex)}
@@ -147,9 +154,13 @@ else
     --from-literal=master-key="$master_key" \
     --from-literal=worker-token="$worker_token" \
     --from-literal=auth-secret="$auth_secret" \
-    --from-literal=bootstrap-admin-password="$ADMIN_PASSWORD" \
-    --dry-run=client -o yaml | "$KUBECTL" apply -f - >/dev/null
+    --from-literal=bootstrap-admin-password="$ADMIN_PASSWORD" >/dev/null
   secret_created=true
+  # Persist the generated login before rollout, so a later storage/image
+  # failure does not lose the only local copy of the new credentials.
+  umask 077
+  printf '%s\n' "Initial admin user: admin" "Initial admin password: $ADMIN_PASSWORD" > INITIAL_ADMIN_CREDENTIALS.txt
+  chmod 600 INITIAL_ADMIN_CREDENTIALS.txt
 fi
 
 echo "[2/7] Verifying offline images on every eligible node"
@@ -256,9 +267,7 @@ echo "[7/7] Multi-node deployment summary"
 "$KUBECTL" -n "$NAMESPACE" get pods -o wide
 "$KUBECTL" -n "$NAMESPACE" get svc,pvc,hpa,pdb
 if [ "$secret_created" = true ]; then
-  umask 077
-  printf '%s\n' "Initial admin user: admin" "Initial admin password: $ADMIN_PASSWORD" > INITIAL_ADMIN_CREDENTIALS.txt
-  chmod 600 INITIAL_ADMIN_CREDENTIALS.txt
+  echo "Initial administrator credentials: $ROOT/INITIAL_ADMIN_CREDENTIALS.txt (mode 600)"
 else
   echo "Existing credentials were preserved."
 fi
@@ -270,4 +279,4 @@ elif [ "$WEB_SERVICE_TYPE" = ClusterIP ]; then
 else
   echo "Inspect the Web endpoint with: $KUBECTL -n $NAMESPACE get service web"
 fi
-echo "Change the default password immediately after the first login."
+echo "Store the generated administrator credentials securely. Password changes revoke existing login sessions."

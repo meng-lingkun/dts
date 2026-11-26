@@ -2,10 +2,10 @@ package mysqlbinlog
 
 import (
 	"context"
-	"fmt"
 	cdcruntime "dts/backend/internal/cdc/runtime"
 	"dts/backend/internal/connector"
 	"dts/backend/internal/domain"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -36,7 +36,7 @@ type nativeAck struct {
 type NativeReader struct {
 	stream   connector.RawCDCStream
 	meta     connector.Connector
-	parser   Parser
+	parser   StreamParser
 	asm      *Assembler
 	maps     map[uint64]*TableMap
 	metas    map[uint64]*domain.TableMetadata
@@ -120,13 +120,16 @@ func (r *NativeReader) decodeTransaction(tx *Transaction) ([]domain.CDCEvent, er
 			return nil, err
 		}
 		tm := r.maps[rows.TableID]
-		md := r.metas[rows.TableID]
-		if tm == nil || md == nil {
-			return nil, fmt.Errorf("missing TABLE_MAP/metadata for table id %d", rows.TableID)
+		if tm == nil {
+			return nil, fmt.Errorf("missing TABLE_MAP for table id %d", rows.TableID)
 		}
 		key := strings.ToLower(tm.Schema + "." + tm.Table)
 		if len(r.selected) > 0 && !r.selected[key] {
 			continue
+		}
+		md := r.metas[rows.TableID]
+		if md == nil {
+			return nil, fmt.Errorf("missing metadata for selected table %s", key)
 		}
 		changes, err := DecodeRows(tm, rows, md.Columns)
 		if err != nil {
@@ -184,7 +187,7 @@ func (r *NativeReader) Next(ctx context.Context) (*cdcruntime.Transaction, error
 			if err != nil {
 				return nil, err
 			}
-			plain, err := payload.Decompress(r.zstdBin)
+			plain, err := payload.Decompress(ctx, r.zstdBin)
 			if err != nil {
 				return nil, err
 			}
@@ -194,7 +197,9 @@ func (r *NativeReader) Next(ctx context.Context) (*cdcruntime.Transaction, error
 			}
 			expanded := make([]*Event, 0, len(rawEvents))
 			for _, raw := range rawEvents {
-				inner, err := r.parser.Parse(raw)
+				// MySQL checksums the outer payload event. Its nested events
+				// always have checksum-free framing.
+				inner, err := (Parser{}).Parse(raw)
 				if err != nil {
 					return nil, fmt.Errorf("parse nested transaction payload event: %w", err)
 				}

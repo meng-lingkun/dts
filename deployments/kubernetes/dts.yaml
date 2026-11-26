@@ -67,7 +67,7 @@ spec:
                 matchLabels: {app: dts-server}
       containers:
       - name: server
-        image: dts/server:0.15.0-rc49
+        image: dts/server:0.15.0-rc50
         imagePullPolicy: Never
         envFrom: [{configMapRef: {name: dts-config}}]
         env:
@@ -158,7 +158,7 @@ spec:
                 matchLabels: {app: dts-worker}
       containers:
       - name: worker
-        image: dts/server:0.15.0-rc49
+        image: dts/server:0.15.0-rc50
         imagePullPolicy: Never
         command: ["/usr/local/bin/dts-worker"]
         env:
@@ -247,7 +247,7 @@ spec:
                 matchLabels: {app: dts-web}
       containers:
       - name: web
-        image: dts/web:0.15.0-rc49
+        image: dts/web:0.15.0-rc50
         imagePullPolicy: Never
         ports: [{containerPort: 8080, name: http}]
         readinessProbe: {httpGet: {path: /, port: http}, initialDelaySeconds: 3, periodSeconds: 10}

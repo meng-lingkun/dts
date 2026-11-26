@@ -152,7 +152,7 @@ func inspectLive(ctx context.Context, ds domain.DataSource, file string, pos uin
 		return err
 	}
 	defer stream.Close()
-	parser := mysqlbinlog.Parser{ChecksumBytes: checksum}
+	parser := mysqlbinlog.NewEventParser(checksum)
 	a := &mysqlbinlog.Assembler{}
 	for n := 0; limit <= 0 || n < limit; n++ {
 		data, err := stream.Next(ctx)
@@ -176,7 +176,7 @@ func main() {
 	var startPos, serverID uint
 	var timeout time.Duration
 	flag.StringVar(&path, "file", "", "raw mysql-bin.* file to inspect")
-	flag.IntVar(&checksum, "checksum-bytes", 0, "trailing checksum bytes per event, usually 0 or 4")
+	flag.IntVar(&checksum, "checksum-bytes", -1, "trailing checksum bytes: -1 follows the file format, 0 or 4 forces a fixed length")
 	flag.IntVar(&limit, "limit", 0, "maximum events; 0 means unlimited")
 	flag.StringVar(&host, "host", "", "live MySQL host")
 	flag.IntVar(&port, "port", 3306, "live MySQL port")

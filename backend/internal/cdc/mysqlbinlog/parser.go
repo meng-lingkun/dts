@@ -176,13 +176,14 @@ func readUint48LE(b []byte) uint64 {
 }
 
 type TableMap struct {
-	TableID     uint64 `json:"table_id"`
-	Flags       uint16 `json:"flags"`
-	Schema      string `json:"schema"`
-	Table       string `json:"table"`
-	ColumnTypes []byte `json:"column_types"`
-	ColumnMeta  []byte `json:"column_metadata"`
-	NullBitmap  []byte `json:"null_bitmap"`
+	TableID          uint64 `json:"table_id"`
+	Flags            uint16 `json:"flags"`
+	Schema           string `json:"schema"`
+	Table            string `json:"table"`
+	ColumnTypes      []byte `json:"column_types"`
+	ColumnMeta       []byte `json:"column_metadata"`
+	NullBitmap       []byte `json:"null_bitmap"`
+	optionalMetadata []byte
 }
 
 func ParseTableMap(e *Event) (*TableMap, error) {
@@ -237,6 +238,7 @@ func ParseTableMap(e *Event) (*TableMap, error) {
 		return nil, errors.New("table-map null bitmap exceeds payload")
 	}
 	out.NullBitmap = append([]byte(nil), p[off:off+nullLen]...)
+	out.optionalMetadata = append([]byte(nil), p[off+nullLen:]...)
 	return out, nil
 }
 

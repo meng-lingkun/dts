@@ -13,6 +13,57 @@ printf '%s\n' "$*" >> "$TEST_LOG"
 MOCK
 chmod +x "$KUBECTL"
 cd "$TEST_ROOT"
+guard="$REPO/deployments/offline/automation/check-directory.sh"
+mkdir empty-root
+sh "$guard" package "$TEST_ROOT/empty-root"
+if sh "$guard" package "$TEST_ROOT/empty-root/." >/dev/null 2>&1; then exit 1; fi
+touch empty-root/customer-file
+if sh "$guard" package "$TEST_ROOT/empty-root" >/dev/null 2>&1; then exit 1; fi
+mkdir -p old-root/runtime
+touch old-root/SHA256SUMS old-root/install-cluster.sh old-root/runtime/versions.env
+sh "$guard" package "$TEST_ROOT/old-root"
+if ln -s "$TEST_ROOT/empty-root" aliased-root 2>/dev/null && [ -L aliased-root ]; then
+  if sh "$guard" package "$TEST_ROOT/aliased-root" >/dev/null 2>&1; then exit 1; fi
+fi
+# Run the PostgreSQL volume-selection command from the actual manifest. The
+# entrypoint is replaced by a recorder so these checks need no privileged pod.
+mkdir pg-test-bin pg-volume
+cat >pg-test-bin/docker-entrypoint.sh <<'PG'
+#!/bin/sh
+set -eu
+[ "$1" = postgres ]
+printf '%s\n' "$PGDATA"
+PG
+chmod +x pg-test-bin/docker-entrypoint.sh
+awk '/^          mount=\/var\/lib\/postgresql\/data$/ {copy=1}
+     copy {sub(/^          /,""); if ($0 ~ /^mount=/) print "mount=$TEST_VOLUME"; else print}
+     /^exec docker-entrypoint.sh postgres$/ {exit}' "$REPO/deployments/kubernetes/postgres.yaml" >pg-volume-command
+export TEST_VOLUME="$TEST_ROOT/pg-volume"
+pg_volume() { PATH="$TEST_ROOT/pg-test-bin:$PATH" sh -eu pg-volume-command; }
+mkdir pg-volume/lost+found
+[ "$(pg_volume)" = "$TEST_VOLUME/pgdata" ]
+mkdir pg-volume/base
+if pg_volume >/dev/null 2>&1; then echo "accepted incomplete legacy PostgreSQL cluster" >&2; exit 1; fi
+printf '17\n' > pg-volume/PG_VERSION
+[ "$(pg_volume)" = "$TEST_VOLUME" ]
+mkdir pg-volume/pgdata
+printf '17\n' > pg-volume/pgdata/PG_VERSION
+if pg_volume >/dev/null 2>&1; then echo "accepted ambiguous PostgreSQL clusters" >&2; exit 1; fi
+mkdir -p images archive-fixture
+printf '[]' > archive-fixture/manifest.json
+dd if=/dev/zero of=archive-fixture/layer.tar bs=1024 count=8 2>/dev/null
+tar -cf valid.tar -C archive-fixture manifest.json layer.tar
+gzip -c valid.tar > images/all-images.tar.gz
+cp "$REPO/deployments/offline/unpack-images.sh" .
+sh unpack-images.sh >/dev/null
+cmp valid.tar images/all-images.tar
+# The manifest can be readable even when the following layer is truncated.
+dd if=valid.tar bs=512 count=4 2>/dev/null | gzip -c > images/all-images.tar.gz
+if sh unpack-images.sh >/dev/null 2>&1; then
+  echo "unpacker accepted an incomplete image layer" >&2
+  exit 1
+fi
+cmp valid.tar images/all-images.tar
 sha256sum verify.sh uninstall.sh > SHA256SUMS
 sh verify.sh >/dev/null
 grep -q 'rollout status deployment/server' "$TEST_LOG"
@@ -144,6 +195,7 @@ printf '%s\n' "$*" >> "$TEST_LOG"
 case "$*" in
   *containerRuntimeVersion*) echo 'node-1=containerd://2.0' ;;
   'get nodes --no-headers') echo 'node-1 Ready' ;;
+  '-n dts get secret dts-secrets --ignore-not-found -o name') echo 'secret/dts-secrets' ;;
 esac
 MOCK
 cp "$REPO/deployments/kubernetes/dns-hosts.patch.example.yaml" "$TEST_ROOT/customer-dns.yaml"
@@ -166,6 +218,7 @@ case "$*" in
   *containerRuntimeVersion*) echo 'node-1=containerd://2.0' ;;
   'get nodes --no-headers') echo 'node-1 Ready' ;;
   'apply -f -') cat >> "$TEST_RENDERED" ;;
+  '-n dts get secret dts-secrets --ignore-not-found -o name') echo 'secret/dts-secrets' ;;
 esac
 MOCK
 mkdir -p kubernetes
@@ -178,6 +231,40 @@ if grep -q 'imagePullPolicy: Never' "$TEST_RENDERED"; then echo 'Registry worklo
 . "$REPO/deployments/offline/cluster/registry-image-map.sh"
 test "$(registry_image registry.k8s.io/coredns/coredns:v1.11.3)" = "$DTS_REGISTRY/kubernetes/coredns:v1.11.3"
 test "$(registry_image ghcr.io/flannel-io/flannel:v0.28.9)" = "$DTS_REGISTRY/flannel/flannel:v0.28.9"
-test "$(registry_image dts/server:0.15.0-rc49)" = "$DTS_REGISTRY/dts/server:0.15.0-rc49"
+test "$(registry_image dts/server:0.15.0-rc50)" = "$DTS_REGISTRY/dts/server:0.15.0-rc50"
 if registry_image unknown.example/image:latest >/dev/null 2>&1; then exit 1; fi
+
+# A new install must generate a distinct admin password and persist it before
+# a later rollout failure. The mock contains no real Kubernetes credentials.
+cat > "$KUBECTL" <<'MOCK'
+#!/bin/sh
+case "$*" in
+  *containerRuntimeVersion*) echo 'node-1=containerd://2.0' ;;
+  'get nodes --no-headers') echo 'node-1 Ready' ;;
+  '-n dts get secret dts-secrets --ignore-not-found -o name')
+    if [ -n "${MOCK_SECRET_ERROR:-}" ]; then exit 8; fi
+    if [ -f "$TEST_ROOT_SECRET" ]; then echo secret/dts-secrets; fi ;;
+  '-n dts create secret generic dts-secrets '*)
+    if [ -n "${MOCK_SECRET_CONFLICT:-}" ] || [ -f "$TEST_ROOT_SECRET" ]; then exit 9; fi
+    touch "$TEST_ROOT_SECRET" ;;
+  '-n dts rollout status deployment/server --timeout=300s') exit 7 ;;
+esac
+MOCK
+unset DTS_ADMIN_PASSWORD
+export TEST_ROOT_SECRET="$TEST_ROOT/secret-exists"
+if MOCK_SECRET_ERROR=1 sh install.sh > output 2>&1; then exit 1; fi
+test ! -e INITIAL_ADMIN_CREDENTIALS.txt && test ! -e "$TEST_ROOT_SECRET"
+if MOCK_SECRET_CONFLICT=1 sh install.sh > output 2>&1; then exit 1; fi
+test ! -e INITIAL_ADMIN_CREDENTIALS.txt && test ! -e "$TEST_ROOT_SECRET"
+if sh install.sh > output 2>&1; then echo 'expected simulated rollout failure' >&2; exit 1; fi
+test -s INITIAL_ADMIN_CREDENTIALS.txt
+first_password=$(sed -n 's/^Initial admin password: //p' INITIAL_ADMIN_CREDENTIALS.txt)
+test "${#first_password}" -ge 16
+if sh install.sh > output 2>&1; then exit 1; fi
+second_password=$(sed -n 's/^Initial admin password: //p' INITIAL_ADMIN_CREDENTIALS.txt)
+test "$first_password" = "$second_password"
+rm "$TEST_ROOT_SECRET"
+DTS_ADMIN_PASSWORD=short sh install.sh > output 2>&1 && exit 1
+grep -q 'DTS_ADMIN_PASSWORD must contain at least 16 characters' output
+test "$second_password" = "$(sed -n 's/^Initial admin password: //p' INITIAL_ADMIN_CREDENTIALS.txt)"
 echo "Kubernetes lifecycle and registry contracts passed"

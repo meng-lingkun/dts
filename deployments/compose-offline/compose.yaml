@@ -1,0 +1,74 @@
+name: dts-offline
+services:
+  postgres:
+    image: dts/postgres:17
+    pull_policy: never
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: dts
+      POSTGRES_DB: dts
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+      POSTGRES_PASSWORD: ${DTS_METADATA_PASSWORD:?restore .env}
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "PGREQUIREAUTH=scram-sha-256,md5 PGPASSWORD=\"$$POSTGRES_PASSWORD\" exec psql -w -h postgres -U dts -d dts -Atqc 'select 1'"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+  server:
+    image: dts/server:${DTS_VERSION:?missing release version}
+    pull_policy: never
+    restart: unless-stopped
+    depends_on:
+      postgres: {condition: service_healthy}
+    environment:
+      DTS_PRODUCTION: "true"
+      DTS_REPOSITORY: postgres
+      DTS_AUTH_REQUIRED: "true"
+      DTS_METADATA_HOST: postgres
+      DTS_METADATA_USER: dts
+      DTS_METADATA_DATABASE: dts
+      DTS_METADATA_PASSWORD: ${DTS_METADATA_PASSWORD:?restore .env}
+      DTS_MASTER_KEY: ${DTS_MASTER_KEY:?restore .env}
+      DTS_AUTH_SECRET: ${DTS_AUTH_SECRET:?restore .env}
+      DTS_WORKER_TOKEN: ${DTS_WORKER_TOKEN:?restore .env}
+      DTS_BOOTSTRAP_ADMIN_PASSWORD: ${DTS_BOOTSTRAP_ADMIN_PASSWORD:?restore .env}
+      DTS_CORS_ORIGIN: ${DTS_CORS_ORIGIN:-http://127.0.0.1:8088}
+      DTS_CDC_SPOOL_STORAGE: file
+      DTS_CDC_SPOOL_DIR: /var/lib/dts/cdc-spool
+    volumes: [spool:/var/lib/dts/cdc-spool]
+    ports: ["127.0.0.1:8080:8080"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://127.0.0.1:8080/readyz"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    stop_grace_period: 30s
+  worker:
+    image: dts/server:${DTS_VERSION:?missing release version}
+    pull_policy: never
+    restart: unless-stopped
+    entrypoint: ["/usr/local/bin/dts-worker"]
+    depends_on:
+      server: {condition: service_healthy}
+    environment:
+      DTS_SERVER: http://server:8080
+      DTS_WORKER_TOKEN: ${DTS_WORKER_TOKEN:?restore .env}
+    stop_grace_period: 45s
+  web:
+    image: dts/web:${DTS_VERSION:?missing release version}
+    pull_policy: never
+    restart: unless-stopped
+    depends_on:
+      server: {condition: service_healthy}
+    ports: ["127.0.0.1:8088:8080"]
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro,z
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO - http://127.0.0.1:8080/readyz | grep -Fq '\"status\":\"ready\"'"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+volumes:
+  pgdata: {}
+  spool: {}

@@ -3,12 +3,12 @@ package mysqlconnector
 import (
 	"bytes"
 	"context"
+	"dts/backend/internal/cdc/mysqlbinlog"
+	"dts/backend/internal/domain"
 	"encoding/binary"
 	"fmt"
 	"io"
 	"net"
-	"dts/backend/internal/cdc/mysqlbinlog"
-	"dts/backend/internal/domain"
 	"strings"
 	"testing"
 	"time"
@@ -156,7 +156,7 @@ func TestConnectorWireAuthenticationAndQuery(t *testing.T) {
 	}
 }
 
-func runFakeBinlogMySQL(t *testing.T, rawEvent []byte) (host string, port int, stop func()) {
+func runFakeBinlogMySQL(t *testing.T, rawEvent []byte, rejectChecksum bool) (host string, port int, stop func()) {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -193,7 +193,11 @@ func runFakeBinlogMySQL(t *testing.T, rawEvent []byte) (host string, port int, s
 		if err != nil || len(pkt) == 0 || pkt[0] != 0x03 {
 			return
 		}
-		if writeTestPacket(c, 1, []byte{0, 0, 0, 2, 0, 0, 0}) != nil {
+		checksumReply := []byte{0, 0, 0, 2, 0, 0, 0}
+		if rejectChecksum {
+			checksumReply = append([]byte{0xff, 0x28, 0x04, '#'}, []byte("HY000checksum negotiation rejected")...)
+		}
+		if writeTestPacket(c, 1, checksumReply) != nil || rejectChecksum {
 			return
 		}
 		// Then COM_BINLOG_DUMP.
@@ -216,7 +220,7 @@ func TestOpenBinlogStream(t *testing.T) {
 	raw[4] = 4 // ROTATE_EVENT
 	binary.LittleEndian.PutUint64(raw[19:27], 4)
 	copy(raw[27:], []byte("mysql-bin.000002"))
-	host, port, stop := runFakeBinlogMySQL(t, raw)
+	host, port, stop := runFakeBinlogMySQL(t, raw, false)
 	defer stop()
 	cRaw, err := NewFactory().New(domain.DataSource{Type: domain.DataSourceMySQL, Host: host, Port: port, Username: "repl", Password: "secret", Database: "app"})
 	if err != nil {
@@ -234,6 +238,28 @@ func TestOpenBinlogStream(t *testing.T) {
 	}
 	if !bytes.Equal(got, raw) {
 		t.Fatalf("raw event mismatch got=%x want=%x", got, raw)
+	}
+}
+
+func TestOpenBinlogStreamFailsClosedWhenChecksumNegotiationFails(t *testing.T) {
+	for _, useGTID := range []bool{false, true} {
+		t.Run(fmt.Sprintf("gtid=%v", useGTID), func(t *testing.T) {
+			host, port, stop := runFakeBinlogMySQL(t, nil, true)
+			defer stop()
+			cRaw, err := NewFactory().New(domain.DataSource{Type: domain.DataSourceMySQL, Host: host, Port: port, Username: "repl", Password: "secret", Database: "app"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer cRaw.Close()
+			if useGTID {
+				_, err = cRaw.(*Connector).OpenBinlogGTIDStream(context.Background(), "", 12345)
+			} else {
+				_, err = cRaw.(*Connector).OpenBinlogStream(context.Background(), "mysql-bin.000001", 4, 12345)
+			}
+			if err == nil || !strings.Contains(err.Error(), "negotiate MySQL replication checksum") {
+				t.Fatalf("expected checksum negotiation failure, got %v", err)
+			}
+		})
 	}
 }
 

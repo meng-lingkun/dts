@@ -1,0 +1,7 @@
+.git
+dist
+artifacts
+**/node_modules
+web/dist
+**/.env
+**/INITIAL_ADMIN_CREDENTIALS.txt

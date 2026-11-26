@@ -1,6 +1,9 @@
 package perfmodel
 
-import "testing"
+import (
+	"math"
+	"testing"
+)
 
 func TestModel(t *testing.T) {
 	if got := EWMA(100, 200, 25); got != 125 {
@@ -14,6 +17,9 @@ func TestModel(t *testing.T) {
 	}
 	if got := PiecesForRows(1_000_000, 250_000, 16); got != 4 {
 		t.Fatalf("pieces=%d", got)
+	}
+	if got := PiecesForRows(math.MaxInt64, math.MaxInt64-1, 16); got != 2 {
+		t.Fatalf("extreme estimate pieces=%d", got)
 	}
 }
 

@@ -4,13 +4,13 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"dts/backend/internal/domain"
+	"dts/backend/internal/repository"
+	"dts/backend/internal/security"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
-	"dts/backend/internal/domain"
-	"dts/backend/internal/repository"
-	"dts/backend/internal/security"
 	"strings"
 	"time"
 )
@@ -207,6 +207,9 @@ func (s *Store) ListMigrationTables(c context.Context, id string) ([]domain.Migr
 func (s *Store) GetMigrationTable(c context.Context, id string) (*domain.MigrationTable, error) {
 	return s.inner.GetMigrationTable(c, id)
 }
+func (s *Store) NumericRangeCoverage(c context.Context, table domain.MigrationTable) (bool, error) {
+	return s.inner.NumericRangeCoverage(c, table)
+}
 func (s *Store) UpdateMigrationTable(c context.Context, v *domain.MigrationTable) error {
 	return s.inner.UpdateMigrationTable(c, v)
 }
@@ -215,6 +218,9 @@ func (s *Store) FindMigrationTableProfile(c context.Context, sourceID, targetID,
 }
 func (s *Store) CreateChunks(c context.Context, v []domain.MigrationChunk) error {
 	return s.inner.CreateChunks(c, v)
+}
+func (s *Store) SplitPendingChunk(ctx context.Context, expected domain.MigrationChunk, pieces []domain.MigrationChunk) error {
+	return s.inner.SplitPendingChunk(ctx, expected, pieces)
 }
 func (s *Store) ListChunks(c context.Context, id string) ([]domain.MigrationChunk, error) {
 	return s.inner.ListChunks(c, id)
@@ -359,7 +365,7 @@ func (s *Store) ListCDCSpool(c context.Context, taskID, direction string, n int)
 }
 func (s *Store) LatestPendingCDCSpool(c context.Context, taskID, direction string) (*domain.CDCSpoolRecord, error) {
 	v, err := s.inner.LatestPendingCDCSpool(c, taskID, direction)
-	if err != nil {
+	if err != nil || v == nil {
 		return nil, err
 	}
 	if err := s.decryptSpool(v); err != nil {
@@ -377,12 +383,9 @@ func (s *Store) CDCSpoolStats(c context.Context, taskID, direction string) (doma
 	return s.inner.CDCSpoolStats(c, taskID, direction)
 }
 func (s *Store) AcquireCDCSpoolDrainLease(c context.Context, taskID, direction, owner string, ttl time.Duration) (bool, error) {
-	type provider interface {
-		AcquireCDCSpoolDrainLease(context.Context, string, string, string, time.Duration) (bool, error)
-	}
-	p, ok := s.inner.(provider)
+	p, ok := s.inner.(repository.CDCExecutionLeaser)
 	if !ok {
-		return true, nil
+		return false, errors.New("repository does not support CDC execution leases")
 	}
 	return p.AcquireCDCSpoolDrainLease(c, taskID, direction, owner, ttl)
 }
@@ -536,7 +539,13 @@ func (s *Store) DeleteDataSource(ctx context.Context, id string) error {
 }
 
 func (s *Store) CreateUser(c context.Context, u *domain.User) error { return s.inner.CreateUser(c, u) }
+func (s *Store) CreateInitialUser(c context.Context, u *domain.User) error {
+	return s.inner.CreateInitialUser(c, u)
+}
 func (s *Store) UpdateUser(c context.Context, u *domain.User) error { return s.inner.UpdateUser(c, u) }
+func (s *Store) UpdateUserLastLogin(c context.Context, id string, at time.Time) error {
+	return s.inner.UpdateUserLastLogin(c, id, at)
+}
 func (s *Store) GetUser(c context.Context, id string) (*domain.User, error) {
 	return s.inner.GetUser(c, id)
 }
@@ -544,6 +553,31 @@ func (s *Store) GetUserByUsername(c context.Context, name string) (*domain.User,
 	return s.inner.GetUserByUsername(c, name)
 }
 func (s *Store) ListUsers(c context.Context) ([]domain.User, error) { return s.inner.ListUsers(c) }
+func (s *Store) RecordSession(c context.Context, session domain.UserSession) error {
+	return s.inner.RecordSession(c, session)
+}
+func (s *Store) SessionState(c context.Context, user, id string) (bool, bool, error) {
+	return s.inner.SessionState(c, user, id)
+}
+func (s *Store) RevokeSession(c context.Context, user, id string) (bool, error) {
+	return s.inner.RevokeSession(c, user, id)
+}
+func (s *Store) ListSessions(c context.Context, user string) ([]domain.UserSession, error) {
+	return s.inner.ListSessions(c, user)
+}
+
+func (s *Store) CreatePersonalToken(ctx context.Context, v domain.PersonalToken, revision int64) error {
+	return s.inner.CreatePersonalToken(ctx, v, revision)
+}
+func (s *Store) PersonalTokenUser(ctx context.Context, id string) (*domain.User, error) {
+	return s.inner.PersonalTokenUser(ctx, id)
+}
+func (s *Store) ListPersonalTokens(ctx context.Context, owner string) ([]domain.PersonalToken, error) {
+	return s.inner.ListPersonalTokens(ctx, owner)
+}
+func (s *Store) DeletePersonalToken(ctx context.Context, owner, id string) (bool, error) {
+	return s.inner.DeletePersonalToken(ctx, owner, id)
+}
 
 // RC42 preserves optional control-plane aggregation/hot-path capabilities
 // through the encryption wrapper. Without these delegates production would

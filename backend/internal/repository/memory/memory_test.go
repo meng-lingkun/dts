@@ -2,10 +2,10 @@ package memory
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"dts/backend/internal/domain"
 	"dts/backend/internal/repository"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -83,6 +83,20 @@ func TestControlOperationLeaseIsExclusiveRenewableAndReclaimable(t *testing.T) {
 	}
 	if err = s.ReleaseControlOperation(ctx, "m1", "validation", "server-b"); err != nil {
 		t.Fatalf("release: %v", err)
+	}
+}
+
+func TestExpiredControlOperationLeaseCannotBeRenewed(t *testing.T) {
+	ctx := context.Background()
+	s := New()
+	if ok, err := s.AcquireControlOperation(ctx, "task", "cutover", "old-owner", -time.Second); err != nil || !ok {
+		t.Fatalf("seed expired lease: %v %v", ok, err)
+	}
+	if err := s.RenewControlOperation(ctx, "task", "cutover", "old-owner", time.Minute); !errors.Is(err, repository.ErrLeaseOwner) {
+		t.Fatalf("expired owner must not resurrect its lease: %v", err)
+	}
+	if ok, err := s.AcquireControlOperation(ctx, "task", "recovery", "new-owner", time.Minute); err != nil || !ok {
+		t.Fatalf("expired lease must remain reclaimable: %v %v", ok, err)
 	}
 }
 

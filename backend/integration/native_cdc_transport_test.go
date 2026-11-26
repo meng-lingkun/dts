@@ -3,7 +3,9 @@
 package integration
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"strings"
 	"testing"
 	"time"
@@ -13,9 +15,11 @@ import (
 	"dts/backend/internal/connector"
 	mysqlconnector "dts/backend/internal/connector/mysql"
 	postgresconnector "dts/backend/internal/connector/postgres"
+	"dts/backend/internal/domain"
 )
 
 func TestMySQLGTIDReplicationTransport(t *testing.T) {
+	requireIsolated(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	raw, err := mysqlconnector.NewFactory().New(mysqlDS())
@@ -49,7 +53,7 @@ func TestMySQLGTIDReplicationTransport(t *testing.T) {
 	if err := my.ExecSQL(ctx, "INSERT INTO `dts_e2e`.`cdc_orders` VALUES (101,'gtid-e2e')"); err != nil {
 		t.Fatal(err)
 	}
-	parser := mysqlbinlog.Parser{}
+	parser := mysqlbinlog.StreamParser{}
 	seenGTID, seenRows, seenCommit := false, false, false
 	for !(seenGTID && seenRows && seenCommit) {
 		rawEvent, err := stream.Next(ctx)
@@ -78,6 +82,7 @@ func TestMySQLGTIDReplicationTransport(t *testing.T) {
 }
 
 func TestPostgresLogicalReplicationTransport(t *testing.T) {
+	requireIsolated(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	raw, err := postgresconnector.NewFactory().New(pgDS())
@@ -89,7 +94,7 @@ func TestPostgresLogicalReplicationTransport(t *testing.T) {
 	for _, q := range []string{
 		"CREATE SCHEMA IF NOT EXISTS dts_e2e",
 		"DROP TABLE IF EXISTS dts_e2e.cdc_orders",
-		"CREATE TABLE dts_e2e.cdc_orders (id bigint PRIMARY KEY,payload varchar(64))",
+		"CREATE TABLE dts_e2e.cdc_orders (id bigint PRIMARY KEY,payload varchar(64),raw_data bytea)",
 		"SELECT pg_drop_replication_slot(slot_name) FROM pg_replication_slots WHERE slot_name='dts_e2e_slot'",
 	} {
 		if err := pg.ExecSQL(ctx, q); err != nil {
@@ -110,7 +115,8 @@ func TestPostgresLogicalReplicationTransport(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer stream.Close()
-	if err := pg.ExecSQL(ctx, "INSERT INTO dts_e2e.cdc_orders VALUES (202,'pg-e2e')"); err != nil {
+	expected := []byte{0, 0xff, '\\', 'x', 0x80}
+	if err := pg.ExecSQL(ctx, "INSERT INTO dts_e2e.cdc_orders VALUES (202,'pg-e2e',decode('00ff5c7880','hex'))"); err != nil {
 		t.Fatal(err)
 	}
 	decoder := pgoutput.NewDecoder()
@@ -129,10 +135,23 @@ func TestPostgresLogicalReplicationTransport(t *testing.T) {
 		if len(tx.Events) == 0 || tx.Events[0].Operation != "INSERT" {
 			t.Fatalf("unexpected tx %+v", tx)
 		}
+		after := tx.Events[0].After
+		if len(after) != 3 || after[2].Encoding != "base64" || after[2].Value != base64.StdEncoding.EncodeToString(expected) {
+			t.Fatalf("pgoutput binary field changed: %+v", after)
+		}
 		lsn := pgoutput.FormatLSN(tx.EndLSN)
 		if err := stream.Acknowledge(ctx, lsn); err != nil {
 			t.Fatal(err)
 		}
 		break
+	}
+	for _, setting := range []string{"hex", "escape"} {
+		if err := pg.ExecSQL(ctx, "SET bytea_output = '"+setting+"'"); err != nil {
+			t.Fatal(err)
+		}
+		batch, err := pg.ReadBatch(ctx, connector.ReadBatchRequest{Schema: "dts_e2e", Table: "cdc_orders", PrimaryKey: "id", StartPK: 202, EndPK: 202, Columns: []domain.ColumnInfo{{Name: "id", DataType: "bigint"}, {Name: "raw_data", DataType: "bytea"}}})
+		if err != nil || len(batch.Rows) != 1 || !bytes.Equal(batch.Rows[0][1].Raw, expected) {
+			t.Fatalf("full-load bytea_output=%s: batch=%+v, err=%v", setting, batch, err)
+		}
 	}
 }

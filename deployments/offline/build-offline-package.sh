@@ -21,8 +21,14 @@ docker version >/dev/null
 
 WORK_DIR=$(mktemp -d "${TMPDIR:-/tmp}/dts-offline.XXXXXX")
 image_container=
-cleanup() { if [ -n "$image_container" ]; then docker rm "$image_container" >/dev/null 2>&1 || true; fi; rm -rf -- "$WORK_DIR"; }
-trap cleanup EXIT INT TERM
+archive_tmp=
+cleanup() {
+  if [ -n "$image_container" ]; then docker rm "$image_container" >/dev/null 2>&1 || true; fi
+  if [ -n "$archive_tmp" ]; then rm -f -- "$archive_tmp" "$archive_tmp.sha256"; fi
+  rm -rf -- "$WORK_DIR"
+}
+trap cleanup EXIT
+trap 'exit 1' INT TERM
 STAGE=$WORK_DIR/$PACKAGE_NAME
 mkdir -p "$STAGE/images" "$STAGE/bin" "$STAGE/migrations" "$STAGE/docs" "$STAGE/runtime" "$STAGE/kubernetes"
 
@@ -66,7 +72,22 @@ cp "$SCRIPT_DIR/install.sh" "$SCRIPT_DIR/install-kubernetes.sh" "$SCRIPT_DIR/loa
 cp "$REPO_ROOT/deployments/kubernetes/"*.yaml "$STAGE/kubernetes/"
 cp "$REPO_ROOT/VERSION" "$STAGE/VERSION"
 cp "$REPO_ROOT/backend/migrations/"*.sql "$STAGE/migrations/"
+cp "$REPO_ROOT/backend/internal/repository/postgres/schema.sql" "$STAGE/migrations/schema.sql"
+mkdir -p "$STAGE/scripts"
+cp "$REPO_ROOT/deployments/scripts/migrate-metadata.sh" "$STAGE/scripts/"
+cp "$REPO_ROOT/deployments/scripts/recovery-set.sh" "$STAGE/scripts/"
 cp "$REPO_ROOT/docs/USER_GUIDE.md" "$REPO_ROOT/docs/MAINTENANCE_GUIDE.md" "$REPO_ROOT/docs/PROJECT_ARCHITECTURE.md" "$REPO_ROOT/docs/ARCHITECTURE_ASSESSMENT.md" "$STAGE/docs/"
+cp "$REPO_ROOT/docs/DTS_RENAME_UPGRADE.md" "$REPO_ROOT/docs/ENTERPRISE_HARDENING_RC50.md" "$REPO_ROOT/docs/OFFLINE_RELEASE_SECURITY.md" "$REPO_ROOT/docs/openapi.json" "$STAGE/docs/"
+cp "$REPO_ROOT/docs/SUPPORT_MATRIX_V0.15_RC50.md" "$STAGE/docs/"
+python3 "$REPO_ROOT/tools/s3-recovery/build.py" --out "$STAGE/tools"
+cp "$REPO_ROOT/deployments/kubernetes/README.md" "$STAGE/kubernetes/README.md"
+mkdir -p "$STAGE/tools/release-security"
+cp "$REPO_ROOT/tools/release-security/release.py" "$STAGE/tools/release-security/"
+server_archive=images/dts-server-$VERSION.tar
+web_archive=images/dts-web-$VERSION.tar
+postgres_archive=images/postgres-17.tar
+cluster_payload=false
+node_runtime="containerd (provided by existing Kubernetes cluster)"
 if [ -n "${CLUSTER_PAYLOAD_DIR:-}" ]; then
   mkdir -p "$STAGE/cluster"
   for directory in runtime network rpms images; do cp -R "$CLUSTER_PAYLOAD_DIR/$directory" "$STAGE/cluster/"; done
@@ -80,9 +101,14 @@ if [ -n "${CLUSTER_PAYLOAD_DIR:-}" ]; then
     test -s "$STAGE/cluster/images/$filename.tar" || { echo "Missing cluster image: $ref" >&2; exit 1; }
   done < "$SCRIPT_DIR/cluster-images.txt"
   find "$STAGE/images" "$STAGE/cluster/images" -name '*.tar' -type f > "$WORK_DIR/merge-inputs.txt"
-  (cd "$REPO_ROOT/tools/offline-image-builder" && go run . --merge-list "$WORK_DIR/merge-inputs.txt" --merged-archive "$STAGE/images/all-images.tar")
+  (cd "$REPO_ROOT/tools/offline-image-builder" && GOTOOLCHAIN="go$(cat "$REPO_ROOT/.go-version")" go run . --merge-list "$WORK_DIR/merge-inputs.txt" --merged-archive "$STAGE/images/all-images.tar")
   (cd "$STAGE/images" && gzip all-images.tar)
   while IFS= read -r file; do rm -f -- "$file"; done < "$WORK_DIR/merge-inputs.txt"
+  cluster_payload=true
+  node_runtime="containerd (bundled for offline kubeadm bootstrap)"
+  server_archive=images/all-images.tar.gz
+  web_archive=$server_archive
+  postgres_archive=$server_archive
 fi
 chmod 0755 "$STAGE/install.sh" "$STAGE/install-kubernetes.sh" "$STAGE/load-images-kubernetes.sh" "$STAGE/verify.sh" "$STAGE/uninstall.sh" "$STAGE/uninstall-all.sh" "$STAGE/bin/dtsctl" "$STAGE/bin/dts-certgen" "$STAGE/runtime/kubectl"
 
@@ -97,17 +123,22 @@ cat > "$STAGE/manifest.json" <<EOF
   "platform": "$PLATFORM",
   "created_at": "$created_at",
   "deployment": "kubernetes",
-  "node_runtime": "containerd (provided by existing Kubernetes cluster)",
+  "cluster_payload": $cluster_payload,
+  "node_runtime": "$node_runtime",
   "cgroup_profiles": ["Kylin 4.19/cgroup v1 compatibility", "kernel 5.10+/cgroup v2"],
   "kubernetes_client": {
     "kubectl_version": "$KUBECTL_VERSION",
     "kubectl_archive": "runtime/kubectl",
-    "kubectl_sha256": "$KUBECTL_SHA256"
+    "kubectl_sha256": "$KUBECTL_SHA256",
+    "kubeadm_archive": "runtime/kubeadm",
+    "kubeadm_sha256": "$KUBEADM_SHA256",
+    "kubelet_archive": "runtime/kubelet",
+    "kubelet_sha256": "$KUBELET_SHA256"
   },
   "images": [
-    {"name": "$SERVER_IMAGE", "image_id": "$server_id", "archive": "images/dts-server-$VERSION.tar"},
-    {"name": "$WEB_IMAGE", "image_id": "$web_id", "archive": "images/dts-web-$VERSION.tar"},
-    {"name": "$POSTGRES_IMAGE", "source": "$POSTGRES_SOURCE_IMAGE", "image_id": "$postgres_id", "archive": "images/postgres-17.tar"}
+    {"name": "$SERVER_IMAGE", "image_id": "$server_id", "archive": "$server_archive"},
+    {"name": "$WEB_IMAGE", "image_id": "$web_id", "archive": "$web_archive"},
+    {"name": "$POSTGRES_IMAGE", "source": "$POSTGRES_SOURCE_IMAGE", "image_id": "$postgres_id", "archive": "$postgres_archive"}
   ]
 }
 EOF
@@ -118,7 +149,12 @@ echo "[7/8] Creating package integrity manifest"
 echo "[8/8] Creating compressed offline package"
 mkdir -p "$OUTPUT_DIR"
 ARCHIVE=$OUTPUT_DIR/$PACKAGE_NAME.tar.gz
-tar -C "$WORK_DIR" -czf "$ARCHIVE" "$PACKAGE_NAME"
-(cd "$OUTPUT_DIR" && sha256sum "$PACKAGE_NAME.tar.gz" > "$PACKAGE_NAME.tar.gz.sha256")
+archive_tmp=$(mktemp "$OUTPUT_DIR/.$PACKAGE_NAME.XXXXXX")
+tar -C "$WORK_DIR" -czf "$archive_tmp" "$PACKAGE_NAME"
+archive_digest=$(sha256sum < "$archive_tmp")
+printf '%s  %s\n' "${archive_digest%% *}" "$PACKAGE_NAME.tar.gz" > "$archive_tmp.sha256"
+chmod 0644 "$archive_tmp" "$archive_tmp.sha256"
+mv -f -- "$archive_tmp" "$ARCHIVE"
+mv -f -- "$archive_tmp.sha256" "$ARCHIVE.sha256"
 echo "Created: $ARCHIVE"
 echo "Checksum: $ARCHIVE.sha256"

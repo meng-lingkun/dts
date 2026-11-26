@@ -25,6 +25,13 @@ func TestQuoteIdent(t *testing.T) {
 		t.Fatalf("got %s", got)
 	}
 }
+func TestSQLTextIndependentOfEscapeMode(t *testing.T) {
+	for in, want := range map[string]string{"O'Brien": "'O''Brien'", "a\\b": "_utf8mb4 X'615c62'", "a\x00b": "_utf8mb4 X'610062'"} {
+		if got := quoteSQLString(in); got != want {
+			t.Fatalf("quoted %q as %q", in, got)
+		}
+	}
+}
 func TestLenEnc(t *testing.T) {
 	b := []byte{0xfc, 0x34, 0x12}
 	v, n, ok := readLenEncInt(b, 0)

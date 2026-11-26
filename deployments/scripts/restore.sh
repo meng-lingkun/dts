@@ -8,5 +8,5 @@ DIR=${1:?usage: restore.sh BACKUP_DIR}
 : "${DTS_METADATA_DATABASE:=dts}"
 export PGPASSWORD=${DTS_METADATA_PASSWORD:?DTS_METADATA_PASSWORD is required}
 (cd "$DIR" && sha256sum -c SHA256SUMS)
-pg_restore -h "$DTS_METADATA_HOST" -p "$DTS_METADATA_PORT" -U "$DTS_METADATA_USER" -d "$DTS_METADATA_DATABASE" --clean --if-exists --no-owner "$DIR/metadata.dump"
+pg_restore -h "$DTS_METADATA_HOST" -p "$DTS_METADATA_PORT" -U "$DTS_METADATA_USER" -d "$DTS_METADATA_DATABASE" --exit-on-error --single-transaction --clean --if-exists --no-owner "$DIR/metadata.dump"
 echo "restore complete; restart DTS with the SAME DTS_MASTER_KEY used when credentials were encrypted"

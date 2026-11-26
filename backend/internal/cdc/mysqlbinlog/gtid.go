@@ -63,6 +63,28 @@ type GTIDSet struct {
 
 func NewGTIDSet() *GTIDSet { return &GTIDSet{sets: map[string][]GTIDInterval{}} }
 
+// Contains proves every transaction interval in other has been executed.
+func (s *GTIDSet) Contains(other *GTIDSet) bool {
+	if s == nil || other == nil {
+		return false
+	}
+	for sid, intervals := range other.sets {
+		for _, wanted := range intervals {
+			covered := false
+			for _, have := range s.sets[sid] {
+				if have.Start <= wanted.Start && have.End >= wanted.End {
+					covered = true
+					break
+				}
+			}
+			if !covered {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 func ParseGTIDSet(raw string) (*GTIDSet, error) {
 	s := NewGTIDSet()
 	raw = strings.TrimSpace(raw)

@@ -51,6 +51,9 @@ func waitCDCReady(ctx context.Context, client *http.Client, endpoint, token stri
 		if wt := strings.TrimSpace(os.Getenv("DTS_WORKER_TOKEN")); wt != "" {
 			req.Header.Set("X-DTS-Worker-Token", wt)
 		}
+		if generation := os.Getenv("DTS_LEASE_GENERATION"); generation != "" {
+			req.Header.Set("X-DTS-Lease-Generation", generation)
+		}
 		resp, err := client.Do(req)
 		if err == nil {
 			data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
@@ -93,6 +96,9 @@ func postTransaction(ctx context.Context, client *http.Client, endpoint, token, 
 	}
 	if wt := strings.TrimSpace(os.Getenv("DTS_WORKER_TOKEN")); wt != "" {
 		req.Header.Set("X-DTS-Worker-Token", wt)
+	}
+	if generation := os.Getenv("DTS_LEASE_GENERATION"); generation != "" {
+		req.Header.Set("X-DTS-Lease-Generation", generation)
 	}
 	resp, err := client.Do(req)
 	if err != nil {

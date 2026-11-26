@@ -11,7 +11,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"strings"
 	"sync"
@@ -251,11 +250,6 @@ func (p *Proxy) handle(ctx context.Context, client net.Conn) {
 				}
 			}
 			if err != nil {
-				if !errors.Is(err, io.EOF) {
-					// Connection errors are expected in a fault proxy. The
-					// client observes the TCP failure; no separate side channel
-					// is needed here.
-				}
 				return
 			}
 		}

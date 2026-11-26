@@ -35,3 +35,20 @@ func TestRBAC(t *testing.T) {
 		t.Fatal("admin should manage validation-report signing-key lifecycle")
 	}
 }
+
+func TestOperatorCannotBypassPrivilegedMigrationActions(t *testing.T) {
+	for _, action := range []string{"ready-cutover", "cutover", "rollback/prepare", "cdc", "cdc/started", "cdc/events", "cdc/debezium", "cdc/canal", "cdc/dlq/d1/replay", "schema-objects/apply", "future-dangerous-action"} {
+		path := "/api/v1/migrations/task/" + action
+		if Allowed(RoleOperator, "POST", path) {
+			t.Errorf("operator can invoke privileged or unknown mutation: %s", path)
+		}
+	}
+	for _, action := range []string{"start", "pause", "resume", "cancel", "validate", "repair", "cdc/spool/drain", "validation-report/archive"} {
+		if !Allowed(RoleOperator, "POST", "/api/v1/migrations/task/"+action) {
+			t.Errorf("ordinary operator action denied: %s", action)
+		}
+	}
+	if Allowed(Role("invalid"), "GET", "/api/v1/datasources") {
+		t.Fatal("unknown role must fail closed")
+	}
+}

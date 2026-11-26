@@ -3,9 +3,17 @@ package migration
 import (
 	"encoding/json"
 	"errors"
-	"math"
+	"fmt"
+
 	"dts/backend/internal/connector"
 	"dts/backend/internal/domain"
+)
+
+const (
+	maxKeysetPartitions = 128
+	// A table's initial range plan and its metadata are materialized together.
+	// Limit that allocation even if a source reports an enormous row estimate.
+	maxInitialRangeChunks = 16_384
 )
 
 // PlanIntegerRange splits an inclusive signed integer PK range by key span.
@@ -16,22 +24,58 @@ func PlanIntegerRange(minPK, maxPK, span int64) ([]domain.MigrationChunk, error)
 	if minPK > maxPK {
 		return nil, errors.New("minPK must be <= maxPK")
 	}
-	chunks := make([]domain.MigrationChunk, 0)
-	start := minPK
-	chunkNo := 1
-	for start <= maxPK {
-		end := start + span - 1
-		if end < start || end > maxPK {
-			end = maxPK
+	// The distance fits uint64 even when the inclusive cardinality is 2^64.
+	distance := uint64(maxPK) - uint64(minPK)
+	extraChunks := distance / uint64(span)
+	if extraChunks >= maxInitialRangeChunks {
+		return nil, fmt.Errorf("span %d would require more than %d initial range chunks", span, maxInitialRangeChunks)
+	}
+	return integerRangeChunks(minPK, maxPK, uint64(span-1), int(extraChunks)+1), nil
+}
+
+func integerRangeChunks(minPK, maxPK int64, spanMinusOne uint64, capacity int) []domain.MigrationChunk {
+	chunks := make([]domain.MigrationChunk, 0, capacity)
+	for start := minPK; ; {
+		end := maxPK
+		if uint64(maxPK)-uint64(start) > spanMinusOne {
+			end = int64(uint64(start) + spanMinusOne)
 		}
-		chunks = append(chunks, domain.MigrationChunk{ChunkNo: chunkNo, SplitType: "PRIMARY_KEY_RANGE", Start: start, End: end, Status: domain.ChunkPending})
+		chunks = append(chunks, domain.MigrationChunk{ChunkNo: len(chunks) + 1, SplitType: "PRIMARY_KEY_RANGE", Start: start, End: end, Status: domain.ChunkPending})
 		if end == maxPK {
 			break
 		}
 		start = end + 1
-		chunkNo++
 	}
-	return chunks, nil
+	return chunks
+}
+
+type integerRange struct{ start, end int64 }
+
+// Split an existing inclusive range into nonempty parts whose widths differ
+// by at most one. Unlike a fixed-span plan this yields exactly the requested
+// number of parts whenever there are enough keys.
+func balancedIntegerRanges(low, high int64, pieces int) []integerRange {
+	if pieces <= 1 || low == high {
+		return []integerRange{{low, high}}
+	}
+	distance := uint64(high) - uint64(low)
+	pieces = int(min(uint64(pieces-1), distance)) + 1
+	// Distribute distance+1 keys without forming that potentially 65-bit sum.
+	base, extra := distance/uint64(pieces), distance%uint64(pieces)+1
+	ranges := make([]integerRange, pieces)
+	start := low
+	for i := range ranges {
+		width := base
+		if uint64(i) < extra {
+			width++
+		}
+		end := int64(uint64(start) + width - 1)
+		ranges[i] = integerRange{start, end}
+		if end < high {
+			start = end + 1
+		}
+	}
+	return ranges
 }
 
 // PlanIntegerRangeByRows estimates a PK span that targets approximately targetRows
@@ -43,25 +87,16 @@ func PlanIntegerRangeByRows(minPK, maxPK, estimatedRows, targetRows int64) ([]do
 	if minPK > maxPK {
 		return nil, errors.New("minPK must be <= maxPK")
 	}
-	if estimatedRows <= 0 {
-		estimatedRows = maxPK - minPK + 1
+	distance := uint64(maxPK) - uint64(minPK)
+	// Without statistics the key domain can be very sparse. Use the same
+	// bound on speculative work as keyset planning.
+	extraChunks := min(distance/uint64(targetRows), uint64(maxKeysetPartitions-1))
+	if estimatedRows > 0 {
+		extraChunks = min(uint64((estimatedRows-1)/targetRows), uint64(maxInitialRangeChunks-1))
 	}
-	chunkCount := int64(math.Ceil(float64(estimatedRows) / float64(targetRows)))
-	if chunkCount < 1 {
-		chunkCount = 1
-	}
-	rangeSize := maxPK - minPK + 1
-	if rangeSize <= 0 {
-		return nil, errors.New("primary key range overflow")
-	}
-	span := rangeSize / chunkCount
-	if rangeSize%chunkCount != 0 {
-		span++
-	}
-	if span < 1 {
-		span = 1
-	}
-	return PlanIntegerRange(minPK, maxPK, span)
+	count := min(extraChunks, distance) + 1
+	// ceil((distance+1)/count)-1 equals distance/count without overflow.
+	return integerRangeChunks(minPK, maxPK, distance/count, int(count)), nil
 }
 
 // PlanBoundedKeyset converts ordered split points into gap-free [lower, upper)
@@ -107,19 +142,7 @@ func DesiredKeysetPartitions(estimatedRows, targetRows int64, parallelism int) i
 	if parallelism <= 0 {
 		parallelism = 1
 	}
-	byRows := int((estimatedRows + targetRows - 1) / targetRows)
-	if byRows < 1 {
-		byRows = 1
-	}
-	capByWorkers := parallelism * 4
-	if capByWorkers < 1 {
-		capByWorkers = 1
-	}
-	if capByWorkers > 128 {
-		capByWorkers = 128
-	}
-	if byRows > capByWorkers {
-		return capByWorkers
-	}
-	return byRows
+	byRows := (estimatedRows-1)/targetRows + 1
+	capByWorkers := min(parallelism, maxKeysetPartitions/4) * 4
+	return int(min(byRows, int64(capByWorkers)))
 }

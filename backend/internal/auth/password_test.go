@@ -1,6 +1,17 @@
 package auth
 
-import "testing"
+import (
+	"encoding/hex"
+	"testing"
+)
+
+func TestPBKDF2SHA256Compatibility(t *testing.T) {
+	// Known PBKDF2-HMAC-SHA256 output with two rounds exercises HMAC reuse.
+	got := pbkdf2SHA256([]byte("password"), []byte("salt"), 2, 32)
+	if hex.EncodeToString(got) != "ae4d0c95af6b46d32d0adff928f06dd02a303f8ef3c251dfd6e2d85a95474c43" {
+		t.Fatal("existing password verifier format changed")
+	}
+}
 
 func TestPasswordHashAndVerify(t *testing.T) {
 	h, err := HashPassword("change-me-123")

@@ -182,3 +182,84 @@ func TestStopAfterCommitYieldsOnlyAtDurableBatchBoundary(t *testing.T) {
 		t.Fatalf("writes=%d commits=%d stats=%+v", writes, commits, stats)
 	}
 }
+
+func TestShortPagesContinueUntilSourceIsExhausted(t *testing.T) {
+	pages := []int{2, 1, 2}
+	var cursor, applied int
+	r := Runner{
+		Read: func(context.Context, int) (*Batch, error) {
+			if cursor == len(pages) {
+				return nil, nil
+			}
+			rows := pages[cursor]
+			cursor++
+			return &Batch{Rows: rows}, nil
+		},
+		Write: func(_ context.Context, b *Batch) (int64, int64, int64, error) {
+			return int64(b.Rows), 0, 0, nil
+		},
+		Commit: func(_ context.Context, b *Batch, _ Stats) (Control, error) {
+			applied += b.Rows
+			return Control{}, nil
+		},
+	}
+	stats, err := r.Run(context.Background(), Config{InitialBatchRows: 50})
+	if err != nil || stats.RowsWritten != 5 || applied != 5 {
+		t.Fatalf("wrote %d, checkpointed %d, err=%v", stats.RowsWritten, applied, err)
+	}
+}
+
+func TestRunJoinsPrefetchOnWriteFailure(t *testing.T) {
+	started := make(chan struct{})
+	stopped := make(chan struct{})
+	first := true
+	fault := errors.New("write failed")
+	r := Runner{
+		Read: func(ctx context.Context, _ int) (*Batch, error) {
+			if first {
+				first = false
+				return &Batch{Rows: 1}, nil
+			}
+			close(started)
+			<-ctx.Done()
+			close(stopped)
+			return nil, ctx.Err()
+		},
+		Write: func(context.Context, *Batch) (int64, int64, int64, error) {
+			<-started
+			return 0, 0, 0, fault
+		},
+		Commit: func(context.Context, *Batch, Stats) (Control, error) {
+			t.Fatal("checkpointed a failed write")
+			return Control{}, nil
+		},
+	}
+	_, err := r.Run(context.Background(), Config{})
+	if !errors.Is(err, fault) {
+		t.Fatalf("got %v", err)
+	}
+	select {
+	case <-stopped:
+	default:
+		t.Fatal("source reader was still running on return")
+	}
+}
+
+func TestCancellationAtEndOfReadIsNotSuccess(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	r := Runner{
+		Read: func(context.Context, int) (*Batch, error) { cancel(); return nil, nil },
+		Write: func(context.Context, *Batch) (int64, int64, int64, error) {
+			t.Fatal("unexpected write")
+			return 0, 0, 0, nil
+		},
+		Commit: func(context.Context, *Batch, Stats) (Control, error) {
+			t.Fatal("unexpected commit")
+			return Control{}, nil
+		},
+	}
+	if _, err := r.Run(ctx, Config{}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("got %v", err)
+	}
+}

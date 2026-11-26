@@ -64,14 +64,11 @@ func PiecesForRows(estimatedRows, recommendedRows int64, maxPieces int) int {
 	if estimatedRows <= 0 || recommendedRows <= 0 {
 		return 1
 	}
-	p := int((estimatedRows + recommendedRows - 1) / recommendedRows)
-	if p < 1 {
-		p = 1
+	p := (estimatedRows-1)/recommendedRows + 1
+	if maxPieces > 0 {
+		p = min(p, int64(maxPieces))
 	}
-	if maxPieces > 0 && p > maxPieces {
-		p = maxPieces
-	}
-	return p
+	return int(min(p, int64(math.MaxInt)))
 }
 
 // AppendSample keeps only the newest max samples so topology latency profiles stay bounded.

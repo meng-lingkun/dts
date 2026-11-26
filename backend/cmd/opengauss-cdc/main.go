@@ -3,6 +3,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"dts/backend/internal/cdc/ddlsidecar"
+	postgresconnector "dts/backend/internal/connector/postgres"
+	"dts/backend/internal/domain"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,9 +13,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"dts/backend/internal/cdc/ddlsidecar"
-	postgresconnector "dts/backend/internal/connector/postgres"
-	"dts/backend/internal/domain"
 	"strconv"
 	"strings"
 	"time"
@@ -52,6 +52,9 @@ func waitCDCReady(ctx context.Context, client *http.Client, endpoint, token stri
 		}
 		if wt := strings.TrimSpace(os.Getenv("DTS_WORKER_TOKEN")); wt != "" {
 			req.Header.Set("X-DTS-Worker-Token", wt)
+		}
+		if generation := os.Getenv("DTS_LEASE_GENERATION"); generation != "" {
+			req.Header.Set("X-DTS-Lease-Generation", generation)
 		}
 		resp, err := client.Do(req)
 		if err == nil {
@@ -95,6 +98,9 @@ func postTransaction(ctx context.Context, client *http.Client, endpoint, token, 
 	}
 	if wt := strings.TrimSpace(os.Getenv("DTS_WORKER_TOKEN")); wt != "" {
 		req.Header.Set("X-DTS-Worker-Token", wt)
+	}
+	if generation := os.Getenv("DTS_LEASE_GENERATION"); generation != "" {
+		req.Header.Set("X-DTS-Lease-Generation", generation)
 	}
 	resp, err := client.Do(req)
 	if err != nil {

@@ -3,14 +3,6 @@ package main
 import (
 	"context"
 	"crypto/rand"
-	"encoding/hex"
-	"errors"
-	"fmt"
-	"log"
-	"net/http"
-	"os"
-	"os/signal"
-	"path/filepath"
 	"dts/backend/internal/api"
 	"dts/backend/internal/auth"
 	"dts/backend/internal/connector"
@@ -32,6 +24,16 @@ import (
 	spoolfilerepo "dts/backend/internal/repository/spoolfile"
 	spools3repo "dts/backend/internal/repository/spools3"
 	"dts/backend/internal/security"
+	"dts/backend/internal/telemetry"
+	"dts/backend/internal/version"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -45,23 +47,22 @@ func env(k, d string) string {
 	return d
 }
 
-func envEnabled(k string) bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(k))) {
-	case "1", "true", "yes", "on":
-		return true
-	default:
-		return false
-	}
-}
-
 func validateProductionEnvironment() error {
-	if !envEnabled("DTS_PRODUCTION") {
+	production, err := auth.ParseEnabled(os.Getenv("DTS_PRODUCTION"))
+	if err != nil {
+		return fmt.Errorf("DTS_PRODUCTION: %w", err)
+	}
+	requiredAuth, err := auth.ParseEnabled(os.Getenv("DTS_AUTH_REQUIRED"))
+	if err != nil {
+		return fmt.Errorf("DTS_AUTH_REQUIRED: %w", err)
+	}
+	if !production {
 		return nil
 	}
 	if os.Getenv("DTS_REPOSITORY") != "postgres" {
 		return errors.New("DTS_PRODUCTION requires DTS_REPOSITORY=postgres")
 	}
-	if !envEnabled("DTS_AUTH_REQUIRED") {
+	if !requiredAuth {
 		return errors.New("DTS_PRODUCTION requires DTS_AUTH_REQUIRED=true")
 	}
 	required := map[string]int{
@@ -95,6 +96,9 @@ func validateProductionEnvironment() error {
 }
 
 func main() {
+	if err := security.LoadSecretFiles("DTS_METADATA_PASSWORD", "DTS_MASTER_KEY", "DTS_WORKER_TOKEN", "DTS_AUTH_SECRET", "DTS_BOOTSTRAP_ADMIN_PASSWORD", "DTS_API_TOKEN", "DTS_RBAC_TOKENS", "DTS_METRICS_TOKEN", "DTS_OIDC_CLIENT_SECRET"); err != nil {
+		log.Fatal(err)
+	}
 	if err := validateProductionEnvironment(); err != nil {
 		log.Fatal(err)
 	}
@@ -108,9 +112,26 @@ func main() {
 			}
 		}
 		ds := domain.DataSource{Type: domain.DataSourcePostgreSQL, Host: env("DTS_METADATA_HOST", "127.0.0.1"), Port: port, Username: env("DTS_METADATA_USER", "dts"), Password: os.Getenv("DTS_METADATA_PASSWORD"), Database: env("DTS_METADATA_DATABASE", "dts")}
-		st, err := pgrepo.New(context.Background(), ds, true)
+		poolSize, err := strconv.Atoi(env("DTS_METADATA_POOL_SIZE", "4"))
+		if err != nil {
+			log.Fatal("invalid DTS_METADATA_POOL_SIZE")
+		}
+		autoMigrate, err := strconv.ParseBool(env("DTS_METADATA_AUTO_MIGRATE", "true"))
+		if err != nil {
+			log.Fatal("invalid DTS_METADATA_AUTO_MIGRATE")
+		}
+		st, err := pgrepo.NewWithPoolSize(context.Background(), ds, autoMigrate, poolSize)
 		if err != nil {
 			log.Fatalf("open PostgreSQL metadata repository: %v", err)
+		}
+		if !autoMigrate {
+			actual, err := st.MetadataSchemaVersion(context.Background())
+			if err != nil {
+				log.Fatalf("check existing metadata schema: %v", err)
+			}
+			if actual != version.Version {
+				log.Fatalf("metadata version %s, binary requires %s", actual, version.Version)
+			}
 		}
 		base = st
 		log.Printf("metadata repository: PostgreSQL %s:%d/%s", ds.Host, ds.Port, ds.Database)
@@ -208,9 +229,18 @@ func main() {
 	if addr == "" {
 		addr = ":8080"
 	}
+	handler := srv.Handler()
+	stopTracing, err := telemetry.Enable(context.Background(), "dts-server")
+	if err != nil {
+		log.Fatal(err)
+	}
+	if stopTracing != nil {
+		defer stopTracing()
+		handler = telemetry.HTTPHandler(handler)
+	}
 	httpServer := &http.Server{
 		Addr:              addr,
-		Handler:           srv.Handler(),
+		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      0,
@@ -263,6 +293,23 @@ func bootstrapAdmin(ctx context.Context, repo repository.Repository) error {
 	if _, err := repo.GetUserByUsername(ctx, username); err == nil {
 		log.Printf("bootstrap admin %q already exists; password was not reset", username)
 		return nil
+	} else if !errors.Is(err, repository.ErrNotFound) {
+		return fmt.Errorf("read bootstrap administrator: %w", err)
+	}
+	production, err := auth.ParseEnabled(os.Getenv("DTS_PRODUCTION"))
+	if err != nil {
+		return fmt.Errorf("DTS_PRODUCTION: %w", err)
+	}
+	if production {
+		lower := strings.ToLower(password)
+		if len(password) < 16 || strings.Contains(lower, "change-me") || strings.Contains(lower, "replace-with") || strings.Contains(lower, "example") {
+			return errors.New("production bootstrap admin password must be an independent random value with at least 16 characters")
+		}
+		for _, name := range []string{"DTS_METADATA_PASSWORD", "DTS_MASTER_KEY", "DTS_WORKER_TOKEN", "DTS_AUTH_SECRET"} {
+			if password == os.Getenv(name) {
+				return fmt.Errorf("production bootstrap admin password must be different from %s", name)
+			}
+		}
 	}
 	hash, err := auth.HashPassword(password)
 	if err != nil {
@@ -282,7 +329,11 @@ func bootstrapAdmin(ctx context.Context, repo repository.Repository) error {
 }
 
 func validateAuthBootstrap(ctx context.Context, repo repository.Repository) error {
-	if !strings.EqualFold(os.Getenv("DTS_AUTH_REQUIRED"), "true") {
+	required, err := auth.ParseEnabled(os.Getenv("DTS_AUTH_REQUIRED"))
+	if err != nil {
+		return fmt.Errorf("DTS_AUTH_REQUIRED: %w", err)
+	}
+	if !required && os.Getenv("DTS_RBAC_TOKENS") == "" && os.Getenv("DTS_API_TOKEN") == "" {
 		return nil
 	}
 	users, err := repo.ListUsers(ctx)
@@ -294,7 +345,7 @@ func validateAuthBootstrap(ctx context.Context, repo repository.Repository) erro
 		spec = "admin:" + os.Getenv("DTS_API_TOKEN")
 	}
 	if len(users) == 0 && auth.ParseTokens(spec).Empty() {
-		return fmt.Errorf("DTS_AUTH_REQUIRED=true but no users or static RBAC tokens exist; set DTS_BOOTSTRAP_ADMIN_PASSWORD for first startup")
+		return errors.New("authentication is configured but no users or valid static RBAC tokens exist; set DTS_BOOTSTRAP_ADMIN_PASSWORD for first startup")
 	}
 	return nil
 }

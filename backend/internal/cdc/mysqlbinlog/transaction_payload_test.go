@@ -1,6 +1,7 @@
 package mysqlbinlog
 
 import (
+	"context"
 	"encoding/binary"
 	"os/exec"
 	"testing"
@@ -42,7 +43,7 @@ func TestParseTransactionPayloadNoneAndSplit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	plain, err := tp.Decompress("")
+	plain, err := tp.Decompress(context.Background(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,11 +79,25 @@ func TestTransactionPayloadZSTD(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	plain, err := tp.Decompress(zstd)
+	plain, err := tp.Decompress(context.Background(), zstd)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if string(plain) != string(nested) {
 		t.Fatal("decompressed payload mismatch")
+	}
+	tp.UncompressedSize = 1
+	if _, err := tp.Decompress(context.Background(), zstd); err == nil {
+		t.Fatal("accepted more decoded bytes than declared")
+	}
+}
+
+func TestTransactionPayloadBounds(t *testing.T) {
+	tp := TransactionPayload{CompressionType: TransactionCompressionNone, UncompressedSize: maxTransactionPayloadBytes + 1}
+	if _, err := tp.Decompress(context.Background(), ""); err == nil {
+		t.Fatal("accepted oversized transaction")
+	}
+	if _, err := SplitTransactionEvents(rawNestedEvent(TransactionPayloadEvent, 0, nil)); err == nil {
+		t.Fatal("accepted a nested transaction container")
 	}
 }

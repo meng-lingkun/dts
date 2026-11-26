@@ -3,6 +3,10 @@ package main
 import (
 	"bytes"
 	"context"
+	cdcruntime "dts/backend/internal/cdc/runtime"
+	"dts/backend/internal/cdc/sqlservercdc"
+	sqlserverconnector "dts/backend/internal/connector/sqlserver"
+	"dts/backend/internal/domain"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,10 +14,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	cdcruntime "dts/backend/internal/cdc/runtime"
-	"dts/backend/internal/cdc/sqlservercdc"
-	sqlserverconnector "dts/backend/internal/connector/sqlserver"
-	"dts/backend/internal/domain"
 	"strconv"
 	"strings"
 	"time"
@@ -45,6 +45,9 @@ func waitCDCReady(ctx context.Context, client *http.Client, endpoint, token stri
 		}
 		if wt := strings.TrimSpace(os.Getenv("DTS_WORKER_TOKEN")); wt != "" {
 			req.Header.Set("X-DTS-Worker-Token", wt)
+		}
+		if generation := os.Getenv("DTS_LEASE_GENERATION"); generation != "" {
+			req.Header.Set("X-DTS-Lease-Generation", generation)
 		}
 		resp, err := client.Do(req)
 		if err == nil {
@@ -88,6 +91,9 @@ func postTransaction(ctx context.Context, client *http.Client, endpoint, token, 
 	}
 	if wt := strings.TrimSpace(os.Getenv("DTS_WORKER_TOKEN")); wt != "" {
 		req.Header.Set("X-DTS-Worker-Token", wt)
+	}
+	if generation := os.Getenv("DTS_LEASE_GENERATION"); generation != "" {
+		req.Header.Set("X-DTS-Lease-Generation", generation)
 	}
 	resp, err := client.Do(req)
 	if err != nil {

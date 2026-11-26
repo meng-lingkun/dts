@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -30,6 +31,8 @@ import (
 	sqlserverconnector "dts/backend/internal/connector/sqlserver"
 	"dts/backend/internal/domain"
 	fullpipeline "dts/backend/internal/pipeline"
+	"dts/backend/internal/security"
+	"dts/backend/internal/telemetry"
 	"dts/backend/internal/transform"
 )
 
@@ -308,7 +311,11 @@ func sqlServerExperimentalEnabled() bool {
 	return envOn("DTS_EXPERIMENTAL_SQLSERVER_NATIVE")
 }
 
-func doJSON(method, url string, in, out any) (int, error) {
+func doJSON(method, url string, in, out any, generation ...int64) (int, error) {
+	return doJSONContext(context.Background(), method, url, in, out, generation...)
+}
+
+func doJSONContext(ctx context.Context, method, url string, in, out any, generation ...int64) (int, error) {
 	var body *bytes.Reader
 	if in != nil {
 		b, err := json.Marshal(in)
@@ -319,11 +326,14 @@ func doJSON(method, url string, in, out any) (int, error) {
 	} else {
 		body = bytes.NewReader(nil)
 	}
-	req, err := http.NewRequest(method, url, body)
+	req, err := http.NewRequestWithContext(ctx, method, url, body)
 	if err != nil {
 		return 0, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if len(generation) > 0 && generation[0] > 0 {
+		req.Header.Set("X-DTS-Lease-Generation", strconv.FormatInt(generation[0], 10))
+	}
 	if token := os.Getenv("DTS_WORKER_TOKEN"); token != "" {
 		req.Header.Set("X-DTS-Worker-Token", token)
 	}
@@ -342,27 +352,30 @@ func doJSON(method, url string, in, out any) (int, error) {
 	}
 	return resp.StatusCode, nil
 }
-func post(url string, in, out any) error { _, err := doJSON(http.MethodPost, url, in, out); return err }
+func post(url string, in, out any, generation ...int64) error {
+	_, err := doJSON(http.MethodPost, url, in, out, generation...)
+	return err
+}
 
 func credentialToDS(c domain.DataSourceCredential) domain.DataSource {
 	return domain.DataSource{Type: c.Type, Host: c.Host, Port: c.Port, Username: c.Username, Password: c.Password, Database: c.Database, Schema: c.Schema, JDBCURL: c.JDBCURL, DriverClass: c.DriverClass, CDCURL: c.CDCURL, TLSMode: c.TLSMode, TLSServerName: c.TLSServerName, TLSCACert: c.TLSCACert, TLSClientCert: c.TLSClientCert, TLSClientKey: c.TLSClientKey}
 }
-func throttleBytesPerSec(bytes, bytesPerSec int64, started time.Time) {
-	if bytesPerSec <= 0 || bytes <= 0 {
-		return
-	}
-	target := time.Duration(float64(bytes) / float64(bytesPerSec) * float64(time.Second))
-	if remain := target - time.Since(started); remain > 0 {
-		time.Sleep(remain)
-	}
-}
-func throttleUnits(units int64, perSecond int64, started time.Time) {
+func throttleUnits(ctx context.Context, units, perSecond int64, started time.Time) error {
 	if units <= 0 || perSecond <= 0 {
-		return
+		return ctx.Err()
 	}
 	want := time.Duration(float64(units) / float64(perSecond) * float64(time.Second))
-	if remain := want - time.Since(started); remain > 0 {
-		time.Sleep(remain)
+	remain := want - time.Since(started)
+	if remain <= 0 {
+		return ctx.Err()
+	}
+	timer := time.NewTimer(remain)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
 	}
 }
 
@@ -424,6 +437,7 @@ func executeManagedEngineJob(parent context.Context, server, workerID string, cl
 		"DTS_TASK_ID="+claim.Job.TaskID,
 		"DTS_WORKER_ID="+workerID,
 		"DTS_ENGINE_JOB_ID="+claim.Job.ID,
+		"DTS_LEASE_GENERATION="+strconv.FormatInt(claim.Job.LeaseGeneration, 10),
 		"DTS_CDC_DIRECTION="+claim.Job.Direction,
 		"DTS_CDC_ENDPOINT="+fmt.Sprintf("%s/api/v1/workers/%s/engine-jobs/%s/cdc/events", server, workerID, claim.Job.ID),
 		"DTS_CDC_READY_ENDPOINT="+fmt.Sprintf("%s/api/v1/workers/%s/engine-jobs/%s/cdc/ready", server, workerID, claim.Job.ID),
@@ -435,7 +449,7 @@ func executeManagedEngineJob(parent context.Context, server, workerID string, cl
 		return domain.EngineJobResult{Error: fmt.Sprintf("start engine %s: %v", cfg.Engine, err)}
 	}
 	startedURL := fmt.Sprintf("%s/api/v1/workers/%s/engine-jobs/%s/started", server, workerID, claim.Job.ID)
-	if err = post(startedURL, nil, nil); err != nil {
+	if err = post(startedURL, nil, nil, claim.Job.LeaseGeneration); err != nil {
 		cancel()
 		_ = cmd.Wait()
 		return domain.EngineJobResult{Error: fmt.Sprintf("report engine start: %v", err), OutputTail: tail.String()}
@@ -460,7 +474,7 @@ func executeManagedEngineJob(parent context.Context, server, workerID string, cl
 			return domain.EngineJobResult{OutputTail: out}
 		case <-leaseTicker.C:
 			leaseURL := fmt.Sprintf("%s/api/v1/workers/%s/engine-jobs/%s/lease", server, workerID, claim.Job.ID)
-			if err := post(leaseURL, nil, nil); err != nil {
+			if err := post(leaseURL, nil, nil, claim.Job.LeaseGeneration); err != nil {
 				stopping = true
 				cancel()
 			}
@@ -469,7 +483,9 @@ func executeManagedEngineJob(parent context.Context, server, workerID string, cl
 				Stop bool `json:"stop"`
 			}
 			ctlURL := fmt.Sprintf("%s/api/v1/workers/%s/engine-jobs/%s/control", server, workerID, claim.Job.ID)
-			if err := post(ctlURL, nil, &ctl); err != nil {
+			if err := post(ctlURL, nil, &ctl, claim.Job.LeaseGeneration); err != nil {
+				stopping = true
+				cancel()
 				continue
 			}
 			if ctl.Stop && !stopping {
@@ -484,18 +500,51 @@ type numericChunkCursor struct {
 	AfterPK int64 `json:"after_pk"`
 }
 
-func numericRangeSplit(splitType string) bool {
-	switch strings.ToUpper(strings.TrimSpace(splitType)) {
-	case "PRIMARY_KEY_RANGE", "PK_RANGE", "PK_RANGE_ADAPTIVE", "PK_RANGE_REBALANCED":
-		return true
-	default:
-		return false
+func chunkReadRequest(job *domain.ChunkJob) (connector.ReadBatchRequest, error) {
+	c, t := job.Chunk, job.Table
+	req := connector.ReadBatchRequest{
+		Schema: t.SourceSchema, Table: t.SourceTable, Columns: t.Columns,
+		PrimaryKey: t.PrimaryKey, PrimaryKeys: t.PrimaryKeys, StartPK: c.Start, EndPK: c.End,
+		Partition: c.PartitionName, HashBucket: c.HashBucket, HashBuckets: c.HashBuckets,
+		CustomWhere: c.CustomWhere, UseKeyset: strings.Contains(strings.ToUpper(c.SplitType), "KEYSET"),
 	}
+	if !req.UseKeyset {
+		if strings.TrimSpace(c.CursorJSON) != "" {
+			req.AfterPK, req.HasAfter = connector.DecodeAfterPK(c.CursorJSON)
+			if !req.HasAfter || req.AfterPK < c.Start || req.AfterPK > c.End {
+				return req, errors.New("invalid numeric chunk cursor or cursor outside persisted range")
+			}
+		}
+		return req, nil
+	}
+	width := len(t.PrimaryKeys)
+	if width == 0 {
+		if t.PrimaryKey == "" {
+			return req, errors.New("keyset chunk requires a primary key")
+		}
+		width = 1
+	}
+	var err error
+	if req.Cursor, err = connector.DecodeKeysetBound(c.CursorJSON, width); err != nil {
+		return req, fmt.Errorf("decode keyset cursor: %w", err)
+	}
+	if req.LowerBound, err = connector.DecodeKeysetBound(c.StartCursorJSON, width); err != nil {
+		return req, fmt.Errorf("decode keyset lower bound: %w", err)
+	}
+	if req.UpperBound, err = connector.DecodeKeysetBound(c.EndCursorJSON, width); err != nil {
+		return req, fmt.Errorf("decode keyset upper bound: %w", err)
+	}
+	return req, nil
 }
 
 func executeJob(ctx context.Context, server, workerID string, job *domain.ChunkJob) (result domain.ChunkResult) {
 	started := time.Now()
 	defer func() { result.DurationMS = time.Since(started).Milliseconds() }()
+	readReq, err := chunkReadRequest(job)
+	if err != nil {
+		result.Error = err.Error()
+		return
+	}
 	newConnector := func(c domain.DataSourceCredential) (connector.Connector, error) {
 		ds := credentialToDS(c)
 		switch {
@@ -546,6 +595,17 @@ func executeJob(ctx context.Context, server, workerID string, job *domain.ChunkJ
 	}
 
 	var readBytesPerSec atomic.Int64
+	if job.Chunk.LeaseGeneration > 0 {
+		f, ok := dst.(connector.TransactionFencer)
+		if !ok {
+			result.Error = "target has no transaction execution fence"
+			return
+		}
+		if err := f.EnsureExecutionFence(ctx); err != nil {
+			result.Error = err.Error()
+			return
+		}
+	}
 	var writeBytesPerSec atomic.Int64
 	initialReadBPS := job.ReadBytesPerSec
 	if initialReadBPS <= 0 && job.ReadLimitMBps > 0 {
@@ -557,37 +617,6 @@ func executeJob(ctx context.Context, server, workerID string, job *domain.ChunkJ
 	}
 	readBytesPerSec.Store(initialReadBPS)
 	writeBytesPerSec.Store(initialWriteBPS)
-
-	useKeyset := strings.Contains(job.Chunk.SplitType, "KEYSET")
-	var keyCursor, lowerBound, upperBound []connector.Value
-	if useKeyset && strings.TrimSpace(job.Chunk.CursorJSON) != "" {
-		if err := json.Unmarshal([]byte(job.Chunk.CursorJSON), &keyCursor); err != nil {
-			result.Error = fmt.Sprintf("decode keyset cursor: %v", err)
-			return
-		}
-	}
-	if useKeyset && strings.TrimSpace(job.Chunk.StartCursorJSON) != "" {
-		if err := json.Unmarshal([]byte(job.Chunk.StartCursorJSON), &lowerBound); err != nil {
-			result.Error = fmt.Sprintf("decode keyset lower bound: %v", err)
-			return
-		}
-	}
-	if useKeyset && strings.TrimSpace(job.Chunk.EndCursorJSON) != "" {
-		if err := json.Unmarshal([]byte(job.Chunk.EndCursorJSON), &upperBound); err != nil {
-			result.Error = fmt.Sprintf("decode keyset upper bound: %v", err)
-			return
-		}
-	}
-	var after int64
-	hasAfter := false
-	if !useKeyset && numericRangeSplit(job.Chunk.SplitType) && strings.TrimSpace(job.Chunk.CursorJSON) != "" {
-		var cur numericChunkCursor
-		if err := json.Unmarshal([]byte(job.Chunk.CursorJSON), &cur); err != nil {
-			result.Error = fmt.Sprintf("decode numeric chunk cursor: %v", err)
-			return
-		}
-		after, hasAfter = cur.AfterPK, true
-	}
 
 	targetCols := job.Table.TargetColumns
 	if len(targetCols) == 0 {
@@ -609,49 +638,31 @@ func executeJob(ctx context.Context, server, workerID string, job *domain.ChunkJ
 
 	reader := func(readCtx context.Context, limit int) (*fullpipeline.Batch, error) {
 		readStarted := time.Now()
-		batch, e := src.ReadBatch(readCtx, connector.ReadBatchRequest{
-			Schema: job.Table.SourceSchema, Table: job.Table.SourceTable,
-			PrimaryKey: job.Table.PrimaryKey, PrimaryKeys: job.Table.PrimaryKeys,
-			Columns: job.Table.Columns, StartPK: job.Chunk.Start, EndPK: job.Chunk.End,
-			AfterPK: after, HasAfter: hasAfter, Cursor: keyCursor,
-			LowerBound: lowerBound, UpperBound: upperBound, UseKeyset: useKeyset,
-			Limit: limit, Partition: job.Chunk.PartitionName,
-			HashBucket: job.Chunk.HashBucket, HashBuckets: job.Chunk.HashBuckets,
-			CustomWhere: job.Chunk.CustomWhere,
-		})
+		readReq.Limit = limit
+		batch, e := src.ReadBatch(readCtx, readReq)
 		readMS := time.Since(readStarted).Milliseconds()
 		if e != nil {
 			return nil, fmt.Errorf("read batch: %w", e)
 		}
+		if e := readReq.AdvancePage(batch); e != nil {
+			return nil, e
+		}
 		if len(batch.Rows) == 0 {
 			return &fullpipeline.Batch{}, nil
 		}
-		throttleBytesPerSec(batch.Bytes, readBytesPerSec.Load(), readStarted)
-		cursorJSON := ""
-		if useKeyset {
-			if len(batch.LastKey) == 0 {
-				return nil, fmt.Errorf("keyset batch returned rows without a last-key cursor")
-			}
-			// Advance only the reader-local cursor. Durable state is updated by the
-			// Commit hook after the sink write succeeds.
-			keyCursor = append([]connector.Value(nil), batch.LastKey...)
-			encoded, e := json.Marshal(keyCursor)
-			if e != nil {
-				return nil, fmt.Errorf("encode keyset cursor: %w", e)
-			}
-			cursorJSON = string(encoded)
-		} else {
-			after = batch.LastPK
-			hasAfter = true
-			if numericRangeSplit(job.Chunk.SplitType) {
-				encoded, e := json.Marshal(numericChunkCursor{AfterPK: after})
-				if e != nil {
-					return nil, fmt.Errorf("encode numeric chunk cursor: %w", e)
-				}
-				cursorJSON = string(encoded)
-			}
+		if err := throttleUnits(readCtx, batch.Bytes, readBytesPerSec.Load(), readStarted); err != nil {
+			return nil, err
 		}
-		return &fullpipeline.Batch{Rows: len(batch.Rows), Bytes: batch.Bytes, Cursor: cursorJSON, ReadMS: readMS, Payload: batch}, nil
+		// Commit publishes this cursor only after the corresponding sink write.
+		var cursor any = numericChunkCursor{AfterPK: readReq.AfterPK}
+		if readReq.UseKeyset {
+			cursor = readReq.Cursor
+		}
+		encoded, e := json.Marshal(cursor)
+		if e != nil {
+			return nil, fmt.Errorf("encode chunk cursor: %w", e)
+		}
+		return &fullpipeline.Batch{Rows: len(batch.Rows), Bytes: batch.Bytes, Cursor: string(encoded), ReadMS: readMS, Payload: batch}, nil
 	}
 
 	transformer := func(_ context.Context, pb *fullpipeline.Batch) (*fullpipeline.Batch, error) {
@@ -675,7 +686,7 @@ func executeJob(ctx context.Context, server, workerID string, job *domain.ChunkJ
 			return 0, 0, 0, fmt.Errorf("pipeline batch payload is not a connector row batch")
 		}
 		writeStarted := time.Now()
-		written, e := dst.WriteBatch(writeCtx, connector.WriteBatchRequest{
+		written, e := fencedBatch(writeCtx, dst, "chunk/"+job.Chunk.TaskID+"/"+job.Chunk.ID, job.Chunk.LeaseGeneration, connector.WriteBatchRequest{
 			Schema: job.Table.TargetSchema, Table: job.Table.TargetTable,
 			Columns: targetCols, Rows: batch.Rows,
 			PrimaryKey: targetPK, PrimaryKeys: targetPKs,
@@ -684,9 +695,15 @@ func executeJob(ctx context.Context, server, workerID string, job *domain.ChunkJ
 		if e != nil {
 			return 0, 0, writeMS, fmt.Errorf("write batch: %w", e)
 		}
-		throttleBytesPerSec(batch.Bytes, writeBytesPerSec.Load(), writeStarted)
-		throttleUnits(int64(len(batch.Rows)), job.RowsPerSecond, writeStarted)
-		throttleUnits(2, int64(job.QPS), writeStarted)
+		if err := throttleUnits(writeCtx, batch.Bytes, writeBytesPerSec.Load(), writeStarted); err != nil {
+			return 0, 0, writeMS, err
+		}
+		if err := throttleUnits(writeCtx, int64(len(batch.Rows)), job.RowsPerSecond, writeStarted); err != nil {
+			return 0, 0, writeMS, err
+		}
+		if err := throttleUnits(writeCtx, 2, int64(job.QPS), writeStarted); err != nil {
+			return 0, 0, writeMS, err
+		}
 		return written, batch.Bytes, writeMS, nil
 	}
 
@@ -701,7 +718,7 @@ func executeJob(ctx context.Context, server, workerID string, job *domain.ChunkJ
 			LastWriteMS: stats.LastWriteMS, LastBatchRows: stats.LastBatchRows,
 		}
 		var control domain.ChunkControl
-		if _, e := doJSON(http.MethodPost, server+"/api/v1/workers/"+workerID+"/chunks/"+job.Chunk.ID+"/lease", progress, &control); e != nil {
+		if _, e := doJSONContext(commitCtx, http.MethodPost, server+"/api/v1/workers/"+workerID+"/chunks/"+job.Chunk.ID+"/lease", progress, &control, job.Chunk.LeaseGeneration); e != nil {
 			return fullpipeline.Control{}, fmt.Errorf("renew lease/checkpoint: %w", e)
 		}
 		// Lease renewal always carries the current task-global source/target
@@ -752,8 +769,19 @@ func executeJob(ctx context.Context, server, workerID string, job *domain.ChunkJ
 }
 
 func main() {
+	if err := security.LoadSecretFiles("DTS_WORKER_TOKEN", "DTS_TIDB_KAFKA_SASL_PASSWORD", "DTS_OPENGAUSS_DDL_SIDECAR_TOKEN", "DTS_KINGBASE_DDL_SIDECAR_TOKEN"); err != nil {
+		log.Fatal(err)
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	stopTracing, err := telemetry.Enable(ctx, "dts-worker")
+	if err != nil {
+		log.Fatal(err)
+	}
+	if stopTracing != nil {
+		defer stopTracing()
+		httpClient.Transport = telemetry.HTTPTransport(httpClient.Transport)
+	}
 	server := os.Getenv("DTS_SERVER")
 	if server == "" {
 		server = "http://127.0.0.1:8080"
@@ -826,6 +854,13 @@ func main() {
 					}
 					continue
 				}
+				if claim.Job.LeaseGeneration <= 0 {
+					log.Printf("server returned an unfenced engine claim; refusing execution until all servers are upgraded")
+					if !sleepContext(ctx, 3*time.Second) {
+						return
+					}
+					continue
+				}
 				runningJobs.Add(1)
 				log.Printf("cdc-slot=%d claimed engine-job=%s engine=%s direction=%s", slot, claim.Job.ID, claim.Job.Engine, claim.Job.Direction)
 				result := executeManagedEngineJob(ctx, server, w.ID, &claim)
@@ -838,7 +873,7 @@ func main() {
 				if result.Error != "" {
 					endpoint = "fail"
 				}
-				if err := post(server+"/api/v1/workers/"+w.ID+"/engine-jobs/"+claim.Job.ID+"/"+endpoint, result, nil); err != nil {
+				if err := post(server+"/api/v1/workers/"+w.ID+"/engine-jobs/"+claim.Job.ID+"/"+endpoint, result, nil, claim.Job.LeaseGeneration); err != nil {
 					log.Printf("report engine-job %s: %v", endpoint, err)
 				}
 			}
@@ -868,6 +903,13 @@ func main() {
 					}
 					continue
 				}
+				if job.Chunk.LeaseGeneration <= 0 {
+					log.Printf("server returned an unfenced chunk claim; refusing execution until all servers are upgraded")
+					if !sleepContext(ctx, 3*time.Second) {
+						return
+					}
+					continue
+				}
 				runningJobs.Add(1)
 				log.Printf("slot=%d claimed %s %s.%s PK[%d,%d]", slot, job.Chunk.ID, job.Table.SourceSchema, job.Table.SourceTable, job.Chunk.Start, job.Chunk.End)
 				result := executeJob(ctx, server, w.ID, &job)
@@ -878,13 +920,13 @@ func main() {
 				}
 				if result.Error != "" {
 					log.Printf("chunk %s failed: %s", job.Chunk.ID, result.Error)
-					if err := post(server+"/api/v1/workers/"+w.ID+"/chunks/"+job.Chunk.ID+"/fail", result, nil); err != nil {
+					if err := post(server+"/api/v1/workers/"+w.ID+"/chunks/"+job.Chunk.ID+"/fail", result, nil, job.Chunk.LeaseGeneration); err != nil {
 						log.Printf("report failure: %v", err)
 					}
 					continue
 				}
 				log.Printf("chunk %s complete rows=%d bytes=%d duration=%s", job.Chunk.ID, result.RowsWritten, result.BytesWritten, time.Duration(result.DurationMS)*time.Millisecond)
-				if err := post(server+"/api/v1/workers/"+w.ID+"/chunks/"+job.Chunk.ID+"/complete", result, nil); err != nil {
+				if err := post(server+"/api/v1/workers/"+w.ID+"/chunks/"+job.Chunk.ID+"/complete", result, nil, job.Chunk.LeaseGeneration); err != nil {
 					log.Printf("report completion: %v", err)
 				}
 			}

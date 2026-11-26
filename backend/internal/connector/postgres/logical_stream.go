@@ -2,12 +2,13 @@ package postgresconnector
 
 import (
 	"context"
+	"dts/backend/internal/cdc/pgoutput"
+	"dts/backend/internal/connector"
+	"dts/backend/internal/domain"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
-	"dts/backend/internal/connector"
-	"dts/backend/internal/domain"
 	"regexp"
 	"strings"
 	"time"
@@ -28,14 +29,7 @@ func (s *logicalStream) Close() error {
 }
 
 func parseReplicationLSN(s string) (uint64, error) {
-	var hi, lo uint64
-	if _, err := fmt.Sscanf(strings.TrimSpace(s), "%X/%X", &hi, &lo); err != nil {
-		return 0, err
-	}
-	if hi > 0xffffffff || lo > 0xffffffff {
-		return 0, errors.New("PostgreSQL LSN overflow")
-	}
-	return hi<<32 | lo, nil
+	return pgoutput.ParseLSN(s)
 }
 
 func pgEpochMicros(t time.Time) int64 {
@@ -106,12 +100,13 @@ func (c *Connector) OpenLogicalReplicationStream(ctx context.Context, slot, star
 	if !replicationSlotName.MatchString(slot) {
 		return nil, errors.New("invalid PostgreSQL replication slot name")
 	}
-	startLSN = strings.TrimSpace(startLSN)
-	if startLSN == "" {
-		return nil, errors.New("start LSN is required")
+	position, err := parseReplicationLSN(startLSN)
+	if err != nil {
+		return nil, fmt.Errorf("invalid start LSN: %w", err)
 	}
+	startLSN = pgoutput.FormatLSN(position)
 	publication = strings.TrimSpace(publication)
-	if publication == "" {
+	if publication == "" || strings.IndexByte(publication, 0) >= 0 {
 		return nil, errors.New("publication name is required for pgoutput")
 	}
 	p, err := dialPGWithParams(ctx, c.ds, map[string]string{"replication": "database"})
@@ -119,6 +114,9 @@ func (c *Connector) OpenLogicalReplicationStream(ctx context.Context, slot, star
 		return nil, err
 	}
 	cmd := "START_REPLICATION SLOT " + slot + " LOGICAL " + startLSN + " (proto_version '1', publication_names '" + strings.ReplaceAll(publication, "'", "''") + "')"
+	if c.ds.Type == domain.DataSourcePostgreSQL || c.ds.Type == domain.DataSourcePolarDBPostgreSQL {
+		cmd = strings.TrimSuffix(cmd, ")") + ", messages 'true')"
+	}
 	if err := p.writeMessage('Q', cstr(cmd)); err != nil {
 		_ = p.close()
 		return nil, err

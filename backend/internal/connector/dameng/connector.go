@@ -647,7 +647,8 @@ func (c *Connector) ReadBatch(ctx context.Context, req connector.ReadBatchReques
 				return nil, e
 			}
 			cond = append(cond, p)
-		} else if len(req.LowerBound) > 0 {
+		}
+		if len(req.LowerBound) > 0 {
 			p, e := lexPredicate(keys, kcols, req.LowerBound, ">=", &args)
 			if e != nil {
 				return nil, e
@@ -674,7 +675,11 @@ func (c *Connector) ReadBatch(ctx context.Context, req connector.ReadBatchReques
 		}
 	}
 	if strings.TrimSpace(req.CustomWhere) != "" {
-		cond = append(cond, "("+strings.TrimSpace(req.CustomWhere)+")")
+		predicate, err := req.CustomPredicate(qIdent, strings.ToUpper)
+		if err != nil {
+			return nil, err
+		}
+		cond = append(cond, predicate)
 	}
 	where := ""
 	if len(cond) > 0 {

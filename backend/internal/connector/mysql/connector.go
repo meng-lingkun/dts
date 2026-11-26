@@ -219,7 +219,7 @@ func (c *Connector) ListTables(ctx context.Context, schema string) ([]domain.Tab
 	if err != nil {
 		return nil, err
 	}
-	sql := "SELECT TABLE_SCHEMA,TABLE_NAME,COALESCE(TABLE_ROWS,0),COALESCE(DATA_LENGTH,0) FROM information_schema.TABLES WHERE TABLE_SCHEMA=" + quoteSQLString(schema) + " AND TABLE_TYPE='BASE TABLE' ORDER BY TABLE_NAME"
+	sql := "SELECT TABLE_SCHEMA,TABLE_NAME,COALESCE(TABLE_ROWS,0),COALESCE(DATA_LENGTH,0) FROM information_schema.TABLES WHERE TABLE_SCHEMA=" + quoteSQLString(schema) + " AND TABLE_TYPE='BASE TABLE' AND TABLE_NAME<>'__dts_execution_fence' ORDER BY TABLE_NAME"
 	r, err := p.query(ctx, sql)
 	if err != nil {
 		return nil, err
@@ -258,7 +258,7 @@ func (c *Connector) GetTableMetadata(ctx context.Context, schema, table string) 
 			continue
 		}
 		ord, _ := strconv.Atoi(string(row[5]))
-		col := domain.ColumnInfo{Name: string(row[0]), DataType: strings.ToLower(string(row[1])), ColumnType: strings.ToLower(string(row[2])), Nullable: string(row[3]) == "YES", Extra: string(row[4]), Ordinal: ord, PrimaryKey: string(row[6]) == "PRI"}
+		col := domain.ColumnInfo{Name: string(row[0]), DataType: strings.ToLower(string(row[1])), ColumnType: string(row[2]), Nullable: string(row[3]) == "YES", Extra: string(row[4]), Ordinal: ord, PrimaryKey: string(row[6]) == "PRI"}
 		m.Columns = append(m.Columns, col)
 		if col.PrimaryKey {
 			pks = append(pks, col)
@@ -396,7 +396,7 @@ func mysqlValueLiteral(v connector.Value, col domain.ColumnInfo) string {
 	case "binary", "varbinary", "tinyblob", "blob", "mediumblob", "longblob", "bit":
 		return "X'" + hex.EncodeToString(v.Raw) + "'"
 	default:
-		return "'" + strings.ReplaceAll(string(v.Raw), "'", "''") + "'"
+		return quoteSQLString(string(v.Raw))
 	}
 }
 
@@ -514,10 +514,6 @@ func (c *Connector) ListTablePartitions(ctx context.Context, schema, table strin
 }
 
 func (c *Connector) ReadBatch(ctx context.Context, req connector.ReadBatchRequest) (*connector.RowBatch, error) {
-	p, err := c.get(ctx)
-	if err != nil {
-		return nil, err
-	}
 	if req.Limit <= 0 {
 		req.Limit = 500
 	}
@@ -546,11 +542,6 @@ func (c *Connector) ReadBatch(ctx context.Context, req connector.ReadBatchReques
 		if len(keys) == 0 {
 			return nil, errors.New("keyset read requires primary key columns")
 		}
-		for _, bound := range [][]connector.Value{req.Cursor, req.LowerBound, req.UpperBound} {
-			if len(bound) > 0 && len(bound) != len(keys) {
-				return nil, fmt.Errorf("keyset bound has %d values for %d keys", len(bound), len(keys))
-			}
-		}
 		left := make([]string, 0, len(keys))
 		keyCols := make([]domain.ColumnInfo, 0, len(keys))
 		for _, key := range keys {
@@ -562,6 +553,13 @@ func (c *Connector) ReadBatch(ctx context.Context, req connector.ReadBatchReques
 			left = append(left, quoteIdent(key))
 			keyCols = append(keyCols, selected[idx])
 		}
+		for _, bound := range [][]connector.Value{req.Cursor, req.LowerBound, req.UpperBound} {
+			if len(bound) > 0 {
+				if err := validateMySQLValues(keyCols, bound); err != nil {
+					return nil, fmt.Errorf("keyset bound: %w", err)
+				}
+			}
+		}
 		tuple := func(values []connector.Value) string {
 			right := make([]string, len(values))
 			for i := range values {
@@ -572,7 +570,8 @@ func (c *Connector) ReadBatch(ctx context.Context, req connector.ReadBatchReques
 		conditions := make([]string, 0, 2)
 		if len(req.Cursor) > 0 {
 			conditions = append(conditions, "("+strings.Join(left, ",")+") > "+tuple(req.Cursor))
-		} else if len(req.LowerBound) > 0 {
+		}
+		if len(req.LowerBound) > 0 {
 			conditions = append(conditions, "("+strings.Join(left, ",")+") >= "+tuple(req.LowerBound))
 		}
 		if len(req.UpperBound) > 0 {
@@ -616,7 +615,11 @@ func (c *Connector) ReadBatch(ctx context.Context, req connector.ReadBatchReques
 		conditions = append(conditions, "MOD(CRC32(CONCAT_WS('#',"+strings.Join(parts, ",")+")),"+strconv.Itoa(req.HashBuckets)+")="+strconv.Itoa(req.HashBucket))
 	}
 	if strings.TrimSpace(req.CustomWhere) != "" {
-		conditions = append(conditions, "("+strings.TrimSpace(req.CustomWhere)+")")
+		predicate, err := req.CustomPredicate(quoteIdent, nil)
+		if err != nil {
+			return nil, err
+		}
+		conditions = append(conditions, predicate)
 	}
 	where = ""
 	if len(conditions) > 0 {
@@ -627,6 +630,10 @@ func (c *Connector) ReadBatch(ctx context.Context, req connector.ReadBatchReques
 		from += " PARTITION (" + quoteIdent(strings.TrimSpace(req.Partition)) + ")"
 	}
 	q := "SELECT " + strings.Join(cols, ",") + " FROM " + from + where + " ORDER BY " + strings.Join(orderKeys, ",") + " LIMIT " + strconv.Itoa(req.Limit)
+	p, err := c.get(ctx)
+	if err != nil {
+		return nil, err
+	}
 	r, err := p.query(ctx, q)
 	if err != nil {
 		return nil, err
@@ -1057,7 +1064,7 @@ func (c *Connector) createGBaseTable(ctx context.Context, schema, table string, 
 		// GBase V9 SHOW CREATE TABLE normalizes this form to DISTRIBUTED BY('id').
 		// Quote as a string-style identifier to match the vendor syntax accepted by
 		// both older V8/V9 examples and current V9 clusters.
-		quotedDist[i] = "'" + strings.ReplaceAll(key, "'", "''") + "'"
+		quotedDist[i] = quoteSQLString(key)
 	}
 	q := "CREATE TABLE IF NOT EXISTS " + quoteIdent(schema) + "." + quoteIdent(table) + " (" + strings.Join(defs, ",") + ") ENGINE=EXPRESS DISTRIBUTED BY(" + strings.Join(quotedDist, ",") + ") DEFAULT CHARSET=utf8mb4"
 	if _, err = p.exec(ctx, q); err != nil {
@@ -1263,6 +1270,12 @@ func (c *Connector) EnsureSchema(ctx context.Context, schema string) error {
 func mysqlTargetType(col domain.ColumnInfo) string {
 	ct := strings.ToLower(col.ColumnType)
 	dt := strings.ToLower(col.DataType)
+	if dt == "enum" || dt == "set" {
+		if strings.HasPrefix(ct, dt+"(") && strings.HasSuffix(ct, ")") {
+			return col.ColumnType
+		}
+		return ""
+	}
 	if strings.Contains(ct, "character varying") {
 		return strings.Replace(ct, "character varying", "varchar", 1)
 	}
@@ -1786,6 +1799,9 @@ func (c *Connector) DeleteByKey(ctx context.Context, req connector.DeleteByKeyRe
 	}
 	if len(keys) == 0 || len(keys) != len(cols) || len(keys) != len(vals) {
 		return errors.New("delete primary key values are incomplete")
+	}
+	if err := validateMySQLValues(cols, vals); err != nil {
+		return fmt.Errorf("delete key: %w", err)
 	}
 	where := make([]string, len(keys))
 	for i := range keys {

@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
+import { ElMessage } from 'element-plus'
 
 const route=useRoute(),router=useRouter(),auth=useAuthStore()
 const appVersion=__APP_VERSION__
@@ -13,7 +14,10 @@ const groups=[
   {label:'平台运维',items:[{to:'/monitoring',label:'监控中心',mark:'监'},{to:'/workers',label:'Worker 节点',mark:'W'},{to:'/alerts',label:'告警中心',mark:'警'},{to:'/audit',label:'操作审计',mark:'审'}]},
 ]
 function active(path:string){return path==='/'?route.path==='/':route.path.startsWith(path)}
-async function logout(){auth.logout();await router.replace('/login')}
+async function logout(){
+  try { await auth.logout(); await router.replace('/login') }
+  catch { ElMessage.error('退出失败，请重试') }
+}
 watch(()=>route.fullPath,()=>{mobileOpen.value=false})
 </script>
 
@@ -29,7 +33,7 @@ watch(()=>route.fullPath,()=>{mobileOpen.value=false})
         </div>
         <div class="nav-group"><span class="nav-label">系统</span><RouterLink v-if="auth.identity?.role==='admin'" to="/users" :class="{active:active('/users')}"><i>权</i><span>用户与权限</span></RouterLink><RouterLink to="/settings" :class="{active:active('/settings')}"><i>设</i><span>访问设置</span></RouterLink></div>
       </nav>
-      <div class="sidebar-footer"><span class="status-dot"></span><div><b>控制面在线</b><small>{{appVersion}}</small></div></div>
+      <div class="sidebar-footer"><span class="status-dot"></span><div><b>DTS 控制台</b><small>{{appVersion}}</small></div></div>
     </aside>
     <main>
       <header class="topbar">

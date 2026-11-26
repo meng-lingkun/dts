@@ -2,9 +2,10 @@ package connector
 
 import (
 	"context"
+	"dts/backend/internal/domain"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"dts/backend/internal/domain"
 	"regexp"
 	"sort"
 	"strings"
@@ -107,6 +108,45 @@ type CapabilityFactory interface {
 type Value struct {
 	Null bool
 	Raw  []byte
+}
+
+// DecodeKeysetBound accepts an empty string for an open end. A stored tuple
+// must contain a non-null value for each key (width zero skips the width check).
+func DecodeKeysetBound(raw string, width int) ([]Value, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+	var encoded []struct {
+		Raw  json.RawMessage
+		Null bool
+	}
+	if err := json.Unmarshal([]byte(raw), &encoded); err != nil {
+		return nil, err
+	}
+	if len(encoded) == 0 || (width > 0 && len(encoded) != width) {
+		return nil, fmt.Errorf("invalid keyset tuple width %d", len(encoded))
+	}
+	values := make([]Value, len(encoded))
+	for i, v := range encoded {
+		if v.Null || len(v.Raw) == 0 {
+			return nil, errors.New("null or missing keyset component")
+		}
+		if err := json.Unmarshal(v.Raw, &values[i].Raw); err != nil {
+			return nil, err
+		}
+	}
+	return values, nil
+}
+
+// DecodeAfterPK distinguishes the first row after key zero from a missing cursor.
+func DecodeAfterPK(raw string) (int64, bool) {
+	var cursor struct {
+		AfterPK *int64 `json:"after_pk"`
+	}
+	if err := json.Unmarshal([]byte(raw), &cursor); err != nil || cursor.AfterPK == nil {
+		return 0, false
+	}
+	return *cursor.AfterPK, true
 }
 
 type RowBatch struct {
@@ -312,6 +352,15 @@ type TransactionalCDCApplyConnector interface {
 	RollbackCDCTransaction(context.Context) error
 }
 
+// TransactionFencer serializes a target transaction against newer executions.
+// Ensure is called before BEGIN (MySQL DDL can implicitly commit). Fence must
+// hold the scope row lock until the business transaction commits or rolls back.
+type TransactionFencer interface {
+	EnsureExecutionFence(context.Context) error
+	VerifyFencedTable(context.Context, string, string) error
+	FenceTransaction(context.Context, string, int64) error
+}
+
 // DDLApplyConnector executes a source DDL statement in a selected schema. The
 // migration service only uses this for explicitly enabled same-family replay;
 // heterogeneous DDL remains a schema-conversion responsibility.
@@ -323,6 +372,33 @@ type DDLApplyConnector interface {
 type CDCSource interface {
 	Connector
 	CurrentCDCPosition(context.Context) (*domain.CDCPosition, error)
+}
+
+// CDCQuiescenceVerifier independently rejects in-flight write/prepared
+// transactions before a final watermark is accepted. It does not replace the
+// operator's business-level write freeze, which must remain active throughout.
+type CDCQuiescenceVerifier interface{ VerifyCDCQuiescence(context.Context) error }
+
+type CDCSourceIdentity interface {
+	CDCSourceIdentity(context.Context) (string, error)
+}
+
+// Logical sources can emit a transaction marker so an idle selected table set
+// still produces a decoded checkpoint covering the final freeze barrier.
+type CDCFreezeBarrierSource interface {
+	CaptureFreezeBarrier(context.Context) (*domain.CDCPosition, error)
+}
+
+// CDCSelectedTableFreezer holds database-enforced write locks on a dedicated
+// connection until Close, disconnect, or the server-side idle timeout.
+// A different control-plane replica can check the same transaction's proof.
+type CDCSelectedTableFreezer interface {
+	HoldFreezeTables(context.Context, []domain.MigrationTable) (string, error)
+	VerifyTableFreeze(context.Context, string) error
+}
+
+type CDCFreezeHeadSource interface {
+	CurrentFreezeHead(context.Context) (*domain.CDCPosition, error)
 }
 
 // CDCSelectionPositionSource captures a restart position using the selected

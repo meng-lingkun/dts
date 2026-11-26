@@ -1,6 +1,7 @@
 ---
 - name: Validate destructive request and DTS ownership
   hosts: nodes
+  any_errors_fatal: true
   become: true
   gather_facts: false
   vars:
@@ -13,6 +14,15 @@
           - dts_destroy_confirmation | default('') == 'DESTROY_DTS_CLUSTER'
         fail_msg: Refusing full uninstall without the destruction token
       run_once: true
+    - name: Verify the actual remote package directory before destruction
+      script: "check-directory.sh package {{ dts_install_root | quote }}"
+      changed_when: false
+    - name: Verify the actual data directory before destruction
+      script: "check-directory.sh storage {{ dts_single_node_storage_root | quote }}"
+      changed_when: false
+      when:
+        - groups['workers'] | default([]) | length == 0
+        - dts_single_node_local_storage | default(true) | bool
     - name: Check the DTS cluster ownership marker
       stat:
         path: /var/lib/dts-cluster-bootstrap/owned
@@ -50,18 +60,35 @@
   gather_facts: false
   environment:
     KUBECONFIG: /etc/kubernetes/admin.conf
+  vars:
+    teardown_kubectl: "{{ dts_remote_install_dir | default('/opt/dts-offline', true) }}/runtime/kubectl"
   tasks:
+    - name: Check whether the control plane was initialized
+      stat:
+        path: /etc/kubernetes/admin.conf
+      register: dts_teardown_admin_config
+    - name: Enable the packaged kubectl for interrupted teardown
+      file:
+        path: "{{ teardown_kubectl }}"
+        mode: '0755'
+      when: dts_teardown_admin_config.stat.exists
     - name: Record persistent volumes claimed by DTS
-      shell: >-
-        /usr/local/bin/kubectl get pv
-        -o jsonpath='{range .items[?(@.spec.claimRef.namespace=="dts")]}{.metadata.name}{"\n"}{end}'
+      command:
+        argv:
+          - "{{ teardown_kubectl }}"
+          - get
+          - pv
+          - -o
+          - 'jsonpath={range .items[?(@.spec.claimRef.namespace=="dts")]}{.metadata.name}{"\n"}{end}'
       register: dts_persistent_volumes
       changed_when: false
+      when: dts_teardown_admin_config.stat.exists
     - name: Delete the DTS namespace including PostgreSQL and PVCs
-      command: /usr/local/bin/kubectl delete namespace dts --ignore-not-found --wait=true --timeout=300s
+      command: "{{ teardown_kubectl | quote }} delete namespace dts --ignore-not-found --wait=true --timeout=300s"
+      when: dts_teardown_admin_config.stat.exists
     - name: Delete retained DTS persistent-volume API objects
-      command: "/usr/local/bin/kubectl delete pv {{ item }} --ignore-not-found --wait=true --timeout=120s"
-      loop: "{{ dts_persistent_volumes.stdout_lines }}"
+      command: "{{ teardown_kubectl | quote }} delete pv {{ item }} --ignore-not-found --wait=true --timeout=120s"
+      loop: "{{ dts_persistent_volumes.stdout_lines | default([]) }}"
       when: item | length > 0
     - name: Explain external storage boundary
       debug:
@@ -95,7 +122,7 @@
       failed_when: false
     - name: Stage a private kubeadm reset helper outside the installation path
       copy:
-        src: /usr/local/bin/kubeadm
+        src: "{{ dts_remote_install_dir | default('/opt/dts-offline', true) }}/runtime/kubeadm"
         dest: /run/dts-kubeadm-reset
         remote_src: true
         mode: '0700'
@@ -161,6 +188,7 @@
         - /var/lib/containerd
         - /run/containerd
         - /etc/dts
+        - /etc/crictl.yaml
         - /var/lib/dts-cluster-bootstrap
         - /etc/modules-load.d/dts-kubernetes.conf
         - /etc/sysctl.d/99-dts-kubernetes.conf

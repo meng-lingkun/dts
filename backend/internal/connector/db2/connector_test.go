@@ -7,6 +7,39 @@ import (
 	"dts/backend/internal/domain"
 )
 
+func TestDB2RangeIncludesBothEndpointsAndZero(t *testing.T) {
+	for _, tc := range []struct {
+		start, end int64
+		want       string
+	}{{0, 0, `"ID" BETWEEN 0 AND 0`}, {-9, 0, `"ID" BETWEEN -9 AND 0`}, {0, 9, `"ID" BETWEEN 0 AND 9`}} {
+		req := connector.ReadBatchRequest{PrimaryKey: "ID", StartPK: tc.start, EndPK: tc.end}
+		if got := db2RangePredicate(req); got != tc.want {
+			t.Fatalf("range %d..%d: %q", tc.start, tc.end, got)
+		}
+		req.UseKeyset = true
+		if db2RangePredicate(req) != "" {
+			t.Fatal("numeric bounds leaked into keyset read")
+		}
+	}
+}
+
+func TestDB2CompositeKeysetBound(t *testing.T) {
+	keys := []string{"A", "B"}
+	columns := []domain.ColumnInfo{{Name: "A", DataType: "INTEGER"}, {Name: "B", DataType: "INTEGER"}}
+	bound := []connector.Value{{Raw: []byte("5")}, {Raw: []byte("9")}}
+	for op, want := range map[string]string{
+		">=": `(("A">5) OR ("A"=5 AND "B">=9))`,
+		"<=": `(("A"<5) OR ("A"=5 AND "B"<=9))`,
+		">":  `(("A">5) OR ("A"=5 AND "B">9))`,
+		"<":  `(("A"<5) OR ("A"=5 AND "B"<9))`,
+	} {
+		got, err := lexicographicPredicate(keys, columns, bound, op)
+		if err != nil || got != want {
+			t.Fatalf("bound %s: %s, %v; want %s", op, got, err, want)
+		}
+	}
+}
+
 func TestDB2CapabilitiesAreGatedAndNeverAdvertiseSourceCDC(t *testing.T) {
 	f := NewFactory()
 	t.Setenv("DTS_EXPERIMENTAL_DB2_NATIVE", "")

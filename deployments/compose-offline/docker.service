@@ -1,0 +1,17 @@
+[Unit]
+Description=Docker Engine (DTS offline runtime)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+Environment=PATH=/opt/dts/docker-29.7.2:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/opt/dts/docker-29.7.2/dockerd --group=root
+Delegate=yes
+KillMode=process
+Restart=on-failure
+LimitNOFILE=infinity
+TasksMax=infinity
+
+[Install]
+WantedBy=multi-user.target

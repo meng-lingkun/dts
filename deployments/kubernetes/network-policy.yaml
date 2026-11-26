@@ -1,0 +1,33 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: dts-server-ingress, namespace: dts}
+spec:
+  podSelector: {matchLabels: {app: dts-server}}
+  policyTypes: [Ingress]
+  ingress:
+  - from:
+    - podSelector: {matchLabels: {app: dts-web}}
+    - podSelector: {matchLabels: {app: dts-worker}}
+    - podSelector: {matchLabels: {app: dts-server}}
+    - namespaceSelector: {matchLabels: {dts-metrics-access: "true"}}
+      podSelector: {matchLabels: {dts-metrics-client: "true"}}
+    ports: [{protocol: TCP, port: 8080}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: dts-postgres-ingress, namespace: dts}
+spec:
+  podSelector: {matchLabels: {app: dts-postgres}}
+  policyTypes: [Ingress]
+  ingress:
+  - from:
+    - podSelector: {matchLabels: {app: dts-server}}
+    ports: [{protocol: TCP, port: 5432}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: dts-worker-ingress, namespace: dts}
+spec:
+  podSelector: {matchLabels: {app: dts-worker}}
+  policyTypes: [Ingress]
+  ingress: []

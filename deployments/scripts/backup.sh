@@ -13,5 +13,5 @@ DTS metadata backup created $(date -u +%FT%TZ).
 Back up DTS_MASTER_KEY and DTS_AUTH_SECRET separately in your secret manager.
 They are intentionally NOT written into this directory.
 TXT
-sha256sum "$OUT/metadata.dump" > "$OUT/SHA256SUMS"
+(cd "$OUT" && sha256sum metadata.dump > SHA256SUMS)
 echo "$OUT"

@@ -201,13 +201,16 @@ type TransformRule struct {
 }
 
 type MigrationTask struct {
-	ID               string          `json:"id"`
-	Name             string          `json:"name"`
-	SourceID         string          `json:"source_datasource_id"`
-	TargetID         string          `json:"target_datasource_id"`
-	Mode             MigrationMode   `json:"mode"`
-	Status           MigrationStatus `json:"status"`
-	PausedFromStatus MigrationStatus `json:"paused_from_status,omitempty"`
+	CutoverOperation  *LifecycleOperation `json:"cutover_operation,omitempty"`
+	RollbackOperation *LifecycleOperation `json:"rollback_operation,omitempty"`
+	Revision          int64               `json:"revision"`
+	ID                string              `json:"id"`
+	Name              string              `json:"name"`
+	SourceID          string              `json:"source_datasource_id"`
+	TargetID          string              `json:"target_datasource_id"`
+	Mode              MigrationMode       `json:"mode"`
+	Status            MigrationStatus     `json:"status"`
+	PausedFromStatus  MigrationStatus     `json:"paused_from_status,omitempty"`
 	// Engine fields are retained for metadata/API compatibility. V0.15+ always
 	// normalizes them to "dts"; users do not select third-party runtimes.
 	FullEngine                     string            `json:"full_engine"`
@@ -506,6 +509,7 @@ const (
 )
 
 type MigrationChunk struct {
+	LeaseGeneration   int64             `json:"lease_generation"`
 	ID                string            `json:"id"`
 	TaskID            string            `json:"task_id"`
 	TableID           string            `json:"table_id"`
@@ -638,6 +642,11 @@ type ValidationResult struct {
 	LastError      string           `json:"last_error,omitempty"`
 	StartedAt      time.Time        `json:"started_at"`
 	FinishedAt     time.Time        `json:"finished_at"`
+}
+
+// NewerThan matches the metadata database ordering for validation retries.
+func (v ValidationResult) NewerThan(other ValidationResult) bool {
+	return v.FinishedAt.After(other.FinishedAt) || (v.FinishedAt.Equal(other.FinishedAt) && v.ID > other.ID)
 }
 
 // ValidationArchive is an immutable audit proof created after a migration reaches
@@ -981,19 +990,20 @@ const (
 )
 
 type EngineJob struct {
-	ID         string          `json:"id"`
-	TaskID     string          `json:"task_id"`
-	Kind       string          `json:"kind"`      // CDC
-	Direction  string          `json:"direction"` // forward / reverse
-	Engine     string          `json:"engine"`
-	Status     EngineJobStatus `json:"status"`
-	WorkerID   string          `json:"worker_id,omitempty"`
-	LeaseUntil time.Time       `json:"lease_until,omitempty"`
-	RetryCount int             `json:"retry_count"`
-	LastError  string          `json:"last_error,omitempty"`
-	StartedAt  time.Time       `json:"started_at,omitempty"`
-	UpdatedAt  time.Time       `json:"updated_at"`
-	FinishedAt time.Time       `json:"finished_at,omitempty"`
+	LeaseGeneration int64           `json:"lease_generation"`
+	ID              string          `json:"id"`
+	TaskID          string          `json:"task_id"`
+	Kind            string          `json:"kind"`      // CDC
+	Direction       string          `json:"direction"` // forward / reverse
+	Engine          string          `json:"engine"`
+	Status          EngineJobStatus `json:"status"`
+	WorkerID        string          `json:"worker_id,omitempty"`
+	LeaseUntil      time.Time       `json:"lease_until,omitempty"`
+	RetryCount      int             `json:"retry_count"`
+	LastError       string          `json:"last_error,omitempty"`
+	StartedAt       time.Time       `json:"started_at,omitempty"`
+	UpdatedAt       time.Time       `json:"updated_at"`
+	FinishedAt      time.Time       `json:"finished_at,omitempty"`
 }
 
 type EngineJobClaim struct {
@@ -1035,6 +1045,7 @@ type CompatibilityAssessment struct {
 }
 
 type User struct {
+	Revision     int64     `json:"revision"`
 	ID           string    `json:"id"`
 	Username     string    `json:"username"`
 	PasswordHash string    `json:"-"`

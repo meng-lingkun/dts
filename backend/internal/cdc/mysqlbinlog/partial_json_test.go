@@ -1,8 +1,8 @@
 package mysqlbinlog
 
 import (
-	"encoding/binary"
 	"dts/backend/internal/domain"
+	"encoding/binary"
 	"testing"
 )
 
@@ -176,7 +176,7 @@ func TestPartialJSONRequiresFullBeforeImage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := decodePartialUpdateAfterImage(data, []byte{0x01}, tm, cols, metas, nil); err == nil {
+	if _, _, err := decodePartialUpdateAfterImage(data, []byte{0x01}, tm, cols, metas, nil, nil); err == nil {
 		t.Fatal("expected missing full before-image to fail safe")
 	}
 }

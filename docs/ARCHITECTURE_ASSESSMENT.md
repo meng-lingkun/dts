@@ -3,6 +3,8 @@
 评估基线：`0.15.0-rc49`  
 评估日期：2026-09-02
 
+> 本文是 2026-09-02 的架构基线。2026-10-29 的实际缺陷复现、修复、验证边界和剩余发布门禁见 [企业就绪度复查](ENTERPRISE_READINESS.md)。
+
 ## 1. 结论
 
 整体架构方向合理，但生产就绪度是“有条件成立”。
@@ -125,9 +127,9 @@ API 使用手写 `net/http` Route，缺少 OpenAPI、统一分页/过滤、请�
 
 #### 4.11 安全纵深仍不足
 
-当前没有登录限流/锁定、MFA、OIDC/SAML/LDAP、服务端 Session 撤销、细粒度数据范围权限、通用 Secret Manager/KMS 数据源凭据集成。开发模式仍可配置 CORS `*`，Metrics 默认无认证，前端静态 Token 存在 LocalStorage；生产校验已禁止通配 CORS。
+登录已支持按账号、对端 IP 和并发数限流。浏览器使用 HttpOnly Cookie，Nginx 设置 CSP；密码重置会使对应账号的旧会话失效。尚缺 MFA、OIDC/SAML/LDAP、单会话主动撤销、细粒度数据范围权限和通用 Secret Manager/KMS 凭据集成。开发模式可配置 CORS `*`，生产校验禁止通配 CORS。Metrics 默认无认证。
 
-建议：增加生产安全 Profile、OIDC、MFA、Token Hash/轮换、登录防护、Metrics 独立监听/鉴权、CSP/HSTS/安全响应头和 Secret Provider SPI。
+建议增加 OIDC、MFA、Token Hash/轮换、Metrics 独立监听/鉴权、HTTPS 入口的 HSTS 和 Secret Provider SPI。
 
 #### 4.12 缺少分布式追踪和统一日志上下文
 

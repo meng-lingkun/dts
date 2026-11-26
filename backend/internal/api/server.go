@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/sha1"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
@@ -14,11 +15,13 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -35,6 +38,7 @@ import (
 	"dts/backend/internal/validationreport"
 	"dts/backend/internal/version"
 	workersvc "dts/backend/internal/worker"
+	"go.opentelemetry.io/otel/trace"
 )
 
 type Server struct {
@@ -45,7 +49,9 @@ type Server struct {
 	engines                         *engine.Registry
 	staticTokens                    *auth.TokenSet
 	sessions                        *auth.SessionManager
+	oidcLogin                       *oidcLogin
 	authRequired                    atomic.Bool
+	loginGuard                      loginGuard
 	validationReportExports         atomic.Uint64
 	validationReportArchiveSuccess  atomic.Uint64
 	validationReportArchiveFailures atomic.Uint64
@@ -69,13 +75,18 @@ func New(repo repository.Repository, c *connector.Registry, e *engine.Registry) 
 	if secret == "" {
 		secret = "dts-development-auth-secret-change-me"
 	}
-	users, _ := repo.ListUsers(context.Background())
-	required := !tokens.Empty() || len(users) > 0 || strings.EqualFold(os.Getenv("DTS_AUTH_REQUIRED"), "true")
+	users, userErr := repo.ListUsers(context.Background())
+	configured, configErr := auth.ParseEnabled(os.Getenv("DTS_AUTH_REQUIRED"))
+	required := configured || configErr != nil || userErr != nil || spec != "" || len(users) > 0
 	s := &Server{
 		repo: repo, connectors: c, migrations: migration.NewService(repo, c, e), workers: workersvc.NewService(repo), engines: e,
 		staticTokens: tokens, sessions: auth.NewSessionManager(secret, ttl),
 	}
 	s.authRequired.Store(required)
+	s.oidcLogin = loadOIDCLogin()
+	if s.oidcLogin != nil {
+		s.authRequired.Store(true)
+	}
 	return s
 }
 
@@ -91,6 +102,17 @@ func (s *Server) Handler() http.Handler {
 	})
 	mux.HandleFunc("GET /readyz", s.readiness)
 	mux.HandleFunc("POST /api/v1/auth/login", s.login)
+	mux.HandleFunc("GET /api/v1/auth/providers", s.authProviders)
+	mux.HandleFunc("GET /api/v1/auth/oidc/start", s.startOIDC)
+	mux.HandleFunc("GET /api/v1/auth/oidc/callback", s.finishOIDC)
+	mux.HandleFunc("POST /api/v1/auth/logout", s.browserLogout)
+	mux.HandleFunc("GET /api/v1/auth/sessions", s.listSessions)
+	mux.HandleFunc("GET /api/v1/auth/personal-tokens", s.listPersonalTokens)
+	mux.HandleFunc("POST /api/v1/auth/personal-tokens", s.createPersonalToken)
+	mux.HandleFunc("DELETE /api/v1/auth/personal-tokens/{token_id}", s.revokePersonalToken)
+	mux.HandleFunc("DELETE /api/v1/auth/sessions/{session_id}", s.revokeSession)
+	mux.HandleFunc("GET /api/v1/users/{id}/sessions", s.listSessions)
+	mux.HandleFunc("DELETE /api/v1/users/{id}/sessions/{session_id}", s.revokeSession)
 	mux.HandleFunc("GET /api/v1/auth/me", s.me)
 	mux.HandleFunc("GET /api/v1/users", s.listUsers)
 	mux.HandleFunc("POST /api/v1/users", s.createUser)
@@ -148,6 +170,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/migrations/{id}/cdc/started", s.markCDCStarted)
 	mux.HandleFunc("POST /api/v1/migrations/{id}/ready-cutover", s.readyCutover)
 	mux.HandleFunc("POST /api/v1/migrations/{id}/cutover", s.cutover)
+	mux.HandleFunc("POST /api/v1/migrations/{id}/cutover/freeze", s.confirmCutoverFreeze)
+	mux.HandleFunc("POST /api/v1/migrations/{id}/rollback/freeze", s.confirmRollbackFreeze)
+	mux.HandleFunc("GET /api/v1/migrations/{id}/operations", s.lifecycleOperations)
 	mux.HandleFunc("POST /api/v1/migrations/{id}/start", s.startMigration)
 	mux.HandleFunc("POST /api/v1/migrations/{id}/pause", s.pauseMigration)
 	mux.HandleFunc("POST /api/v1/migrations/{id}/resume", s.resumeMigration)
@@ -175,9 +200,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/alerts", s.listAlerts)
 	mux.HandleFunc("POST /api/v1/alerts/{id}/ack", s.ackAlert)
 	mux.HandleFunc("GET /api/v1/audit", s.listAudit)
-	return cors(logging(s.apiAuth(workerAuth(mux))))
+	return correlate(cors(logging(s.apiAuth(workerAuth(workerLeaseFence(jsonRouteErrors(mux)))))))
 }
 func (s *Server) readiness(w http.ResponseWriter, r *http.Request) {
+	if s.oidcLogin != nil && s.oidcLogin.configErr != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"status": "not_ready", "error": s.oidcLogin.configErr.Error()})
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 	defer cancel()
 	if _, err := s.repo.ListWorkers(ctx); err != nil {
@@ -213,20 +242,54 @@ func (s *Server) readiness(w http.ResponseWriter, r *http.Request) {
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
+	if body, ok := v.(map[string]any); ok && status >= 400 {
+		if _, provided := body["code"]; !provided {
+			body["code"] = statusCode(status)
+		}
+		body["request_id"] = w.Header().Get("X-Request-ID")
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	if v != nil {
 		_ = json.NewEncoder(w).Encode(v)
 	}
 }
-func decode(r *http.Request, v any) error { return json.NewDecoder(r.Body).Decode(v) }
 func randomID(prefix string) string {
 	b := make([]byte, 5)
 	_, _ = rand.Read(b)
 	return prefix + "_" + hex.EncodeToString(b)
 }
 func apiError(w http.ResponseWriter, status int, err error) {
-	writeJSON(w, status, map[string]any{"error": err.Error()})
+	if errors.Is(err, errSessionUnavailable) {
+		status = http.StatusServiceUnavailable
+	}
+	if errors.Is(err, migration.ErrFreezeRequired) || errors.Is(err, migration.ErrWatermarkBehind) {
+		status = http.StatusConflict
+	}
+	if errors.Is(err, repository.ErrConflict) || errors.Is(err, repository.ErrLastAdmin) {
+		status = http.StatusConflict
+	}
+	if errors.Is(err, errJSONRequestTooLarge) {
+		status = http.StatusRequestEntityTooLarge
+	}
+	if errors.Is(err, migration.ErrCDCExecutionBusy) {
+		status = http.StatusConflict
+		w.Header().Set("Retry-After", "1")
+	}
+	code := statusCode(status)
+	switch {
+	case errors.Is(err, migration.ErrFreezeRequired):
+		code = "FREEZE_REQUIRED"
+	case errors.Is(err, migration.ErrWatermarkBehind):
+		code = "WATERMARK_BEHIND"
+	case errors.Is(err, repository.ErrConflict):
+		code = "REVISION_CONFLICT"
+	case errors.Is(err, repository.ErrLastAdmin):
+		code = "LAST_ADMIN"
+	case errors.Is(err, migration.ErrCDCExecutionBusy):
+		code = "CDC_EXECUTION_BUSY"
+	}
+	writeJSON(w, status, map[string]any{"error": err.Error(), "code": code})
 }
 
 func websocketAccept(key string) string {
@@ -234,8 +297,16 @@ func websocketAccept(key string) string {
 	return base64.StdEncoding.EncodeToString(h[:])
 }
 
-func writeWebSocketText(conn net.Conn, payload []byte) error {
-	header := []byte{0x81}
+type webSocketWriter struct {
+	conn net.Conn
+	mu   sync.Mutex
+}
+
+func (w *webSocketWriter) frame(opcode byte, payload []byte) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	_ = w.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	header := []byte{0x80 | opcode}
 	n := len(payload)
 	switch {
 	case n <= 125:
@@ -248,16 +319,15 @@ func writeWebSocketText(conn net.Conn, payload []byte) error {
 		binary.BigEndian.PutUint64(b[:], uint64(n))
 		header = append(header, b[:]...)
 	}
-	if _, err := conn.Write(header); err != nil {
+	if _, err := w.conn.Write(header); err != nil {
 		return err
 	}
-	_, err := conn.Write(payload)
+	_, err := w.conn.Write(payload)
 	return err
 }
 
-func readWebSocketFrames(conn net.Conn, done chan<- struct{}) {
+func readWebSocketFrames(reader *bufio.Reader, writer *webSocketWriter, done chan<- struct{}) {
 	defer close(done)
-	reader := bufio.NewReader(conn)
 	for {
 		b1, err := reader.ReadByte()
 		if err != nil {
@@ -283,30 +353,27 @@ func readWebSocketFrames(conn net.Conn, done chan<- struct{}) {
 			}
 			n = binary.BigEndian.Uint64(ext[:])
 		}
-		if n > 1<<20 {
+		if !masked || n > 1<<20 || b1&0x70 != 0 || (opcode >= 8 && (n > 125 || b1&0x80 == 0)) {
 			return
 		}
 		var mask [4]byte
-		if masked {
-			if _, err := io.ReadFull(reader, mask[:]); err != nil {
-				return
-			}
+		if _, err := io.ReadFull(reader, mask[:]); err != nil {
+			return
 		}
 		data := make([]byte, int(n))
 		if _, err := io.ReadFull(reader, data); err != nil {
 			return
 		}
-		if masked {
-			for i := range data {
-				data[i] ^= mask[i%4]
-			}
+		for i := range data {
+			data[i] ^= mask[i%4]
 		}
 		if opcode == 0x8 {
 			return
 		}
 		if opcode == 0x9 { // ping -> pong
-			header := []byte{0x8a, byte(len(data))}
-			_, _ = conn.Write(append(header, data...))
+			if err := writer.frame(0xa, data); err != nil {
+				return
+			}
 		}
 	}
 }
@@ -331,13 +398,21 @@ func (s *Server) websocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer conn.Close()
-	_, _ = fmt.Fprintf(rw, "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: %s\r\nSec-WebSocket-Protocol: dts.v1\r\n\r\n", websocketAccept(key))
+	var selectedProtocol string
+	for _, offered := range strings.Split(r.Header.Get("Sec-WebSocket-Protocol"), ",") {
+		if strings.TrimSpace(offered) == "dts.v1" {
+			selectedProtocol = "Sec-WebSocket-Protocol: dts.v1\r\n"
+			break
+		}
+	}
+	_, _ = fmt.Fprintf(rw, "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: %s\r\nX-Request-ID: %s\r\n%s\r\n", websocketAccept(key), w.Header().Get("X-Request-ID"), selectedProtocol)
 	if err := rw.Flush(); err != nil {
 		return
 	}
 
 	done := make(chan struct{})
-	go readWebSocketFrames(conn, done)
+	writer := &webSocketWriter{conn: conn}
+	go readWebSocketFrames(rw.Reader, writer, done)
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 	send := func(v any) error {
@@ -345,11 +420,25 @@ func (s *Server) websocket(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-		return writeWebSocketText(conn, b)
+		return writer.frame(1, b)
 	}
 	selectedTask := strings.TrimSpace(r.URL.Query().Get("task_id"))
 	for {
+		// A WebSocket may outlive the session that opened it. Revalidate on
+		// each publication cycle so password resets, disablement and expiry
+		// also stop existing streams, including across server replicas.
+		required, err := s.requiresAuthentication(r.Context())
+		if required && err == nil {
+			_, _, err = s.authenticateRequest(r)
+		}
+		if err != nil {
+			code := uint16(1008)
+			if errors.Is(err, errSessionUnavailable) {
+				code = 1013 // temporary metadata outage, retry later
+			}
+			_ = writer.frame(8, binary.BigEndian.AppendUint16(nil, code))
+			return
+		}
 		migrations, _ := s.repo.ListMigrations(r.Context())
 		for _, m := range migrations {
 			if selectedTask != "" && m.ID != selectedTask {
@@ -386,6 +475,14 @@ func (s *Server) websocket(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
+	if expected := os.Getenv("DTS_METRICS_TOKEN"); expected != "" {
+		token, bearer := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+		if !bearer || subtle.ConstantTimeCompare([]byte(token), []byte(expected)) != 1 {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="DTS metrics"`)
+			apiError(w, http.StatusUnauthorized, errors.New("metrics credential required"))
+			return
+		}
+	}
 	ms, _ := s.repo.ListMigrations(r.Context())
 	ws, _ := s.workers.List(r.Context())
 	ds, _ := s.repo.ListDataSources(r.Context())
@@ -1572,7 +1669,10 @@ func (s *Server) drainCDCSpool(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Server) markCDCStarted(w http.ResponseWriter, r *http.Request) {
 	var p domain.CDCPosition
-	_ = decode(r, &p)
+	if err := decodeOptional(r, &p); err != nil {
+		apiError(w, http.StatusBadRequest, err)
+		return
+	}
 	if err := s.migrations.MarkCDCStarted(r.Context(), r.PathValue("id"), &p); err != nil {
 		apiError(w, 400, err)
 		return
@@ -1773,7 +1873,10 @@ func (s *Server) readyCutover(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		MaxLagMS int64 `json:"max_lag_ms"`
 	}
-	_ = decode(r, &in)
+	if err := decodeOptional(r, &in); err != nil {
+		apiError(w, http.StatusBadRequest, err)
+		return
+	}
 	if err := s.migrations.ReadyForCutover(r.Context(), r.PathValue("id"), in.MaxLagMS); err != nil {
 		apiError(w, 400, err)
 		return
@@ -1800,7 +1903,10 @@ func (s *Server) prepareRollback(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Server) markRollbackCDCStarted(w http.ResponseWriter, r *http.Request) {
 	var p domain.CDCPosition
-	_ = decode(r, &p)
+	if err := decodeOptional(r, &p); err != nil {
+		apiError(w, http.StatusBadRequest, err)
+		return
+	}
 	if err := s.migrations.MarkRollbackCDCStarted(r.Context(), r.PathValue("id"), &p); err != nil {
 		apiError(w, 400, err)
 		return
@@ -1824,7 +1930,10 @@ func (s *Server) readyRollback(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		MaxLagMS int64 `json:"max_lag_ms"`
 	}
-	_ = decode(r, &in)
+	if err := decodeOptional(r, &in); err != nil {
+		apiError(w, http.StatusBadRequest, err)
+		return
+	}
 	if err := s.migrations.ReadyForRollback(r.Context(), r.PathValue("id"), in.MaxLagMS); err != nil {
 		apiError(w, 400, err)
 		return
@@ -2018,7 +2127,10 @@ func (s *Server) engineJobControl(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Server) completeEngineJob(w http.ResponseWriter, r *http.Request) {
 	var result domain.EngineJobResult
-	_ = decode(r, &result)
+	if err := decodeOptional(r, &result); err != nil {
+		apiError(w, http.StatusBadRequest, err)
+		return
+	}
 	if err := s.migrations.CompleteEngineJob(r.Context(), r.PathValue("id"), r.PathValue("job_id"), result); err != nil {
 		apiError(w, 409, err)
 		return
@@ -2027,7 +2139,10 @@ func (s *Server) completeEngineJob(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Server) failEngineJob(w http.ResponseWriter, r *http.Request) {
 	var result domain.EngineJobResult
-	_ = decode(r, &result)
+	if err := decodeOptional(r, &result); err != nil {
+		apiError(w, http.StatusBadRequest, err)
+		return
+	}
 	if err := s.migrations.FailEngineJob(r.Context(), r.PathValue("id"), r.PathValue("job_id"), result); err != nil {
 		apiError(w, 409, err)
 		return
@@ -2068,14 +2183,51 @@ func validRole(v string) (auth.Role, bool) {
 }
 
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {
+	if s.oidcLogin != nil && s.oidcLogin.only {
+		apiError(w, 403, errors.New("use enterprise OIDC login"))
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	browser := r.Header.Get(browserHeader) == "1"
+	if browser && !allowBrowserWrite(w, r) {
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 8192)
 	var req loginRequest
 	if err := decode(r, &req); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) || errors.Is(err, errJSONRequestTooLarge) {
+			apiError(w, http.StatusRequestEntityTooLarge, errors.New("login request exceeds 8 KiB"))
+			return
+		}
 		apiError(w, http.StatusBadRequest, errors.New("invalid login request"))
 		return
 	}
 	username := strings.ToLower(strings.TrimSpace(req.Username))
+	if len(username) > 64 {
+		apiError(w, http.StatusBadRequest, errors.New("invalid login request"))
+		return
+	}
+	retry := s.loginGuard.admit(time.Now(), r.RemoteAddr, username)
+	if retry > 0 {
+		w.Header().Set("Retry-After", strconv.Itoa(retry))
+		apiError(w, http.StatusTooManyRequests, errors.New("too many login attempts"))
+		return
+	}
+	defer s.loginGuard.release()
 	u, err := s.repo.GetUserByUsername(r.Context(), username)
-	if err != nil || !u.Enabled || !auth.VerifyPassword(u.PasswordHash, req.Password) {
+	if err != nil && !errors.Is(err, repository.ErrNotFound) {
+		apiError(w, http.StatusServiceUnavailable, errSessionUnavailable)
+		return
+	}
+	enabled := err == nil && u != nil && u.Enabled
+	// Match the work factor of an enabled account for generic login failures.
+	passwordHash := "pbkdf2_sha256$210000$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+	if enabled {
+		passwordHash = u.PasswordHash
+	}
+	if !auth.VerifyPassword(passwordHash, req.Password) || !enabled {
+		_ = s.repo.CreateAuditEvent(r.Context(), &domain.AuditEvent{ID: randomID("aud"), Actor: username, Action: "LOGIN_FAILED", ResourceType: "auth", RemoteAddr: r.RemoteAddr, CreatedAt: time.Now().UTC()})
 		// Deliberately keep one generic error so account existence is not leaked.
 		apiError(w, http.StatusUnauthorized, errors.New("invalid username or password"))
 		return
@@ -2085,18 +2237,23 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		apiError(w, http.StatusUnauthorized, errors.New("user role is invalid"))
 		return
 	}
-	token, expiry, err := s.sessions.Issue(u.ID, u.Username, role)
+	token, expiry, err := s.issueUserSession(r.Context(), u, role, nil)
 	if err != nil {
 		apiError(w, http.StatusInternalServerError, err)
 		return
 	}
 	u.LastLoginAt = time.Now().UTC()
-	u.UpdatedAt = u.LastLoginAt
-	_ = s.repo.UpdateUser(r.Context(), u)
+	_ = s.repo.UpdateUserLastLogin(r.Context(), u.ID, u.LastLoginAt)
 	_ = s.repo.CreateAuditEvent(r.Context(), &domain.AuditEvent{ID: randomID("aud"), Actor: u.Username, Action: "LOGIN", ResourceType: "auth", ResourceID: u.ID, RemoteAddr: r.RemoteAddr, CreatedAt: time.Now().UTC()})
-	writeJSON(w, http.StatusOK, map[string]any{
-		"token": token, "expires_at": expiry, "user": u,
-	})
+	response := map[string]any{"expires_at": expiry, "user": u}
+	if browser {
+		cookie := sessionCookie(r)
+		cookie.Value, cookie.Expires = token, expiry
+		http.SetCookie(w, cookie)
+	} else {
+		response["token"] = token
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (s *Server) me(w http.ResponseWriter, r *http.Request) {
@@ -2104,7 +2261,8 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"authenticated": false, "open_mode": true, "username": "open-mode", "role": auth.RoleAdmin})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"authenticated": true, "open_mode": false, "username": r.Header.Get("X-DTS-User"), "role": r.Header.Get("X-DTS-Role")})
+	_, sessionErr := s.sessions.Verify(requestCredential(r))
+	writeJSON(w, http.StatusOK, map[string]any{"authenticated": true, "open_mode": false, "username": r.Header.Get("X-DTS-User"), "role": r.Header.Get("X-DTS-Role"), "personal_tokens_enabled": sessionErr == nil && (s.oidcLogin == nil || !s.oidcLogin.only)})
 }
 
 func (s *Server) listUsers(w http.ResponseWriter, r *http.Request) {
@@ -2141,9 +2299,18 @@ func (s *Server) createUser(w http.ResponseWriter, r *http.Request) {
 	if req.Enabled != nil {
 		enabled = *req.Enabled
 	}
+	initial, _ := r.Context().Value(bootstrapRequestKey{}).(bool)
+	if initial && (!enabled || role != auth.RoleAdmin) {
+		apiError(w, http.StatusBadRequest, errors.New("the first account must be an enabled administrator"))
+		return
+	}
 	now := time.Now().UTC()
 	u := &domain.User{ID: randomID("usr"), Username: username, PasswordHash: hash, Role: string(role), Enabled: enabled, CreatedAt: now, UpdatedAt: now}
-	if err := s.repo.CreateUser(r.Context(), u); err != nil {
+	create := s.repo.CreateUser
+	if initial {
+		create = s.repo.CreateInitialUser
+	}
+	if err := create(r.Context(), u); err != nil {
 		apiError(w, http.StatusConflict, err)
 		return
 	}
@@ -2239,10 +2406,20 @@ func (s *Server) ensureEnabledAdminRemains(ctx context.Context, changed *domain.
 }
 
 func logging(next http.Handler) http.Handler {
+	jsonLogs := strings.EqualFold(os.Getenv("DTS_LOG_FORMAT"), "json")
+	structured := slog.New(slog.NewJSONHandler(os.Stderr, nil))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		next.ServeHTTP(w, r)
-		log.Printf("%s %s %s", r.Method, r.URL.Path, time.Since(start))
+		if jsonLogs {
+			logger := structured
+			if sc := trace.SpanContextFromContext(r.Context()); sc.IsValid() {
+				logger = logger.With("trace_id", sc.TraceID().String(), "span_id", sc.SpanID().String())
+			}
+			logger.InfoContext(r.Context(), "http request", "method", r.Method, "path", r.URL.Path, "duration_ms", time.Since(start).Milliseconds(), "request_id", w.Header().Get("X-Request-ID"))
+			return
+		}
+		log.Printf("%s %s %s request_id=%s", r.Method, r.URL.Path, time.Since(start), w.Header().Get("X-Request-ID"))
 	})
 }
 func cors(next http.Handler) http.Handler {
@@ -2252,7 +2429,8 @@ func cors(next http.Handler) http.Handler {
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", origin)
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-DTS-User, X-DTS-API-Token, X-DTS-Worker-Token")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-DTS-User, X-DTS-API-Token, X-DTS-Worker-Token, X-DTS-Lease-Generation, Idempotency-Key, X-Request-ID")
+		w.Header().Set("Access-Control-Expose-Headers", "X-Request-ID, Retry-After")
 		w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
@@ -2262,62 +2440,67 @@ func cors(next http.Handler) http.Handler {
 	})
 }
 
+type bootstrapRequestKey struct{}
+
+func (s *Server) requiresAuthentication(ctx context.Context) (bool, error) {
+	if s.authRequired.Load() {
+		return true, nil
+	}
+	// Another replica can finish the initial bootstrap while this server is
+	// running. Only an empty registry needs further checks.
+	users, err := s.repo.ListUsers(ctx)
+	if err != nil {
+		return true, errSessionUnavailable
+	}
+	if len(users) > 0 {
+		s.authRequired.Store(true)
+	}
+	return s.authRequired.Load(), nil
+}
+
 func (s *Server) apiAuth(next http.Handler) http.Handler {
+	workerTokenConfigured := os.Getenv("DTS_WORKER_TOKEN") != ""
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasPrefix(r.URL.Path, "/api/v1/") || isWorkerInternalRequest(r) || r.URL.Path == "/api/v1/auth/login" {
+		// Identity, permissions and payloads can change between requests to the
+		// same URL, including when an HttpOnly cookie is cleared or replaced.
+		if strings.HasPrefix(r.URL.Path, "/api/v1/") {
+			w.Header().Set("Cache-Control", "no-store")
+		}
+		// Worker routes bypass user RBAC only when a separate machine token
+		// actually protects them. Otherwise authenticated mode must fail closed.
+		if _, err := r.Cookie(sessionCookieName); err == nil && strings.HasPrefix(r.URL.Path, "/api/v1/") {
+			if r.URL.Path == "/api/v1/ws" && !sameBrowserOrigin(r) {
+				apiError(w, http.StatusForbidden, errors.New("cross-origin WebSocket refused"))
+				return
+			}
+			if r.Method != http.MethodGet && r.Method != http.MethodHead && !allowBrowserWrite(w, r) {
+				return
+			}
+		}
+		if !strings.HasPrefix(r.URL.Path, "/api/v1/") || (isWorkerInternalRequest(r) && workerTokenConfigured) || publicAuthRoute(r.URL.Path) {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if !s.authRequired.Load() {
+		required, err := s.requiresAuthentication(r.Context())
+		if err != nil {
+			apiError(w, http.StatusServiceUnavailable, err)
+			return
+		}
+		if !required && !strings.HasPrefix(requestCredential(r), auth.PersonalTokenPrefix) {
 			// Development bootstrap mode. Once the first user is created, the
 			// server atomically switches to authenticated mode.
 			r.Header.Set("X-DTS-Role", string(auth.RoleAdmin))
-			if r.Header.Get("X-DTS-User") == "" {
-				r.Header.Set("X-DTS-User", "open-mode")
+			r.Header.Set("X-DTS-User", "open-mode")
+			if r.Method == http.MethodPost && r.URL.Path == "/api/v1/users" {
+				r = r.WithContext(context.WithValue(r.Context(), bootstrapRequestKey{}, true))
 			}
 			next.ServeHTTP(w, r)
 			return
 		}
-		got := r.Header.Get("X-DTS-API-Token")
-		if got == "" {
-			authorization := r.Header.Get("Authorization")
-			if strings.HasPrefix(authorization, "Bearer ") {
-				got = strings.TrimSpace(strings.TrimPrefix(authorization, "Bearer "))
-			}
-		}
-		if got == "" && r.URL.Path == "/api/v1/ws" {
-			for _, proto := range strings.Split(r.Header.Get("Sec-WebSocket-Protocol"), ",") {
-				proto = strings.TrimSpace(proto)
-				if !strings.HasPrefix(proto, "auth.") {
-					continue
-				}
-				raw := strings.TrimPrefix(proto, "auth.")
-				if decoded, err := base64.RawURLEncoding.DecodeString(raw); err == nil {
-					got = string(decoded)
-				}
-			}
-		}
-		if got == "" {
-			apiError(w, http.StatusUnauthorized, errors.New("authentication required"))
+		role, actor, err := s.authenticateRequest(r)
+		if err != nil {
+			apiError(w, http.StatusUnauthorized, err)
 			return
-		}
-
-		var role auth.Role
-		var actor string
-		if staticRole, ok := s.staticTokens.Authenticate(got); ok {
-			role, actor = staticRole, "token:"+string(staticRole)
-		} else {
-			claims, err := s.sessions.Verify(got)
-			if err != nil {
-				apiError(w, http.StatusUnauthorized, errors.New("invalid or expired credentials"))
-				return
-			}
-			u, err := s.repo.GetUser(r.Context(), claims.Subject)
-			if err != nil || !u.Enabled || auth.Role(u.Role) != claims.Role {
-				apiError(w, http.StatusUnauthorized, errors.New("user is disabled or session is stale"))
-				return
-			}
-			role, actor = claims.Role, u.Username
 		}
 		if !auth.Allowed(role, r.Method, r.URL.Path) {
 			apiError(w, http.StatusForbidden, fmt.Errorf("role %s is not allowed to perform this operation", role))

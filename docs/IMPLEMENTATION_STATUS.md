@@ -1,3 +1,21 @@
+## V0.15.0-rc50 · 2026-11-23
+
+| 领域 | 当前实现或实测 | 待完成 |
+| --- | --- | --- |
+| 主迁移链路 | MySQL 8.4.7 与 PostgreSQL 16.16、17.11 已在隔离实例完成双向全量和 CDC 行数据比较。PostgreSQL 支持锁定选定表并跨控制面实例核验停写。 | 业务侧自动停写联动、跨库 DDL 补偿、更多目标库的事务围栏。 |
+| 发布与恢复 | Kubernetes 和 Compose 两种 Linux amd64 离线包。元数据可与 File/RWX Spool 联合备份及恢复，两包均附带 S3 Spool 与 PostgreSQL 的联合恢复工具，已用 SeaweedFS 做正反例验证。RC40 实例升级至 RC50 并重复升级通过。PostgreSQL 探针要求实际口令认证，新旧卷和故意免密的 HBA 均已真 Linux 核验。提供 SBOM、扫描、签名及验签工具。 | 麒麟裸机与现场存储验收、RC49 混部滚动升级和降级、依赖镜像漏洞清除及生产签发。 |
+| 企业身份与接口 | OIDC、按 issuer/subject 映射、认证等级约束、可撤销会话及个人 API 令牌。跨副本验收覆盖令牌签发、撤销和原副本重启。OpenAPI 3.1 描述 95 个路径、102 项操作。 | 原生 LDAP/SAML、项目访问范围、割接与死信双人审批、跨接口的幂等和分页策略。 |
+| 运维与控制台 | PostgreSQL 有界连接池与统一 Schema。用户会话、控制租约及按键查询使用 PostgreSQL 绑定参数。支持 NetworkPolicy、Secret 挂载、HTTP 跟踪、结构化请求日志、告警路由。迁移、监控及 Worker 页断线后重取快照，离开页面会取消列表读取。 | 更多历史 SQL 仍需参数化。客户采集器和通知接收端对接、控制台复杂页面拆分尚待完成。 |
+| 故障与容量 | 同一 Windows 主机实测双 Server、双 Worker 故障及会话恢复。全量迁移中强杀 Worker 后，同一分片由新进程在租约过期后接管，完成千行逐行核对。单任务 PostgreSQL 至 MySQL CDC 已运行短时事务验收。 | 客户集群的节点和网络故障、数据库切主、磁盘耗尽、24–72 小时连续 CDC 和 10–40 TB 容量验收。 |
+
+单机 Compose 归档已在无外部网卡、未预装 Docker 的 Ubuntu 24.04.5 客体完成首次安装和重复验证。安装器从包内安装 Docker 29.7.2、Compose 2.40.2，API 就绪、Worker 注册、Web 认证均通过。整机冷启动后 Server IP 发生变化，Web 代理自动恢复。保留卷重装后原行及密钥保留，显式清空后新凭据生效、旧测试表消失。Linux 版 PostgreSQL 已在新卷及旧目录布局验证密码认证和重启后数据保留。[完整 Compose 冷启动及重装](../dist/rc50-compose-fixed-qualification/qualification.json) · [包内进程与数据库探针](../dist/qualification/rc50-pg17-20261123/linux-packaged-services.log) · [全后端 Linux Race](../dist/qualification/rc50-linux-race-20261123/summary.json) · [真实 PostgreSQL 17.12 元数据 Race](../dist/qualification/rc50-linux-race-20261123/metadata-pg17-race.json)
+
+本次保留了 [PostgreSQL 17.11 双向迁移及进程故障记录](../dist/qualification/rc50-pg17-20261123/go-test.log)、[历史 Schema 与增量升级](../dist/qualification/rc50-pg17-20261123/schema-and-pat.log)、[TLS 验收](../dist/qualification/rc50-pg17-20261123/datasource-tls.log)、[单任务 90 秒 CDC](../dist/qualification/rc50-pg17-20261123/continuous-cdc.jsonl)、[Worker 接管逐行核对](../dist/qualification/rc50-worker-takeover-20261123/pg17.11-mysql8.4.7.log) 和 [S3 联合恢复](../dist/rc50-s3-dr/integration-results.txt)。
+
+最终 Compose 归档摘要以 `a1398566` 开头，三个镜像合计 154 项 High、2 项 Critical。Kubernetes 归档摘要以 `10d48ad4` 开头，十三个镜像合计 896 项 High、27 项 Critical。两包中的 DTS Server 与 Web 都为零项 High/Critical。生产签名门禁仍处于阻断状态。详见 [Compose 扫描](../dist/release-security/a1398566cfead053544260a0ae851657782528a2a3653b60c56c6cceee0b0aec/scan-summary.json) 和 [Kubernetes 扫描](../dist/release-security/10d48ad4ae610948e562e76e6f9f4880a59ad221fd6c38e0c3d9c18880b3f4ed/scan-summary.json)。
+
+各数据库的验证范围见 [RC50 支持矩阵](SUPPORT_MATRIX_V0.15_RC50.md)。下列条目保留当时版本的历史结论。
+
 ## V0.15.0-rc49
 
 - DONE: multi-public-key offline Trust Store with ACTIVE / RETIRED / REVOKED state.

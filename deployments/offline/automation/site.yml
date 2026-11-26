@@ -1,6 +1,7 @@
 ---
 - name: Distribute offline payload and prepare nodes
   hosts: nodes
+  any_errors_fatal: true
   become: true
   gather_facts: false
   vars:
@@ -37,6 +38,35 @@
         - groups['workers'] | default([]) | length == 0
         - dts_single_node_local_storage | default(true) | bool
       run_once: true
+    - name: Verify the canonical installation directory on each node
+      script: "check-directory.sh package {{ remote_root | quote }}"
+      changed_when: false
+    - name: Verify the single-node data directory before writing
+      script: "check-directory.sh storage {{ dts_single_node_storage_dir | default('/var/lib/dts-single-node', true) | quote }}"
+      changed_when: false
+      when:
+        - groups['workers'] | default([]) | length == 0
+        - dts_single_node_local_storage | default(true) | bool
+        - dts_install_application | default(true) | bool
+    - name: Create private bootstrap records
+      file:
+        path: /var/lib/dts-cluster-bootstrap
+        state: directory
+        mode: '0700'
+    - name: Record the dedicated installation path
+      copy:
+        dest: /var/lib/dts-cluster-bootstrap/package-root
+        content: "{{ remote_root }}\n"
+        mode: '0600'
+    - name: Record the dedicated single-node data path
+      copy:
+        dest: /var/lib/dts-cluster-bootstrap/storage-root
+        content: "{{ dts_single_node_storage_dir | default('/var/lib/dts-single-node', true) }}\n"
+        mode: '0600'
+      when:
+        - groups['workers'] | default([]) | length == 0
+        - dts_single_node_local_storage | default(true) | bool
+        - dts_install_application | default(true) | bool
     - name: Bootstrap rsync from bundled RPM repository over SSH copy
       copy:
         src: "{{ package_root }}/cluster/rpms/"
@@ -124,6 +154,7 @@
       command: sysctl -p /etc/sysctl.d/99-dts-kubernetes.conf
     - name: Verify effective Kubernetes sysctl parameters
       shell: |
+        set -eu
         test "$(sysctl -n net.ipv4.ip_forward)" = 1
         test "$(sysctl -n net.bridge.bridge-nf-call-iptables)" = 1
         test "$(sysctl -n net.bridge.bridge-nf-call-ip6tables)" = 1
@@ -138,10 +169,6 @@
         src: "{{ package_root }}/images/all-images.tar.gz"
         dest: "{{ remote_root }}/images/all-images.tar.gz"
         checksum: true
-    - name: Remove an image tar left by an earlier package revision
-      file:
-        path: "{{ remote_root }}/images/all-images.tar"
-        state: absent
     - name: Validate and decompress the unified image archive
       command: "sh {{ remote_root }}/unpack-images.sh"
     - name: Install runtime and OS dependencies
@@ -190,11 +217,11 @@
   hosts: control_plane
   become: true
   gather_facts: false
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
   tasks:
     - name: Initialize Kubernetes and Flannel
       command: "sh {{ dts_remote_install_dir | default('/opt/dts-offline', true) }}/install-cluster.sh init {{ ansible_host }}"
-      args:
-        creates: /etc/kubernetes/admin.conf
     - name: Allow DTS workloads on the control plane in single-node mode
       command: /usr/local/bin/kubectl taint nodes --all node-role.kubernetes.io/control-plane-
       register: dts_single_node_taint
@@ -340,7 +367,12 @@
     KUBECONFIG: /etc/kubernetes/admin.conf
   tasks:
     - name: Wait for nodes
-      command: /usr/local/bin/kubectl wait --for=condition=Ready nodes --all --timeout=300s
+      command: "/usr/local/bin/kubectl wait --for=condition=Ready node/{{ hostvars[item].dts_node_hostname.stdout }} --timeout=300s"
+      loop: "{{ groups['control_plane'] + (groups['workers'] | default([])) }}"
+      register: dts_ready_node
+      retries: 6
+      delay: 5
+      until: dts_ready_node.rc == 0
       changed_when: false
     - name: Install DTS using private registry images
       command: "sh {{ dts_remote_install_dir | default('/opt/dts-offline', true) }}/install-kubernetes.sh"

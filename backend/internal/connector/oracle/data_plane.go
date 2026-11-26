@@ -482,7 +482,8 @@ func (c *Connector) ReadBatch(ctx context.Context, req connector.ReadBatchReques
 				return nil, err
 			}
 			conditions = append(conditions, pred)
-		} else if len(req.LowerBound) > 0 {
+		}
+		if len(req.LowerBound) > 0 {
 			pred, err := oracleLexCompare(keys, keyCols, req.LowerBound, ">=")
 			if err != nil {
 				return nil, err
@@ -526,7 +527,11 @@ func (c *Connector) ReadBatch(ctx context.Context, req connector.ReadBatchReques
 		conditions = append(conditions, `ORA_HASH(`+strings.Join(parts, `||'#'||`)+`,`+strconv.Itoa(req.HashBuckets-1)+`)`+`=`+strconv.Itoa(req.HashBucket))
 	}
 	if strings.TrimSpace(req.CustomWhere) != "" {
-		conditions = append(conditions, "("+strings.TrimSpace(req.CustomWhere)+")")
+		predicate, err := req.CustomPredicate(oracleIdent, strings.ToUpper)
+		if err != nil {
+			return nil, err
+		}
+		conditions = append(conditions, predicate)
 	}
 	where := ""
 	if len(conditions) > 0 {

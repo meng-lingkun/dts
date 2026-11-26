@@ -2,12 +2,12 @@ package postgresconnector
 
 import (
 	"context"
+	"dts/backend/internal/connector"
+	"dts/backend/internal/domain"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
-	"dts/backend/internal/connector"
-	"dts/backend/internal/domain"
 	"strconv"
 	"strings"
 	"sync"
@@ -106,23 +106,37 @@ func (f *Factory) New(d domain.DataSource) (connector.Connector, error) {
 }
 
 type Connector struct {
-	ds     domain.DataSource
-	mu     sync.Mutex
-	client *pgClient
+	ds                domain.DataSource
+	mu                sync.Mutex
+	client            *pgClient
+	transactionClient *pgClient
 }
 
 func (c *Connector) get(ctx context.Context) (*pgClient, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.client != nil {
-		return c.client, nil
-	}
-	p, err := dialPG(ctx, c.ds)
-	if err != nil {
+	if err := c.connectLocked(ctx); err != nil {
 		return nil, err
 	}
+	return c.client, nil
+}
+
+func (c *Connector) connectLocked(ctx context.Context) error {
+	if c.transactionClient != nil && (c.client != c.transactionClient || c.transactionClient.closed.Load()) {
+		return errors.New("target transaction connection lost; reconnect within transaction is forbidden")
+	}
+	if c.client != nil && !c.client.closed.Load() {
+		return nil
+	}
+	// Do not replay failed SQL automatically: a lost response may follow a
+	// successful COMMIT. Only a subsequent operation gets a fresh connection.
+	c.client = nil
+	p, err := dialPG(ctx, c.ds)
+	if err != nil {
+		return err
+	}
 	c.client = p
-	return p, nil
+	return nil
 }
 func (c *Connector) Close() error {
 	c.mu.Lock()
@@ -162,14 +176,23 @@ func (c *Connector) GetVersion(ctx context.Context) (string, error) {
 	}
 	return p.serverVersion, nil
 }
-func pgString(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
+
+// QuoteTextLiteral is independent of standard_conforming_strings.
+func QuoteTextLiteral(s string) string {
+	s = strings.ReplaceAll(s, "'", "''")
+	if strings.Contains(s, "\\") {
+		return "E'" + strings.ReplaceAll(s, "\\", "\\\\") + "'"
+	}
+	return "'" + s + "'"
+}
+func pgString(s string) string { return QuoteTextLiteral(s) }
 func pgIdent(s string) string  { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
 func (c *Connector) ListSchemas(ctx context.Context) ([]domain.SchemaInfo, error) {
 	p, e := c.get(ctx)
 	if e != nil {
 		return nil, e
 	}
-	r, e := p.query(ctx, "SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT IN ('pg_catalog','information_schema') AND schema_name NOT LIKE 'pg_toast%' ORDER BY schema_name")
+	r, e := p.query(ctx, "SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT IN ('pg_catalog','information_schema','dts_internal') AND schema_name NOT LIKE 'pg_toast%' ORDER BY schema_name")
 	if e != nil {
 		return nil, e
 	}
@@ -186,7 +209,7 @@ func (c *Connector) ListTables(ctx context.Context, schema string) ([]domain.Tab
 	if e != nil {
 		return nil, e
 	}
-	q := "SELECT schemaname,relname,COALESCE(n_live_tup,0),pg_total_relation_size(quote_ident(schemaname)||'.'||quote_ident(relname)) FROM pg_stat_user_tables WHERE schemaname=" + pgString(schema) + " ORDER BY relname"
+	q := "SELECT schemaname,relname,COALESCE(n_live_tup,0),pg_total_relation_size(quote_ident(schemaname)||'.'||quote_ident(relname)) FROM pg_stat_user_tables WHERE schemaname=" + pgString(schema) + " AND schemaname<>'dts_internal' ORDER BY relname"
 	r, e := p.query(ctx, q)
 	if e != nil {
 		return nil, e
@@ -333,9 +356,9 @@ func validatePostgresValue(col domain.ColumnInfo, v connector.Value) error {
 		return nil
 	}
 	switch strings.ToLower(col.DataType) {
-	case "smallint", "integer", "int", "bigint", "int2", "int4", "int8", "numeric", "decimal":
+	case "smallint", "integer", "int", "bigint", "int2", "int4", "int8":
 		return connector.ValidateNumericLiteral(v.Raw, false)
-	case "real", "double", "double precision", "float4", "float8":
+	case "numeric", "decimal", "real", "double", "double precision", "float4", "float8":
 		return connector.ValidateNumericLiteral(v.Raw, true)
 	default:
 		return nil
@@ -360,12 +383,12 @@ func postgresValueLiteral(v connector.Value, col domain.ColumnInfo) string {
 	}
 	t := strings.ToLower(col.DataType)
 	switch t {
-	case "smallint", "integer", "int", "bigint", "numeric", "decimal", "real", "double precision", "float4", "float8":
+	case "smallint", "integer", "int", "bigint", "int2", "int4", "int8":
 		return string(v.Raw)
 	case "bytea":
 		return "decode('" + hex.EncodeToString(v.Raw) + "','hex')"
 	default:
-		return "'" + strings.ReplaceAll(string(v.Raw), "'", "''") + "'"
+		return pgString(string(v.Raw))
 	}
 }
 
@@ -454,8 +477,8 @@ func (c *Connector) PlanKeysetBoundaries(ctx context.Context, req connector.Keys
 				return nil, fmt.Errorf("migration key %s returned NULL boundary", req.Keys[i])
 			}
 			value := append([]byte(nil), raw...)
-			if strings.EqualFold(keyCols[i].DataType, "bytea") && len(value) >= 2 && string(value[:2]) == `\x` {
-				decoded, decodeErr := hex.DecodeString(string(value[2:]))
+			if strings.EqualFold(keyCols[i].DataType, "bytea") {
+				decoded, decodeErr := connector.DecodePostgreSQLBytea(value)
 				if decodeErr != nil {
 					return nil, fmt.Errorf("decode bytea boundary for %s: %w", req.Keys[i], decodeErr)
 				}
@@ -494,10 +517,6 @@ WHERE pn.nspname=` + pgString(schema) + ` AND cp.relname=` + pgString(table) + `
 }
 
 func (c *Connector) ReadBatch(ctx context.Context, req connector.ReadBatchRequest) (*connector.RowBatch, error) {
-	p, e := c.get(ctx)
-	if e != nil {
-		return nil, e
-	}
 	if req.Limit <= 0 {
 		req.Limit = 500
 	}
@@ -520,11 +539,6 @@ func (c *Connector) ReadBatch(ctx context.Context, req connector.ReadBatchReques
 		if len(keys) == 0 {
 			return nil, errors.New("keyset read requires primary key columns")
 		}
-		for _, bound := range [][]connector.Value{req.Cursor, req.LowerBound, req.UpperBound} {
-			if len(bound) > 0 && len(bound) != len(keys) {
-				return nil, fmt.Errorf("keyset bound has %d values for %d keys", len(bound), len(keys))
-			}
-		}
 		left := make([]string, 0, len(keys))
 		keyCols := make([]domain.ColumnInfo, 0, len(keys))
 		for _, key := range keys {
@@ -536,6 +550,13 @@ func (c *Connector) ReadBatch(ctx context.Context, req connector.ReadBatchReques
 			orderKeys = append(orderKeys, pgIdent(key))
 			keyCols = append(keyCols, req.Columns[idx])
 		}
+		for _, bound := range [][]connector.Value{req.Cursor, req.LowerBound, req.UpperBound} {
+			if len(bound) > 0 {
+				if err := validatePostgresValues(keyCols, bound); err != nil {
+					return nil, fmt.Errorf("keyset bound: %w", err)
+				}
+			}
+		}
 		tuple := func(values []connector.Value) string {
 			right := make([]string, len(values))
 			for i := range values {
@@ -546,7 +567,8 @@ func (c *Connector) ReadBatch(ctx context.Context, req connector.ReadBatchReques
 		conditions := make([]string, 0, 2)
 		if len(req.Cursor) > 0 {
 			conditions = append(conditions, "("+strings.Join(left, ",")+") > "+tuple(req.Cursor))
-		} else if len(req.LowerBound) > 0 {
+		}
+		if len(req.LowerBound) > 0 {
 			conditions = append(conditions, "("+strings.Join(left, ",")+") >= "+tuple(req.LowerBound))
 		}
 		if len(req.UpperBound) > 0 {
@@ -589,7 +611,11 @@ func (c *Connector) ReadBatch(ctx context.Context, req connector.ReadBatchReques
 		conditions = append(conditions, hashExpr)
 	}
 	if strings.TrimSpace(req.CustomWhere) != "" {
-		conditions = append(conditions, "("+strings.TrimSpace(req.CustomWhere)+")")
+		predicate, err := req.CustomPredicate(pgIdent, strings.ToLower)
+		if err != nil {
+			return nil, err
+		}
+		conditions = append(conditions, predicate)
 	}
 	where = ""
 	if len(conditions) > 0 {
@@ -605,6 +631,10 @@ func (c *Connector) ReadBatch(ctx context.Context, req connector.ReadBatchReques
 		from = pgIdent(ps) + "." + pgIdent(pt)
 	}
 	q := "SELECT " + strings.Join(cols, ",") + " FROM " + from + where + " ORDER BY " + strings.Join(orderKeys, ",") + " LIMIT " + strconv.Itoa(req.Limit)
+	p, e := c.get(ctx)
+	if e != nil {
+		return nil, e
+	}
 	r, e := p.query(ctx, q)
 	if e != nil {
 		return nil, e
@@ -614,9 +644,10 @@ func (c *Connector) ReadBatch(ctx context.Context, req connector.ReadBatchReques
 		vals := make([]connector.Value, len(row))
 		for i, v := range row {
 			raw := v
-			if i < len(req.Columns) && strings.ToLower(req.Columns[i].DataType) == "bytea" && len(v) >= 2 && string(v[:2]) == `\x` {
-				if dec, de := hex.DecodeString(string(v[2:])); de == nil {
-					raw = dec
+			if !r.nulls[ri][i] && i < len(req.Columns) && strings.EqualFold(req.Columns[i].DataType, "bytea") {
+				raw, e = connector.DecodePostgreSQLBytea(v)
+				if e != nil {
+					return nil, fmt.Errorf("decode bytea column %s: %w", req.Columns[i].Name, e)
 				}
 			}
 			vals[i] = connector.Value{Null: r.nulls[ri][i], Raw: raw}
@@ -653,7 +684,7 @@ func pgValue(col domain.ColumnInfo, v connector.Value) string {
 	dt := strings.ToLower(col.DataType)
 	raw := string(v.Raw)
 	switch dt {
-	case "smallint", "integer", "bigint", "int2", "int4", "int8", "numeric", "decimal", "real", "double", "double precision", "float4", "float8":
+	case "smallint", "integer", "int", "bigint", "int2", "int4", "int8":
 		return raw
 	case "bytea", "binary", "varbinary", "blob", "tinyblob", "mediumblob", "longblob":
 		return "decode('" + fmt.Sprintf("%x", v.Raw) + "','hex')"
@@ -919,26 +950,23 @@ type RawRows struct {
 func (c *Connector) ExecSQL(ctx context.Context, sql string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.client == nil {
-		p, err := dialPG(ctx, c.ds)
-		if err != nil {
-			return err
-		}
-		c.client = p
+	if err := c.connectLocked(ctx); err != nil {
+		return err
 	}
 	return c.client.exec(ctx, sql)
 }
 func (c *Connector) QuerySQL(ctx context.Context, sql string) (*RawRows, error) {
+	return c.QueryParams(ctx, sql)
+}
+
+// QueryParams binds non-null text values independently of the SQL statement.
+func (c *Connector) QueryParams(ctx context.Context, sql string, params ...string) (*RawRows, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.client == nil {
-		p, err := dialPG(ctx, c.ds)
-		if err != nil {
-			return nil, err
-		}
-		c.client = p
+	if err := c.connectLocked(ctx); err != nil {
+		return nil, err
 	}
-	r, err := c.client.query(ctx, sql)
+	r, err := c.client.query(ctx, sql, params...)
 	if err != nil {
 		return nil, err
 	}
@@ -1105,7 +1133,7 @@ var _ connector.MigrationPrecheckConnector = (*Connector)(nil)
 
 var _ connector.CDCSource = (*Connector)(nil)
 
-func pgLiteral(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
+func pgLiteral(s string) string { return pgString(s) }
 
 func (c *Connector) CreateCDCCheckpoint(ctx context.Context, name string) (*domain.CDCPosition, error) {
 	name = strings.ToLower(name)
@@ -1167,6 +1195,9 @@ func (c *Connector) DropCDCCheckpoint(ctx context.Context, resource string) erro
 	if c.ds.Type == domain.DataSourceKingbase {
 		dropFn = "sys_drop_replication_slot"
 	}
+	if c.ds.Type == domain.DataSourcePostgreSQL || c.ds.Type == domain.DataSourcePolarDBPostgreSQL {
+		return c.ExecSQL(ctx, "SELECT pg_drop_replication_slot(slot_name) FROM pg_replication_slots WHERE slot_name="+pgLiteral(resource))
+	}
 	return c.ExecSQL(ctx, "SELECT "+dropFn+"("+pgLiteral(resource)+")")
 }
 
@@ -1184,6 +1215,9 @@ func (c *Connector) DeleteByKey(ctx context.Context, req connector.DeleteByKeyRe
 	if len(keys) == 0 || len(keys) != len(cols) || len(keys) != len(vals) {
 		return errors.New("delete primary key values are incomplete")
 	}
+	if err := validatePostgresValues(cols, vals); err != nil {
+		return fmt.Errorf("delete key: %w", err)
+	}
 	where := make([]string, len(keys))
 	for i := range keys {
 		if vals[i].Null {
@@ -1199,25 +1233,40 @@ func (c *Connector) DeleteByKey(ctx context.Context, req connector.DeleteByKeyRe
 }
 
 func (c *Connector) BeginCDCTransaction(ctx context.Context) error {
-	p, err := c.get(ctx)
-	if err != nil {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.transactionClient != nil {
+		return errors.New("transaction already open")
+	}
+	if err := c.connectLocked(ctx); err != nil {
 		return err
 	}
-	return p.exec(ctx, "BEGIN")
+	if err := c.client.exec(ctx, "BEGIN"); err != nil {
+		return err
+	}
+	c.transactionClient = c.client
+	return nil
 }
 func (c *Connector) CommitCDCTransaction(ctx context.Context) error {
-	p, err := c.get(ctx)
-	if err != nil {
-		return err
-	}
-	return p.exec(ctx, "COMMIT")
+	return c.endCDCTransaction(ctx, "COMMIT")
 }
 func (c *Connector) RollbackCDCTransaction(ctx context.Context) error {
-	p, err := c.get(ctx)
+	return c.endCDCTransaction(ctx, "ROLLBACK")
+}
+func (c *Connector) endCDCTransaction(ctx context.Context, command string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	p := c.transactionClient
+	if p == nil || p != c.client || p.closed.Load() {
+		return errors.New("target transaction connection lost")
+	}
+	err := p.exec(ctx, command)
 	if err != nil {
+		_ = p.close()
 		return err
 	}
-	return p.exec(ctx, "ROLLBACK")
+	c.transactionClient = nil
+	return nil
 }
 
 var _ connector.CDCApplyConnector = (*Connector)(nil)

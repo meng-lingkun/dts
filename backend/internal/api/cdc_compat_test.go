@@ -78,7 +78,13 @@ func (*externalCDCTestConnector) ListTables(context.Context, string) ([]domain.T
 func (*externalCDCTestConnector) GetTableMetadata(context.Context, string, string) (*domain.TableMetadata, error) {
 	return nil, nil
 }
-func (*externalCDCTestConnector) Close() error { return nil }
+func (*externalCDCTestConnector) Close() error                                            { return nil }
+func (*externalCDCTestConnector) EnsureExecutionFence(context.Context) error              { return nil }
+func (*externalCDCTestConnector) VerifyFencedTable(context.Context, string, string) error { return nil }
+func (*externalCDCTestConnector) FenceTransaction(context.Context, string, int64) error   { return nil }
+func (*externalCDCTestConnector) BeginCDCTransaction(context.Context) error               { return nil }
+func (*externalCDCTestConnector) CommitCDCTransaction(context.Context) error              { return nil }
+func (*externalCDCTestConnector) RollbackCDCTransaction(context.Context) error            { return nil }
 func (*externalCDCTestConnector) ReadBatch(context.Context, connector.ReadBatchRequest) (*connector.RowBatch, error) {
 	return &connector.RowBatch{}, nil
 }

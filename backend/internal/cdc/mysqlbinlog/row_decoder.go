@@ -1,14 +1,15 @@
 package mysqlbinlog
 
 import (
+	"dts/backend/internal/domain"
 	"encoding/base64"
 	"encoding/binary"
 	"fmt"
 	"math"
-	"dts/backend/internal/domain"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // MySQL field type identifiers used in row-based binlog events.
@@ -384,20 +385,32 @@ func decodeBlob(data []byte, pack int) ([]byte, int, error) {
 	return append([]byte(nil), data[pack:n]...), n, nil
 }
 
-func decodeString(data []byte, max int) (string, int, error) {
+func decodeStringField(data []byte, max int, col domain.ColumnInfo) (domain.CDCField, int, error) {
+	field := domain.CDCField{Column: col.Name}
 	prefix := 1
 	if max >= 256 {
 		prefix = 2
 	}
 	l, err := readLE(data, prefix)
 	if err != nil {
-		return "", 0, err
+		return field, 0, err
 	}
 	if l > uint64(len(data)-prefix) {
-		return "", 0, fmt.Errorf("string length %d exceeds remaining", l)
+		return field, 0, fmt.Errorf("string length %d exceeds remaining", l)
 	}
 	n := prefix + int(l)
-	return string(data[prefix:n]), n, nil
+	raw := data[prefix:n]
+	switch strings.ToLower(col.DataType) {
+	case "binary", "varbinary":
+		field.Value = base64.StdEncoding.EncodeToString(raw)
+		field.Encoding = "base64"
+	default:
+		if !utf8.Valid(raw) {
+			return field, 0, fmt.Errorf("column %s contains text outside UTF-8; native binlog decoding needs the source character set", col.Name)
+		}
+		field.Value = string(raw)
+	}
+	return field, n, nil
 }
 
 func realStringType(meta uint16) (tp byte, max int) {
@@ -415,7 +428,7 @@ func realStringType(meta uint16) (tp byte, max int) {
 	return
 }
 
-func decodeValue(data []byte, tp byte, meta uint16, col domain.ColumnInfo) (domain.CDCField, int, error) {
+func decodeValue(data []byte, tp byte, meta uint16, col domain.ColumnInfo, members memberCache) (domain.CDCField, int, error) {
 	f := domain.CDCField{Column: col.Name}
 	need := func(n int) error {
 		if len(data) < n {
@@ -571,38 +584,28 @@ func decodeValue(data []byte, tp byte, meta uint16, col domain.ColumnInfo) (doma
 		}
 		return f, 1, nil
 	case TypeVarchar, TypeVarString:
-		v, n, e := decodeString(data, int(meta))
-		f.Value = v
-		return f, n, e
+		return decodeStringField(data, int(meta), col)
 	case TypeString:
 		real, max := realStringType(meta)
-		if real == TypeEnum {
-			pack := max
-			if pack < 1 || pack > 2 {
-				pack = int(meta & 0xff)
+		if real == TypeEnum || real == TypeSet {
+			kind := "set"
+			if real == TypeEnum {
+				kind = "enum"
 			}
-			v, e := readLE(data, pack)
+			if !strings.EqualFold(col.DataType, kind) || max < 1 || max > 8 || (real == TypeEnum && max > 2) {
+				return f, 0, fmt.Errorf("binlog %s metadata does not match column %s", kind, col.Name)
+			}
+			v, e := readLE(data, max)
 			if e != nil {
 				return f, 0, e
 			}
-			f.Value = strconv.FormatUint(v, 10)
-			return f, pack, nil
-		}
-		if real == TypeSet {
-			pack := max
-			if pack < 1 || pack > 8 {
-				pack = int(meta & 0xff)
-			}
-			v, e := readLE(data, pack)
+			f.Value, e = members.value(kind, col.Name, v)
 			if e != nil {
-				return f, 0, e
+				return f, 0, fmt.Errorf("decode %s column %s: %w", kind, col.Name, e)
 			}
-			f.Value = strconv.FormatUint(v, 10)
-			return f, pack, nil
+			return f, max, nil
 		}
-		v, n, e := decodeString(data, max)
-		f.Value = v
-		return f, n, e
+		return decodeStringField(data, max, col)
 	case TypeBlob, TypeTinyBlob, TypeMediumBlob, TypeLongBlob, TypeGeometry:
 		pack := int(meta)
 		if pack == 0 {
@@ -638,7 +641,7 @@ func decodeValue(data []byte, tp byte, meta uint16, col domain.ColumnInfo) (doma
 	}
 }
 
-func decodeImage(data []byte, bitmap []byte, tm *TableMap, columns []domain.ColumnInfo, metas []uint16) ([]domain.CDCField, int, error) {
+func decodeImage(data []byte, bitmap []byte, tm *TableMap, columns []domain.ColumnInfo, metas []uint16, members memberCache) ([]domain.CDCField, int, error) {
 	if len(columns) != len(tm.ColumnTypes) {
 		return nil, 0, fmt.Errorf("column metadata mismatch table=%s.%s db=%d binlog=%d", tm.Schema, tm.Table, len(columns), len(tm.ColumnTypes))
 	}
@@ -661,7 +664,7 @@ func decodeImage(data []byte, bitmap []byte, tm *TableMap, columns []domain.Colu
 			continue
 		}
 		nullIndex++
-		f, n, err := decodeValue(data[pos:], tm.ColumnTypes[i], metas[i], columns[i])
+		f, n, err := decodeValue(data[pos:], tm.ColumnTypes[i], metas[i], columns[i], members)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -680,7 +683,7 @@ func findCDCField(fields []domain.CDCField, column string) (domain.CDCField, boo
 	return domain.CDCField{}, false
 }
 
-func decodePartialUpdateAfterImage(data []byte, bitmap []byte, tm *TableMap, columns []domain.ColumnInfo, metas []uint16, before []domain.CDCField) ([]domain.CDCField, int, error) {
+func decodePartialUpdateAfterImage(data []byte, bitmap []byte, tm *TableMap, columns []domain.ColumnInfo, metas []uint16, before []domain.CDCField, members memberCache) ([]domain.CDCField, int, error) {
 	options, n, err := readLenEnc(data)
 	if err != nil {
 		return nil, 0, fmt.Errorf("decode binlog_row_value_options: %w", err)
@@ -751,7 +754,7 @@ func decodePartialUpdateAfterImage(data []byte, bitmap []byte, tm *TableMap, col
 			fields = append(fields, domain.CDCField{Column: columns[i].Name, Value: updated, Encoding: "json"})
 			continue
 		}
-		f, consumed, e := decodeValue(data[pos:], tm.ColumnTypes[i], metas[i], columns[i])
+		f, consumed, e := decodeValue(data[pos:], tm.ColumnTypes[i], metas[i], columns[i], members)
 		if e != nil {
 			return nil, 0, e
 		}
@@ -775,9 +778,13 @@ func DecodeRows(tm *TableMap, rows *Rows, columns []domain.ColumnInfo) ([]Decode
 		return nil, err
 	}
 	data := rows.RowData
+	members, err := eventMemberLabels(tm, metas, columns)
+	if err != nil {
+		return nil, fmt.Errorf("table %s.%s: %w", tm.Schema, tm.Table, err)
+	}
 	out := []DecodedChange{}
 	for len(data) > 0 {
-		before, n, err := decodeImage(data, rows.BeforeBitmap, tm, columns, metas)
+		before, n, err := decodeImage(data, rows.BeforeBitmap, tm, columns, metas, members)
 		if err != nil {
 			return nil, err
 		}
@@ -791,9 +798,9 @@ func DecodeRows(tm *TableMap, rows *Rows, columns []domain.ColumnInfo) ([]Decode
 			var after []domain.CDCField
 			var m int
 			if rows.EventType == PartialUpdateRowsEvent {
-				after, m, err = decodePartialUpdateAfterImage(data, rows.AfterBitmap, tm, columns, metas, before)
+				after, m, err = decodePartialUpdateAfterImage(data, rows.AfterBitmap, tm, columns, metas, before, members)
 			} else {
-				after, m, err = decodeImage(data, rows.AfterBitmap, tm, columns, metas)
+				after, m, err = decodeImage(data, rows.AfterBitmap, tm, columns, metas, members)
 			}
 			if err != nil {
 				return nil, err

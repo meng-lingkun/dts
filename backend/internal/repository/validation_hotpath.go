@@ -77,7 +77,7 @@ func FirstInvalidSuccessfulChunk(ctx context.Context, repo Repository, taskID st
 	latest := map[string]domain.ValidationResult{}
 	for _, v := range results {
 		old, ok := latest[v.ChunkID]
-		if !ok || v.FinishedAt.After(old.FinishedAt) {
+		if !ok || v.NewerThan(old) {
 			latest[v.ChunkID] = v
 		}
 	}
@@ -107,7 +107,7 @@ func ListRepairableValidationChunkIDs(ctx context.Context, repo Repository, task
 	latest := map[string]domain.ValidationResult{}
 	for _, v := range items {
 		old, ok := latest[v.ChunkID]
-		if !ok || v.FinishedAt.After(old.FinishedAt) {
+		if !ok || v.NewerThan(old) {
 			latest[v.ChunkID] = v
 		}
 	}

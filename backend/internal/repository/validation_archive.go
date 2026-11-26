@@ -90,7 +90,7 @@ func evidencePage(ctx context.Context, repo Repository, taskID, tableID string, 
 	latest := map[string]domain.ValidationResult{}
 	for _, v := range results {
 		old, ok := latest[v.ChunkID]
-		if !ok || v.FinishedAt.After(old.FinishedAt) || (v.FinishedAt.Equal(old.FinishedAt) && v.ID > old.ID) {
+		if !ok || v.NewerThan(old) {
 			latest[v.ChunkID] = v
 		}
 	}
@@ -216,7 +216,7 @@ func buildLegacyValidationArchive(ctx context.Context, repo Repository, taskID s
 	latest := map[string]domain.ValidationResult{}
 	for _, v := range items {
 		old, ok := latest[v.ChunkID]
-		if !ok || v.FinishedAt.After(old.FinishedAt) || (v.FinishedAt.Equal(old.FinishedAt) && v.ID > old.ID) {
+		if !ok || v.NewerThan(old) {
 			latest[v.ChunkID] = v
 		}
 	}
@@ -401,7 +401,7 @@ func LatestValidationMismatchCount(ctx context.Context, repo Repository, taskID 
 	latest := map[string]domain.ValidationResult{}
 	for _, v := range items {
 		old, ok := latest[v.ChunkID]
-		if !ok || v.FinishedAt.After(old.FinishedAt) || (v.FinishedAt.Equal(old.FinishedAt) && v.ID > old.ID) {
+		if !ok || v.NewerThan(old) {
 			latest[v.ChunkID] = v
 		}
 	}

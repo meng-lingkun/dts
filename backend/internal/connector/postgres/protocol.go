@@ -19,6 +19,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"dts/backend/internal/domain"
@@ -34,6 +35,7 @@ type pgClient struct {
 	r             *bufio.Reader
 	user          string
 	serverVersion string
+	closed        atomic.Bool
 }
 
 func dialPG(ctx context.Context, ds domain.DataSource) (*pgClient, error) {
@@ -144,6 +146,7 @@ func dialPGWithParams(ctx context.Context, ds domain.DataSource, extra map[strin
 }
 
 func (c *pgClient) close() error {
+	c.closed.Store(true)
 	if c.conn == nil {
 		return nil
 	}
@@ -257,19 +260,36 @@ func (c *pgClient) sendSASLInitial(first string) error {
 	return c.writeMessage('p', b.Bytes())
 }
 func (c *pgClient) writeMessage(typ byte, payload []byte) error {
-	buf := make([]byte, 1+4+len(payload))
-	buf[0] = typ
-	binary.BigEndian.PutUint32(buf[1:5], uint32(4+len(payload)))
-	copy(buf[5:], payload)
-	_, err := c.conn.Write(buf)
+	buf := appendFrontendFrame(nil, typ, payload)
+	return c.writeFrames(buf)
+}
+
+func appendFrontendFrame(dst []byte, typ byte, payload []byte) []byte {
+	dst = append(dst, typ)
+	dst = binary.BigEndian.AppendUint32(dst, uint32(4+len(payload)))
+	return append(dst, payload...)
+}
+
+func (c *pgClient) writeFrames(frames []byte) error {
+	n, err := c.conn.Write(frames)
+	if err == nil && n != len(frames) {
+		return io.ErrShortWrite
+	}
 	return err
 }
 func (c *pgClient) readMessage(ctx context.Context) (byte, []byte, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, nil, err
+	}
 	if deadline, ok := ctx.Deadline(); ok {
 		_ = c.conn.SetReadDeadline(deadline)
 	} else {
 		_ = c.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 	}
+	return c.readFrame()
+}
+
+func (c *pgClient) readFrame() (byte, []byte, error) {
 	typ, err := c.r.ReadByte()
 	if err != nil {
 		return 0, nil, err
@@ -304,15 +324,96 @@ func parsePGError(p []byte) error {
 	}
 	return errors.New(msg)
 }
-func (c *pgClient) query(ctx context.Context, sql string) (*pgResult, error) {
-	if err := c.writeMessage('Q', cstr(sql)); err != nil {
+
+// Parameters use the server's inferred types and text input format. An
+// unnamed statement and portal live for this exchange only.
+func parameterFrames(sql string, params []string) ([]byte, error) {
+	if len(params) > 65535 || len(sql) > 128<<20 {
+		return nil, errors.New("PostgreSQL parameterized query too large")
+	}
+	parse := append([]byte{0}, sql...)
+	parse = append(parse, 0, 0, 0) // query terminator and zero explicit type OIDs
+	bind := []byte{0, 0, 0, 0}     // unnamed portal, unnamed statement, all text
+	bind = binary.BigEndian.AppendUint16(bind, uint16(len(params)))
+	for _, value := range params {
+		if len(value) > (128<<20)-len(bind)-6 {
+			return nil, errors.New("PostgreSQL bind exceeds message limit")
+		}
+		if strings.IndexByte(value, 0) >= 0 {
+			return nil, errors.New("PostgreSQL text parameter contains NUL")
+		}
+		bind = binary.BigEndian.AppendUint32(bind, uint32(len(value)))
+		bind = append(bind, value...)
+	}
+	bind = append(bind, 0, 0) // zero format codes selects text results
+	wire := appendFrontendFrame(nil, 'P', parse)
+	wire = appendFrontendFrame(wire, 'B', bind)
+	wire = appendFrontendFrame(wire, 'D', []byte{'P', 0})        // describe portal
+	wire = appendFrontendFrame(wire, 'E', []byte{0, 0, 0, 0, 0}) // all rows
+	return appendFrontendFrame(wire, 'S', nil), nil
+}
+
+func (c *pgClient) query(ctx context.Context, sql string, params ...string) (result *pgResult, retErr error) {
+	if strings.IndexByte(sql, 0) >= 0 {
+		return nil, errors.New("PostgreSQL query contains NUL")
+	}
+	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	res := &pgResult{}
-	for {
-		typ, p, err := c.readMessage(ctx)
+	if c.closed.Load() {
+		return nil, net.ErrClosed
+	}
+	var frames []byte
+	if len(params) != 0 {
+		var err error
+		frames, err = parameterFrames(sql, params)
 		if err != nil {
 			return nil, err
+		}
+	}
+	deadline, hasDeadline := ctx.Deadline()
+	if !hasDeadline {
+		deadline = time.Now().Add(60 * time.Second)
+	}
+	if err := c.conn.SetDeadline(deadline); err != nil {
+		_ = c.close()
+		return nil, err
+	}
+	cancelDone := make(chan struct{})
+	stopCancellation := context.AfterFunc(ctx, func() {
+		_ = c.conn.SetDeadline(time.Now())
+		close(cancelDone)
+	})
+	ready := false
+	defer func() {
+		// A cancellation callback must finish before this connection can be
+		// reused, or it could expire the *next* query's socket deadline.
+		if !stopCancellation() {
+			<-cancelDone
+		}
+		if retErr != nil && !ready {
+			_ = c.close()
+		}
+		if retErr != nil && ctx.Err() != nil {
+			retErr = errors.Join(ctx.Err(), retErr)
+		}
+		_ = c.conn.SetDeadline(time.Time{})
+	}()
+	if frames != nil {
+		if err := c.writeFrames(frames); err != nil {
+			return nil, err
+		}
+	} else {
+		if err := c.writeMessage('Q', cstr(sql)); err != nil {
+			return nil, err
+		}
+	}
+	res := &pgResult{}
+	var queryErr error
+	for {
+		typ, p, err := c.readFrame()
+		if err != nil {
+			return nil, errors.Join(queryErr, err)
 		}
 		switch typ {
 		case 'T':
@@ -330,8 +431,18 @@ func (c *pgClient) query(ctx context.Context, sql string) (*pgResult, error) {
 			res.nulls = append(res.nulls, nulls)
 		case 'C', 'I', 'N', 'S':
 		case 'E':
-			return nil, parsePGError(p)
+			// ErrorResponse is followed by ReadyForQuery even when the SQL
+			// statement fails. Returning at E leaves Z for the next query,
+			// which can then falsely report success without reading its result.
+			queryErr = parsePGError(p)
 		case 'Z':
+			if len(p) != 1 {
+				return nil, errors.New("invalid PostgreSQL ReadyForQuery response")
+			}
+			ready = true
+			if queryErr != nil {
+				return nil, queryErr
+			}
 			return res, nil
 		}
 	}

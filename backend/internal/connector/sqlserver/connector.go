@@ -598,7 +598,8 @@ func (c *Connector) ReadBatch(ctx context.Context, req connector.ReadBatchReques
 		}
 		if len(req.Cursor) > 0 {
 			conditions = append(conditions, lexCompare(keys, keyCols, req.Cursor, ">"))
-		} else if len(req.LowerBound) > 0 {
+		}
+		if len(req.LowerBound) > 0 {
 			conditions = append(conditions, lexCompare(keys, keyCols, req.LowerBound, ">="))
 		}
 		if len(req.UpperBound) > 0 {
@@ -632,7 +633,11 @@ func (c *Connector) ReadBatch(ctx context.Context, req connector.ReadBatchReques
 		conditions = append(conditions, "((CONVERT(bigint,CHECKSUM(CONCAT("+strings.Join(parts, ",N'#',")+"))) & 2147483647) % "+strconv.Itoa(req.HashBuckets)+")="+strconv.Itoa(req.HashBucket))
 	}
 	if strings.TrimSpace(req.CustomWhere) != "" {
-		conditions = append(conditions, "("+strings.TrimSpace(req.CustomWhere)+")")
+		predicate, err := req.CustomPredicate(qIdentSafe, nil)
+		if err != nil {
+			return nil, err
+		}
+		conditions = append(conditions, predicate)
 	}
 	where := ""
 	if len(conditions) > 0 {

@@ -1,3 +1,22 @@
+-- Serialize automatic and operator-initiated bootstraps in this database.
+-- Both callers execute the complete script in one transaction.
+SELECT pg_advisory_xact_lock(5849328471002);
+
+-- Check before any historical version markers in this bootstrap are written.
+DO $dts_upgrade$
+DECLARE installed text;
+BEGIN
+  IF to_regclass('metadata_schema_state') IS NOT NULL THEN
+    SELECT schema_version INTO installed FROM metadata_schema_state WHERE id = 1;
+    IF installed IS NOT NULL AND installed <> '1.0.0-rc2'
+        AND installed !~ '^0[.]15[.]0-unified-dev([1-9]|1[0-4]|15-complete)$'
+        AND installed !~ '^0[.]15[.]0-rc([1-9]|[1-4][0-9]|50)$' THEN
+      RAISE EXCEPTION 'unsupported metadata version %, refusing to replace it with RC50', installed;
+    END IF;
+  END IF;
+END;
+$dts_upgrade$;
+
 CREATE TABLE IF NOT EXISTS datasources(id text PRIMARY KEY,name text NOT NULL,type text NOT NULL,host text NOT NULL,port integer NOT NULL,username text NOT NULL,password_ciphertext text NOT NULL DEFAULT '',database_name text,schema_name text,created_at timestamptz NOT NULL,updated_at timestamptz NOT NULL);
 ALTER TABLE datasources ADD COLUMN IF NOT EXISTS schema_name text;
 CREATE TABLE IF NOT EXISTS migration_tasks(id text PRIMARY KEY,name text NOT NULL,source_datasource_id text NOT NULL,target_datasource_id text NOT NULL,mode text NOT NULL,status text NOT NULL,full_engine text NOT NULL,cdc_engine text,table_mappings jsonb NOT NULL DEFAULT '[]',chunk_rows bigint NOT NULL,batch_rows integer NOT NULL,parallelism integer NOT NULL,max_retries integer NOT NULL,auto_create_table boolean NOT NULL DEFAULT false,validation_enabled boolean NOT NULL DEFAULT false,validation_mode text NOT NULL DEFAULT 'CHUNK_CHECKSUM',read_limit_mbps bigint NOT NULL DEFAULT 0,write_limit_mbps bigint NOT NULL DEFAULT 0,progress double precision NOT NULL DEFAULT 0,total_chunks integer NOT NULL DEFAULT 0,finished_chunks integer NOT NULL DEFAULT 0,rows_migrated bigint NOT NULL DEFAULT 0,bytes_migrated bigint NOT NULL DEFAULT 0,speed_bytes_sec bigint NOT NULL DEFAULT 0,cdc_lag_ms bigint NOT NULL DEFAULT 0,last_error text,created_at timestamptz NOT NULL,updated_at timestamptz NOT NULL);
@@ -417,3 +436,35 @@ CREATE TABLE IF NOT EXISTS control_operation_leases(
   updated_at timestamptz NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_control_operation_leases_expiry ON control_operation_leases(lease_until);
+
+-- RC50: compare-and-swap metadata and IAM writes.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS revision bigint NOT NULL DEFAULT 0;
+ALTER TABLE migration_tasks ADD COLUMN IF NOT EXISTS revision bigint NOT NULL DEFAULT 0;
+ALTER TABLE migration_tasks ADD COLUMN IF NOT EXISTS cutover_operation jsonb;
+ALTER TABLE migration_tasks ADD COLUMN IF NOT EXISTS rollback_operation jsonb;
+ALTER TABLE migration_chunks ADD COLUMN IF NOT EXISTS lease_generation bigint NOT NULL DEFAULT 0;
+ALTER TABLE engine_jobs ADD COLUMN IF NOT EXISTS lease_generation bigint NOT NULL DEFAULT 0;
+ALTER TABLE cdc_spool_drain_leases ADD COLUMN IF NOT EXISTS generation bigint NOT NULL DEFAULT 0;
+
+CREATE TABLE IF NOT EXISTS dts_user_sessions(
+  id text PRIMARY KEY,
+  user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at timestamptz NOT NULL,
+  expires_at timestamptz NOT NULL,
+  revoked boolean NOT NULL DEFAULT false
+);
+CREATE INDEX IF NOT EXISTS idx_dts_user_sessions_user ON dts_user_sessions(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_dts_user_sessions_expiry ON dts_user_sessions(expires_at);
+
+CREATE TABLE IF NOT EXISTS dts_personal_tokens(
+  id text PRIMARY KEY,
+  user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name text NOT NULL,
+  created_at timestamptz NOT NULL,
+  expires_at timestamptz NOT NULL CHECK(expires_at > created_at)
+);
+CREATE INDEX IF NOT EXISTS idx_dts_personal_tokens_owner ON dts_personal_tokens(user_id, expires_at);
+
+INSERT INTO metadata_schema_state(id,schema_version,updated_at)
+VALUES(1,'0.15.0-rc50',now())
+ON CONFLICT(id) DO UPDATE SET schema_version=EXCLUDED.schema_version,updated_at=EXCLUDED.updated_at;

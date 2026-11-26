@@ -4,8 +4,11 @@ package integration
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"strconv"
 	"testing"
+	"time"
 
 	"dts/backend/internal/connector"
 	mysqlconnector "dts/backend/internal/connector/mysql"
@@ -14,10 +17,21 @@ import (
 )
 
 func mysqlDS() domain.DataSource {
-	return domain.DataSource{Type: domain.DataSourceMySQL, Host: env("DTS_E2E_MYSQL_HOST", "127.0.0.1"), Port: 13306, Username: "root", Password: env("DTS_E2E_MYSQL_PASSWORD", "dts"), Database: "dts_e2e"}
+	return domain.DataSource{Type: domain.DataSourceMySQL, Host: env("DTS_E2E_MYSQL_HOST", "127.0.0.1"), Port: testPort("DTS_E2E_MYSQL_PORT", 13306), Username: "root", Password: env("DTS_E2E_MYSQL_PASSWORD", "dts"), Database: "dts_e2e"}
 }
 func pgDS() domain.DataSource {
-	return domain.DataSource{Type: domain.DataSourcePostgreSQL, Host: env("DTS_E2E_POSTGRES_HOST", "127.0.0.1"), Port: 15432, Username: "postgres", Password: env("DTS_E2E_POSTGRES_PASSWORD", "dts"), Database: "dts", Schema: "dts_e2e"}
+	return domain.DataSource{Type: domain.DataSourcePostgreSQL, Host: env("DTS_E2E_POSTGRES_HOST", "127.0.0.1"), Port: testPort("DTS_E2E_POSTGRES_PORT", 15432), Username: "postgres", Password: env("DTS_E2E_POSTGRES_PASSWORD", "dts"), Database: env("DTS_E2E_POSTGRES_DATABASE", "dts"), Schema: "dts_e2e"}
+}
+
+func testPort(key string, fallback int) int {
+	if value := os.Getenv(key); value != "" {
+		port, err := strconv.Atoi(value)
+		if err != nil || port < 1 || port > 65535 {
+			panic(key + " must be a TCP port between 1 and 65535")
+		}
+		return port
+	}
+	return fallback
 }
 func env(k, d string) string {
 	if v := os.Getenv(k); v != "" {
@@ -27,6 +41,7 @@ func env(k, d string) string {
 }
 
 func TestMySQLCompositeKeysetToPostgres(t *testing.T) {
+	requireIsolated(t)
 	ctx := context.Background()
 	mr, err := mysqlconnector.NewFactory().New(mysqlDS())
 	if err != nil {
@@ -110,5 +125,55 @@ func TestMySQLCompositeKeysetToPostgres(t *testing.T) {
 	}
 	if got != 4 {
 		t.Fatalf("target rows=%d", got)
+	}
+}
+
+func TestFilteredReadAndTextRoundTrip(t *testing.T) {
+	requireIsolated(t)
+	for _, name := range []string{"mysql", "postgres"} {
+		t.Run(name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			var ds = mysqlDS()
+			var factory connector.Factory = mysqlconnector.NewFactory()
+			mode := "SET SESSION sql_mode='NO_BACKSLASH_ESCAPES'"
+			if name == "postgres" {
+				ds, factory = pgDS(), postgresconnector.NewFactory()
+				mode = "SET standard_conforming_strings=off"
+			}
+			raw, err := factory.New(ds)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer raw.Close()
+			c := raw.(nativeTarget)
+			schema := "dts_e2e"
+			if name == "postgres" {
+				if err := c.ExecSQL(ctx, "CREATE SCHEMA IF NOT EXISTS dts_e2e"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			table := fmt.Sprintf("text_roundtrip_%d", time.Now().UnixNano())
+			if err := c.ExecSQL(ctx, mode); err != nil {
+				t.Fatal(err)
+			}
+			if err := c.ExecSQL(ctx, "CREATE TABLE "+schema+"."+table+" (id bigint PRIMARY KEY, label varchar(64), payload varchar(128))"); err != nil {
+				t.Fatal(err)
+			}
+			defer c.ExecSQL(context.Background(), "DROP TABLE "+schema+"."+table)
+			cols := []domain.ColumnInfo{{Name: "id", DataType: "bigint"}, {Name: "label", DataType: "varchar"}, {Name: "payload", DataType: "varchar"}}
+			payload := "订单\\2026\nO'Brien"
+			rows := [][]connector.Value{{{Raw: []byte("1")}, {Raw: []byte("O'Brien")}, {Raw: []byte(payload)}}, {{Raw: []byte("2")}, {Raw: []byte("other")}, {Raw: []byte("ignored")}}}
+			if _, err := c.WriteBatch(ctx, connector.WriteBatchRequest{Schema: schema, Table: table, PrimaryKey: "id", Columns: cols, Rows: rows}); err != nil {
+				t.Fatal(err)
+			}
+			got, err := c.ReadBatch(ctx, connector.ReadBatchRequest{Schema: schema, Table: table, PrimaryKey: "id", Columns: cols, StartPK: 1, EndPK: 2, CustomWhere: "label = 'O''Brien'", Limit: 10})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got.Rows) != 1 || string(got.Rows[0][2].Raw) != payload {
+				t.Fatalf("unexpected filtered row or text: %+v", got)
+			}
+		})
 	}
 }

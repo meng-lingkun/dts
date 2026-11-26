@@ -2,21 +2,22 @@ package memory
 
 import (
 	"context"
+	"dts/backend/internal/domain"
+	"dts/backend/internal/repository"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
-	"dts/backend/internal/domain"
-	"dts/backend/internal/repository"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 )
 
-var ErrNotFound = fmt.Errorf("not found")
+var ErrNotFound = repository.ErrNotFound
 
 var _ repository.ControlOperationLeaser = (*Store)(nil)
 
@@ -40,12 +41,15 @@ type Store struct {
 	audits                   []domain.AuditEvent
 	taskLogs                 []domain.TaskLog
 	users                    map[string]domain.User
+	sessions                 map[string]domain.UserSession
+	personalTokens           map[string]domain.PersonalToken
 	controlOperations        map[string]persistedControlOperation
 }
 
 type persistedControlOperation struct {
 	TaskID, Operation, Owner string
 	LeaseUntil, UpdatedAt    time.Time
+	Generation               int64
 }
 
 type persistedCDCSpool struct {
@@ -88,6 +92,11 @@ type persistedDataSource struct {
 	TLSClientKeyCiphertext string
 	CreatedAt, UpdatedAt   time.Time
 }
+type persistedUser struct {
+	domain.User
+	PasswordHash string `json:"password_hash"`
+}
+
 type snapshot struct {
 	DataSources              map[string]persistedDataSource                  `json:"datasources"`
 	Migrations               map[string]domain.MigrationTask                 `json:"migrations"`
@@ -105,7 +114,9 @@ type snapshot struct {
 	Alerts                   map[string]domain.Alert                         `json:"alerts"`
 	Audits                   []domain.AuditEvent                             `json:"audits"`
 	TaskLogs                 []domain.TaskLog                                `json:"task_logs"`
-	Users                    map[string]domain.User                          `json:"users"`
+	Users                    map[string]persistedUser                        `json:"users"`
+	Sessions                 map[string]domain.UserSession                   `json:"sessions,omitempty"`
+	PersonalTokens           map[string]domain.PersonalToken                 `json:"personal_tokens,omitempty"`
 	ControlOperations        map[string]persistedControlOperation            `json:"control_operations"`
 }
 
@@ -190,8 +201,14 @@ func (s *Store) load() error {
 		s.taskLogs = snap.TaskLogs
 	}
 	if snap.Users != nil {
-		s.users = snap.Users
+		for id, stored := range snap.Users {
+			u := stored.User
+			u.PasswordHash = stored.PasswordHash
+			s.users[id] = u
+		}
 	}
+	s.sessions = snap.Sessions
+	s.personalTokens = snap.PersonalTokens
 	if snap.ControlOperations != nil {
 		s.controlOperations = snap.ControlOperations
 	}
@@ -213,7 +230,13 @@ func (s *Store) persistLocked() error {
 	for id, v := range s.cdcDeadLetters {
 		deadLetters[id] = persistedCDCDeadLetter{ID: v.ID, TaskID: v.TaskID, Direction: v.Direction, PositionType: v.PositionType, PositionValue: v.PositionValue, Resource: v.Resource, Events: v.Events, EventsCiphertext: v.EventsCiphertext, LastError: v.LastError, RetryCount: v.RetryCount, Status: v.Status, CreatedAt: v.CreatedAt, UpdatedAt: v.UpdatedAt, ResolvedAt: v.ResolvedAt}
 	}
-	snap := snapshot{DataSources: ds, Migrations: s.migrations, Tables: s.tables, Chunks: s.chunks, Workers: s.workers, EngineJobs: s.engineJobs, CDCPositions: s.cdcPositions, CDCSpool: spool, CDCDeadLetters: deadLetters, CDCConflicts: s.cdcConflicts, Validations: s.validations, ValidationArchives: s.validationArchives, ValidationReportArchives: s.validationReportArchives, Alerts: s.alerts, Audits: s.audits, TaskLogs: s.taskLogs, Users: s.users, ControlOperations: s.controlOperations}
+	users := make(map[string]persistedUser, len(s.users))
+	for id, u := range s.users {
+		users[id] = persistedUser{User: u, PasswordHash: u.PasswordHash}
+	}
+	snap := snapshot{DataSources: ds, Migrations: s.migrations, Tables: s.tables, Chunks: s.chunks, Workers: s.workers, EngineJobs: s.engineJobs, CDCPositions: s.cdcPositions, CDCSpool: spool, CDCDeadLetters: deadLetters, CDCConflicts: s.cdcConflicts, Validations: s.validations, ValidationArchives: s.validationArchives, ValidationReportArchives: s.validationReportArchives, Alerts: s.alerts, Audits: s.audits, TaskLogs: s.taskLogs, Users: users, ControlOperations: s.controlOperations}
+	snap.Sessions = s.sessions
+	snap.PersonalTokens = s.personalTokens
 	b, err := json.MarshalIndent(snap, "", "  ")
 	if err != nil {
 		return err
@@ -230,35 +253,55 @@ func (s *Store) persistLocked() error {
 
 func cloneDS(v domain.DataSource) domain.DataSource { return v }
 func cloneMigration(v domain.MigrationTask) domain.MigrationTask {
-	if v.Tables != nil {
-		v.Tables = append([]domain.TableMapping(nil), v.Tables...)
+	v.CutoverOperation = v.CutoverOperation.Clone()
+	v.RollbackOperation = v.RollbackOperation.Clone()
+	v.Tables = slices.Clone(v.Tables)
+	for i := range v.Tables {
+		v.Tables[i].Columns = slices.Clone(v.Tables[i].Columns)
+		v.Tables[i].Partitions = slices.Clone(v.Tables[i].Partitions)
 	}
-	if v.WorkerSelector != nil {
-		v.WorkerSelector = maps.Clone(v.WorkerSelector)
-	}
-	if v.RateLimitWindows != nil {
-		v.RateLimitWindows = append([]domain.RateLimitWindow(nil), v.RateLimitWindows...)
-	}
+	v.WorkerSelector = maps.Clone(v.WorkerSelector)
+	v.RateLimitWindows = slices.Clone(v.RateLimitWindows)
+	v.TransformRules = slices.Clone(v.TransformRules)
 	return v
 }
 func cloneTable(v domain.MigrationTable) domain.MigrationTable {
-	if v.Columns != nil {
-		v.Columns = append([]domain.ColumnInfo(nil), v.Columns...)
+	v.PrimaryKeys = slices.Clone(v.PrimaryKeys)
+	v.TargetPrimaryKeys = slices.Clone(v.TargetPrimaryKeys)
+	v.Columns = slices.Clone(v.Columns)
+	v.TargetColumns = slices.Clone(v.TargetColumns)
+	v.Partitions = slices.Clone(v.Partitions)
+	v.Indexes = slices.Clone(v.Indexes)
+	for i := range v.Indexes {
+		v.Indexes[i].Columns = slices.Clone(v.Indexes[i].Columns)
 	}
-	if v.TargetColumns != nil {
-		v.TargetColumns = append([]domain.ColumnInfo(nil), v.TargetColumns...)
+	v.ForeignKeys = slices.Clone(v.ForeignKeys)
+	for i := range v.ForeignKeys {
+		v.ForeignKeys[i].Columns = slices.Clone(v.ForeignKeys[i].Columns)
+		v.ForeignKeys[i].ReferencedColumns = slices.Clone(v.ForeignKeys[i].ReferencedColumns)
 	}
-	if v.TopologyPerformance != nil {
-		v.TopologyPerformance = maps.Clone(v.TopologyPerformance)
+	v.Topology = slices.Clone(v.Topology)
+	for i := range v.Topology {
+		v.Topology[i].Labels = maps.Clone(v.Topology[i].Labels)
 	}
+	v.TopologyPerformance = maps.Clone(v.TopologyPerformance)
+	for id, sample := range v.TopologyPerformance {
+		sample.DurationSamplesMS = slices.Clone(sample.DurationSamplesMS)
+		v.TopologyPerformance[id] = sample
+	}
+	return v
+}
+
+func cloneChunk(v domain.MigrationChunk) domain.MigrationChunk {
+	v.PlacementHint = maps.Clone(v.PlacementHint)
+	v.FaultDomain = maps.Clone(v.FaultDomain)
 	return v
 }
 
 func (s *Store) CreateDataSource(_ context.Context, d *domain.DataSource) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.datasources[d.ID] = cloneDS(*d)
-	return s.persistLocked()
+	return putLocked(s, s.datasources, d.ID, cloneDS(*d))
 }
 func (s *Store) ListDataSources(_ context.Context) ([]domain.DataSource, error) {
 	s.mu.RLock()
@@ -284,8 +327,7 @@ func (s *Store) GetDataSource(_ context.Context, id string) (*domain.DataSource,
 func (s *Store) CreateMigration(_ context.Context, m *domain.MigrationTask) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.migrations[m.ID] = cloneMigration(*m)
-	return s.persistLocked()
+	return putLocked(s, s.migrations, m.ID, cloneMigration(*m))
 }
 func (s *Store) ListMigrations(_ context.Context) ([]domain.MigrationTask, error) {
 	s.mu.RLock()
@@ -310,11 +352,22 @@ func (s *Store) GetMigration(_ context.Context, id string) (*domain.MigrationTas
 func (s *Store) UpdateMigration(_ context.Context, m *domain.MigrationTask) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.migrations[m.ID]; !ok {
+	previous, ok := s.migrations[m.ID]
+	if !ok {
 		return ErrNotFound
 	}
-	s.migrations[m.ID] = cloneMigration(*m)
-	return s.persistLocked()
+	if previous.Revision != m.Revision {
+		return repository.ErrConflict
+	}
+	next := cloneMigration(*m)
+	next.Revision++
+	s.migrations[m.ID] = next
+	if err := s.persistLocked(); err != nil {
+		s.migrations[m.ID] = previous
+		return err
+	}
+	m.Revision = next.Revision
+	return nil
 }
 
 func (s *Store) AcquireControlOperation(_ context.Context, taskID, operation, owner string, lease time.Duration) (bool, error) {
@@ -325,8 +378,8 @@ func (s *Store) AcquireControlOperation(_ context.Context, taskID, operation, ow
 	if exists && current.LeaseUntil.After(now) {
 		return false, nil
 	}
-	s.controlOperations[taskID] = persistedControlOperation{TaskID: taskID, Operation: operation, Owner: owner, LeaseUntil: now.Add(lease), UpdatedAt: now}
-	if err := s.persistLocked(); err != nil {
+	next := persistedControlOperation{TaskID: taskID, Operation: operation, Owner: owner, LeaseUntil: now.Add(lease), UpdatedAt: now}
+	if err := putLocked(s, s.controlOperations, taskID, next); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -336,14 +389,13 @@ func (s *Store) RenewControlOperation(_ context.Context, taskID, operation, owne
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	current, exists := s.controlOperations[taskID]
-	if !exists || current.Owner != owner || current.Operation != operation {
+	if !exists || current.Owner != owner || current.Operation != operation || !current.LeaseUntil.After(time.Now()) {
 		return repository.ErrLeaseOwner
 	}
 	now := time.Now()
 	current.LeaseUntil = now.Add(lease)
 	current.UpdatedAt = now
-	s.controlOperations[taskID] = current
-	return s.persistLocked()
+	return putLocked(s, s.controlOperations, taskID, current)
 }
 
 func (s *Store) ReleaseControlOperation(_ context.Context, taskID, operation, owner string) error {
@@ -356,15 +408,13 @@ func (s *Store) ReleaseControlOperation(_ context.Context, taskID, operation, ow
 	if current.Owner != owner || current.Operation != operation {
 		return repository.ErrLeaseOwner
 	}
-	delete(s.controlOperations, taskID)
-	return s.persistLocked()
+	return deleteLocked(s, s.controlOperations, taskID)
 }
 
 func (s *Store) CreateMigrationTable(_ context.Context, t *domain.MigrationTable) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.tables[t.ID] = cloneTable(*t)
-	return s.persistLocked()
+	return putLocked(s, s.tables, t.ID, cloneTable(*t))
 }
 func (s *Store) ListMigrationTables(_ context.Context, taskID string) ([]domain.MigrationTable, error) {
 	s.mu.RLock()
@@ -399,8 +449,7 @@ func (s *Store) UpdateMigrationTable(_ context.Context, t *domain.MigrationTable
 	if _, ok := s.tables[t.ID]; !ok {
 		return ErrNotFound
 	}
-	s.tables[t.ID] = cloneTable(*t)
-	return s.persistLocked()
+	return putLocked(s, s.tables, t.ID, cloneTable(*t))
 }
 func (s *Store) FindMigrationTableProfile(_ context.Context, sourceID, targetID, schema, table string) (*domain.MigrationTable, error) {
 	s.mu.RLock()
@@ -424,21 +473,80 @@ func (s *Store) FindMigrationTableProfile(_ context.Context, sourceID, targetID,
 	return best, nil
 }
 
-func (s *Store) CreateChunks(_ context.Context, chunks []domain.MigrationChunk) error {
+func (s *Store) CreateChunks(ctx context.Context, chunks []domain.MigrationChunk) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, c := range chunks {
-		s.chunks[c.ID] = c
+	if err := ctx.Err(); err != nil {
+		return err
 	}
-	return s.persistLocked()
+	seen := make(map[string]bool, len(chunks))
+	for _, c := range chunks {
+		if _, exists := s.chunks[c.ID]; exists || seen[c.ID] {
+			return repository.ErrConflict
+		}
+		seen[c.ID] = true
+	}
+	for _, c := range chunks {
+		s.chunks[c.ID] = cloneChunk(c)
+	}
+	if err := s.persistLocked(); err != nil {
+		for id := range seen {
+			delete(s.chunks, id)
+		}
+		return err
+	}
+	return nil
 }
+func (s *Store) SplitPendingChunk(ctx context.Context, expected domain.MigrationChunk, pieces []domain.MigrationChunk) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, ok := s.chunks[expected.ID]
+	if !ok {
+		return repository.ErrConflict
+	}
+	if err := repository.CheckPendingSplit(expected, current, pieces); err != nil {
+		return err
+	}
+	numbers := make(map[int]bool, len(pieces)-1)
+	for _, piece := range pieces[1:] {
+		if _, exists := s.chunks[piece.ID]; exists {
+			return repository.ErrConflict
+		}
+		numbers[piece.ChunkNo] = true
+	}
+	for _, other := range s.chunks {
+		if other.TaskID == current.TaskID && other.TableID == current.TableID && numbers[other.ChunkNo] {
+			return repository.ErrConflict
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	head := current
+	head.Start, head.End, head.SplitType = pieces[0].Start, pieces[0].End, pieces[0].SplitType
+	head.StartCursorJSON, head.EndCursorJSON = pieces[0].StartCursorJSON, pieces[0].EndCursorJSON
+	head.LeaseGeneration++
+	s.chunks[current.ID] = head
+	for _, piece := range pieces[1:] {
+		s.chunks[piece.ID] = cloneChunk(piece)
+	}
+	if err := s.persistLocked(); err != nil {
+		s.chunks[current.ID] = current
+		for _, piece := range pieces[1:] {
+			delete(s.chunks, piece.ID)
+		}
+		return err
+	}
+	return nil
+}
+
 func (s *Store) ListChunks(_ context.Context, taskID string) ([]domain.MigrationChunk, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	out := []domain.MigrationChunk{}
 	for _, v := range s.chunks {
 		if v.TaskID == taskID {
-			out = append(out, v)
+			out = append(out, cloneChunk(v))
 		}
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -456,19 +564,23 @@ func (s *Store) GetChunk(_ context.Context, id string) (*domain.MigrationChunk, 
 	if !ok {
 		return nil, ErrNotFound
 	}
-	return &v, nil
+	c := cloneChunk(v)
+	return &c, nil
 }
 func (s *Store) UpdateChunk(_ context.Context, c *domain.MigrationChunk) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.chunks[c.ID]; !ok {
+	old, ok := s.chunks[c.ID]
+	if !ok {
 		return ErrNotFound
 	}
-	s.chunks[c.ID] = *c
-	return s.persistLocked()
+	if old.LeaseGeneration != c.LeaseGeneration {
+		return repository.ErrConflict
+	}
+	return putLocked(s, s.chunks, c.ID, cloneChunk(*c))
 }
 
-func (s *Store) YieldChunk(_ context.Context, worker string, completed *domain.MigrationChunk, created []domain.MigrationChunk) error {
+func (s *Store) YieldChunk(ctx context.Context, worker string, completed *domain.MigrationChunk, created []domain.MigrationChunk) error {
 	if completed == nil {
 		return fmt.Errorf("yielded chunk is nil")
 	}
@@ -478,7 +590,7 @@ func (s *Store) YieldChunk(_ context.Context, worker string, completed *domain.M
 	if !ok {
 		return ErrNotFound
 	}
-	if current.Status != domain.ChunkRunning || current.WorkerID != worker {
+	if current.Status != domain.ChunkRunning || current.WorkerID != worker || current.LeaseGeneration != completed.LeaseGeneration || !repository.WorkerLeaseValid(ctx, current.LeaseGeneration, current.LeaseUntil) {
 		return repository.ErrLeaseOwner
 	}
 	for _, ch := range created {
@@ -486,11 +598,21 @@ func (s *Store) YieldChunk(_ context.Context, worker string, completed *domain.M
 			return fmt.Errorf("chunk %s already exists", ch.ID)
 		}
 	}
-	s.chunks[completed.ID] = *completed
+	next := *completed
+	next.LeaseGeneration++
+	s.chunks[completed.ID] = cloneChunk(next)
 	for _, ch := range created {
-		s.chunks[ch.ID] = ch
+		s.chunks[ch.ID] = cloneChunk(ch)
 	}
-	return s.persistLocked()
+	if err := s.persistLocked(); err != nil {
+		s.chunks[completed.ID] = current
+		for _, ch := range created {
+			delete(s.chunks, ch.ID)
+		}
+		return err
+	}
+	*completed = next
+	return nil
 }
 
 func labelsMatch(labels, selector map[string]string) bool {
@@ -528,7 +650,7 @@ func (s *Store) ClaimChunk(_ context.Context, workerID string, lease time.Durati
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := time.Now()
-	changed := false
+	previous := make(map[string]domain.MigrationChunk)
 	for id, c := range s.chunks {
 		if c.Status == domain.ChunkRunning && !c.LeaseUntil.IsZero() && now.After(c.LeaseUntil) {
 			c.Status = domain.ChunkPending
@@ -536,8 +658,8 @@ func (s *Store) ClaimChunk(_ context.Context, workerID string, lease time.Durati
 			c.LeaseUntil = time.Time{}
 			c.RetryCount++
 			c.LastError = "worker lease expired"
+			previous[id] = s.chunks[id]
 			s.chunks[id] = c
-			changed = true
 		}
 	}
 	ids := make([]string, 0, len(s.chunks))
@@ -733,43 +855,49 @@ func (s *Store) ClaimChunk(_ context.Context, workerID string, lease time.Durati
 			continue
 		}
 		c.Status = domain.ChunkRunning
+		c.LeaseGeneration++
 		c.WorkerID = workerID
 		c.LeaseUntil = now.Add(lease)
 		if c.StartedAt.IsZero() {
 			c.StartedAt = now
 		}
 		c.LastError = ""
+		if _, expired := previous[id]; !expired {
+			previous[id] = s.chunks[id]
+		}
 		s.chunks[id] = c
-		_ = s.persistLocked()
-		return &c, nil
+		if err := persistClaimsLocked(s, s.chunks, previous); err != nil {
+			return nil, err
+		}
+		claimed := cloneChunk(c)
+		return &claimed, nil
 	}
-	if changed {
-		_ = s.persistLocked()
+	if err := persistClaimsLocked(s, s.chunks, previous); err != nil {
+		return nil, err
 	}
 	return nil, repository.ErrNoChunk
 }
-func (s *Store) RenewChunkLease(_ context.Context, id, workerID string, lease time.Duration) error {
+func (s *Store) RenewChunkLease(ctx context.Context, id, workerID string, lease time.Duration) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	c, ok := s.chunks[id]
 	if !ok {
 		return ErrNotFound
 	}
-	if c.Status != domain.ChunkRunning || c.WorkerID != workerID {
+	if c.Status != domain.ChunkRunning || c.WorkerID != workerID || !repository.WorkerLeaseValid(ctx, c.LeaseGeneration, c.LeaseUntil) {
 		return repository.ErrLeaseOwner
 	}
 	c.LeaseUntil = time.Now().Add(lease)
-	s.chunks[id] = c
-	return s.persistLocked()
+	return putLocked(s, s.chunks, id, c)
 }
-func (s *Store) UpdateChunkProgress(_ context.Context, id, workerID string, progress domain.ChunkProgress) error {
+func (s *Store) UpdateChunkProgress(ctx context.Context, id, workerID string, progress domain.ChunkProgress) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	c, ok := s.chunks[id]
 	if !ok {
 		return ErrNotFound
 	}
-	if c.Status != domain.ChunkRunning || c.WorkerID != workerID {
+	if c.Status != domain.ChunkRunning || c.WorkerID != workerID || !repository.WorkerLeaseValid(ctx, c.LeaseGeneration, c.LeaseUntil) {
 		return repository.ErrLeaseOwner
 	}
 	if progress.CursorJSON != "" {
@@ -783,8 +911,7 @@ func (s *Store) UpdateChunkProgress(_ context.Context, id, workerID string, prog
 	c.LastWriteMS = progress.LastWriteMS
 	c.LastBatchRows = progress.LastBatchRows
 	c.BackpressureLevel = progress.BackpressureLevel
-	s.chunks[id] = c
-	return s.persistLocked()
+	return putLocked(s, s.chunks, id, c)
 }
 
 func (s *Store) CreateEngineJob(_ context.Context, j *domain.EngineJob) error {
@@ -793,8 +920,7 @@ func (s *Store) CreateEngineJob(_ context.Context, j *domain.EngineJob) error {
 	if _, exists := s.engineJobs[j.ID]; exists {
 		return fmt.Errorf("engine job already exists")
 	}
-	s.engineJobs[j.ID] = *j
-	return s.persistLocked()
+	return putLocked(s, s.engineJobs, j.ID, *j)
 }
 func (s *Store) GetEngineJob(_ context.Context, id string) (*domain.EngineJob, error) {
 	s.mu.RLock()
@@ -821,11 +947,14 @@ func (s *Store) ListEngineJobs(_ context.Context, taskID string) ([]domain.Engin
 func (s *Store) UpdateEngineJob(_ context.Context, j *domain.EngineJob) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.engineJobs[j.ID]; !ok {
+	old, ok := s.engineJobs[j.ID]
+	if !ok {
 		return ErrNotFound
 	}
-	s.engineJobs[j.ID] = *j
-	return s.persistLocked()
+	if old.LeaseGeneration != j.LeaseGeneration {
+		return repository.ErrConflict
+	}
+	return putLocked(s, s.engineJobs, j.ID, *j)
 }
 func (s *Store) ClaimEngineJob(_ context.Context, workerID string, lease time.Duration, capabilities []string) (*domain.EngineJob, error) {
 	s.mu.Lock()
@@ -838,7 +967,7 @@ func (s *Store) ClaimEngineJob(_ context.Context, workerID string, lease time.Du
 			caps["dts"] = true
 		}
 	}
-	changed := false
+	previous := make(map[string]domain.EngineJob)
 	for id, j := range s.engineJobs {
 		if j.Status == domain.EngineJobRunning && !j.LeaseUntil.IsZero() && j.LeaseUntil.Before(now) {
 			j.Status = domain.EngineJobPending
@@ -847,8 +976,8 @@ func (s *Store) ClaimEngineJob(_ context.Context, workerID string, lease time.Du
 			j.RetryCount++
 			j.LastError = "worker lease expired"
 			j.UpdatedAt = now
+			previous[id] = s.engineJobs[id]
 			s.engineJobs[id] = j
-			changed = true
 		}
 	}
 	ids := make([]string, 0, len(s.engineJobs))
@@ -862,6 +991,7 @@ func (s *Store) ClaimEngineJob(_ context.Context, workerID string, lease time.Du
 			continue
 		}
 		j.Status = domain.EngineJobRunning
+		j.LeaseGeneration++
 		j.WorkerID = workerID
 		j.LeaseUntil = now.Add(lease)
 		if j.StartedAt.IsZero() {
@@ -869,29 +999,33 @@ func (s *Store) ClaimEngineJob(_ context.Context, workerID string, lease time.Du
 		}
 		j.UpdatedAt = now
 		j.LastError = ""
+		if _, expired := previous[id]; !expired {
+			previous[id] = s.engineJobs[id]
+		}
 		s.engineJobs[id] = j
-		_ = s.persistLocked()
+		if err := persistClaimsLocked(s, s.engineJobs, previous); err != nil {
+			return nil, err
+		}
 		return &j, nil
 	}
-	if changed {
-		_ = s.persistLocked()
+	if err := persistClaimsLocked(s, s.engineJobs, previous); err != nil {
+		return nil, err
 	}
 	return nil, repository.ErrNoChunk
 }
-func (s *Store) RenewEngineJobLease(_ context.Context, id, workerID string, lease time.Duration) error {
+func (s *Store) RenewEngineJobLease(ctx context.Context, id, workerID string, lease time.Duration) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	j, ok := s.engineJobs[id]
 	if !ok {
 		return ErrNotFound
 	}
-	if j.Status != domain.EngineJobRunning || j.WorkerID != workerID {
+	if (j.Status != domain.EngineJobRunning && j.Status != domain.EngineJobStopRequested) || j.WorkerID != workerID || !repository.WorkerLeaseValid(ctx, j.LeaseGeneration, j.LeaseUntil) {
 		return repository.ErrLeaseOwner
 	}
 	j.LeaseUntil = time.Now().Add(lease)
 	j.UpdatedAt = time.Now()
-	s.engineJobs[id] = j
-	return s.persistLocked()
+	return putLocked(s, s.engineJobs, id, j)
 }
 
 func (s *Store) UpsertWorker(_ context.Context, w *domain.Worker) error {
@@ -904,8 +1038,7 @@ func (s *Store) UpsertWorker(_ context.Context, w *domain.Worker) error {
 	if w.Labels != nil {
 		c.Labels = maps.Clone(w.Labels)
 	}
-	s.workers[w.ID] = c
-	return s.persistLocked()
+	return putLocked(s, s.workers, w.ID, c)
 }
 func (s *Store) ListWorkers(_ context.Context) ([]domain.Worker, error) {
 	s.mu.RLock()
@@ -941,17 +1074,20 @@ func (s *Store) GetWorker(_ context.Context, id string) (*domain.Worker, error) 
 	return &c, nil
 }
 
-func (s *Store) CreateCDCPosition(_ context.Context, v *domain.CDCPosition) error {
+func (s *Store) CreateCDCPosition(ctx context.Context, v *domain.CDCPosition) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.cdcPositions = append(s.cdcPositions, *v)
+	if err := s.validateAdmissionLocked(ctx, v.TaskID, v.Direction); err != nil {
+		return err
+	}
+	next := append(s.cdcPositions, *v)
 	// RC41 replaces the old global 10k slice truncation. A busy task must never
 	// evict another paused task's newest durable CDC checkpoint. The emergency
 	// in-memory bound preserves at least the newest item for every task+direction.
-	if len(s.cdcPositions) > 60000 {
-		s.cdcPositions = compactCDCPositionsHardLimit(s.cdcPositions, 50000)
+	if len(next) > 60000 {
+		next = compactCDCPositionsHardLimit(next, 50000)
 	}
-	return s.persistLocked()
+	return replaceLocked(s, &s.cdcPositions, next)
 }
 
 func compactCDCPositionsHardLimit(in []domain.CDCPosition, limit int) []domain.CDCPosition {
@@ -997,15 +1133,25 @@ func (s *Store) ListCDCPositions(_ context.Context, taskID string, limit int) ([
 }
 
 func cloneSpool(v domain.CDCSpoolRecord) domain.CDCSpoolRecord {
-	if v.Events != nil {
-		v.Events = append([]domain.CDCEvent(nil), v.Events...)
-	}
+	v.Events = cloneEvents(v.Events)
 	return v
 }
 
-func (s *Store) CreateCDCSpool(_ context.Context, v *domain.CDCSpoolRecord) error {
+func cloneEvents(events []domain.CDCEvent) []domain.CDCEvent {
+	events = slices.Clone(events)
+	for i := range events {
+		events[i].Before = slices.Clone(events[i].Before)
+		events[i].After = slices.Clone(events[i].After)
+	}
+	return events
+}
+
+func (s *Store) CreateCDCSpool(ctx context.Context, v *domain.CDCSpoolRecord) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.validateAdmissionLocked(ctx, v.TaskID, v.Direction); err != nil {
+		return err
+	}
 	for i := range s.cdcSpool {
 		if s.cdcSpool[i].ID == v.ID {
 			v.Sequence = s.cdcSpool[i].Sequence
@@ -1018,17 +1164,21 @@ func (s *Store) CreateCDCSpool(_ context.Context, v *domain.CDCSpoolRecord) erro
 			maxSeq = s.cdcSpool[i].Sequence
 		}
 	}
-	v.Sequence = maxSeq + 1
-	if v.EventCount == 0 {
-		v.EventCount = len(v.Events)
+	next := *v
+	next.Sequence = maxSeq + 1
+	if next.EventCount == 0 {
+		next.EventCount = len(next.Events)
 	}
-	if v.PayloadBytes == 0 && len(v.Events) > 0 {
-		if b, err := json.Marshal(v.Events); err == nil {
-			v.PayloadBytes = int64(len(b))
+	if next.PayloadBytes == 0 && len(next.Events) > 0 {
+		if b, err := json.Marshal(next.Events); err == nil {
+			next.PayloadBytes = int64(len(b))
 		}
 	}
-	s.cdcSpool = append(s.cdcSpool, cloneSpool(*v))
-	return s.persistLocked()
+	if err := replaceLocked(s, &s.cdcSpool, append(s.cdcSpool, cloneSpool(next))); err != nil {
+		return err
+	}
+	*v = next
+	return nil
 }
 
 func (s *Store) ListCDCSpool(_ context.Context, taskID, direction string, limit int) ([]domain.CDCSpoolRecord, error) {
@@ -1064,19 +1214,23 @@ func (s *Store) LatestPendingCDCSpool(_ context.Context, taskID, direction strin
 		}
 	}
 	if found == nil {
-		return nil, ErrNotFound
+		return nil, nil
 	}
 	return found, nil
 }
 
-func (s *Store) MarkCDCSpoolApplied(_ context.Context, id string, at time.Time) error {
+func (s *Store) MarkCDCSpoolApplied(ctx context.Context, id string, at time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for i := range s.cdcSpool {
 		if s.cdcSpool[i].ID == id {
-			s.cdcSpool[i].Status = domain.CDCSpoolApplied
-			s.cdcSpool[i].AppliedAt = at
-			return s.persistLocked()
+			if err := s.validateAdmissionLocked(ctx, s.cdcSpool[i].TaskID, s.cdcSpool[i].Direction); err != nil {
+				return err
+			}
+			next := s.cdcSpool[i]
+			next.Status = domain.CDCSpoolApplied
+			next.AppliedAt = at
+			return replaceLocked(s, &s.cdcSpool[i], next)
 		}
 	}
 	return ErrNotFound
@@ -1102,14 +1256,13 @@ func (s *Store) DeleteAppliedCDCSpool(_ context.Context, taskID, direction strin
 	for _, idx := range applied[:remove] {
 		drop[idx] = true
 	}
-	out := s.cdcSpool[:0]
+	out := make([]domain.CDCSpoolRecord, 0, len(s.cdcSpool)-remove)
 	for i, v := range s.cdcSpool {
 		if !drop[i] {
 			out = append(out, v)
 		}
 	}
-	s.cdcSpool = out
-	return s.persistLocked()
+	return replaceLocked(s, &s.cdcSpool, out)
 }
 
 func (s *Store) CDCSpoolStats(_ context.Context, taskID, direction string) (domain.CDCSpoolStats, error) {
@@ -1132,25 +1285,27 @@ func (s *Store) CDCSpoolStats(_ context.Context, taskID, direction string) (doma
 }
 
 func cloneDeadLetter(v domain.CDCDeadLetter) domain.CDCDeadLetter {
-	if v.Events != nil {
-		v.Events = append([]domain.CDCEvent(nil), v.Events...)
-	}
+	v.Events = cloneEvents(v.Events)
 	return v
 }
-func (s *Store) CreateCDCDeadLetter(_ context.Context, v *domain.CDCDeadLetter) error {
+func (s *Store) CreateCDCDeadLetter(ctx context.Context, v *domain.CDCDeadLetter) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.cdcDeadLetters[v.ID] = cloneDeadLetter(*v)
-	return s.persistLocked()
+	if err := s.validateAdmissionLocked(ctx, v.TaskID, v.Direction); err != nil {
+		return err
+	}
+	return putLocked(s, s.cdcDeadLetters, v.ID, cloneDeadLetter(*v))
 }
-func (s *Store) UpdateCDCDeadLetter(_ context.Context, v *domain.CDCDeadLetter) error {
+func (s *Store) UpdateCDCDeadLetter(ctx context.Context, v *domain.CDCDeadLetter) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.validateAdmissionLocked(ctx, v.TaskID, v.Direction); err != nil {
+		return err
+	}
 	if _, ok := s.cdcDeadLetters[v.ID]; !ok {
 		return ErrNotFound
 	}
-	s.cdcDeadLetters[v.ID] = cloneDeadLetter(*v)
-	return s.persistLocked()
+	return putLocked(s, s.cdcDeadLetters, v.ID, cloneDeadLetter(*v))
 }
 func (s *Store) GetCDCDeadLetter(_ context.Context, id string) (*domain.CDCDeadLetter, error) {
 	s.mu.RLock()
@@ -1174,11 +1329,15 @@ func (s *Store) ListCDCDeadLetters(_ context.Context, taskID string) ([]domain.C
 	sort.Slice(out, func(i, j int) bool { return out[i].UpdatedAt.After(out[j].UpdatedAt) })
 	return out, nil
 }
-func (s *Store) DeleteCDCDeadLetter(_ context.Context, id string) error {
+func (s *Store) DeleteCDCDeadLetter(ctx context.Context, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	delete(s.cdcDeadLetters, id)
-	return s.persistLocked()
+	if v, ok := s.cdcDeadLetters[id]; ok {
+		if err := s.validateAdmissionLocked(ctx, v.TaskID, v.Direction); err != nil {
+			return err
+		}
+	}
+	return deleteLocked(s, s.cdcDeadLetters, id)
 }
 
 func (s *Store) CreateCDCConflict(_ context.Context, v *domain.CDCConflictRecord) error {
@@ -1189,11 +1348,11 @@ func (s *Store) CreateCDCConflict(_ context.Context, v *domain.CDCConflictRecord
 			return nil
 		}
 	}
-	s.cdcConflicts = append(s.cdcConflicts, *v)
-	if len(s.cdcConflicts) > 100000 {
-		s.cdcConflicts = s.cdcConflicts[len(s.cdcConflicts)-100000:]
+	next := append(s.cdcConflicts, *v)
+	if len(next) > 100000 {
+		next = next[len(next)-100000:]
 	}
-	return s.persistLocked()
+	return replaceLocked(s, &s.cdcConflicts, next)
 }
 func (s *Store) ListCDCConflicts(_ context.Context, taskID string, limit int) ([]domain.CDCConflictRecord, error) {
 	s.mu.RLock()
@@ -1213,8 +1372,7 @@ func (s *Store) ListCDCConflicts(_ context.Context, taskID string, limit int) ([
 func (s *Store) CreateValidationResult(_ context.Context, v *domain.ValidationResult) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.validations[v.ID] = *v
-	return s.persistLocked()
+	return putLocked(s, s.validations, v.ID, *v)
 }
 func (s *Store) ListValidationResults(_ context.Context, taskID string) ([]domain.ValidationResult, error) {
 	s.mu.RLock()
@@ -1231,18 +1389,23 @@ func (s *Store) ListValidationResults(_ context.Context, taskID string) ([]domai
 func (s *Store) DeleteValidationResults(_ context.Context, taskID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	removed := make(map[string]domain.ValidationResult)
 	for id, v := range s.validations {
-		if taskID == "" || v.TaskID == taskID {
+		if v.TaskID == taskID {
+			removed[id] = v
 			delete(s.validations, id)
 		}
 	}
-	return s.persistLocked()
+	if err := s.persistLocked(); err != nil {
+		maps.Copy(s.validations, removed)
+		return err
+	}
+	return nil
 }
 func (s *Store) CreateAlert(_ context.Context, a *domain.Alert) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.alerts[a.ID] = *a
-	return s.persistLocked()
+	return putLocked(s, s.alerts, a.ID, *a)
 }
 func (s *Store) ListAlerts(_ context.Context) ([]domain.Alert, error) {
 	s.mu.RLock()
@@ -1262,17 +1425,16 @@ func (s *Store) AcknowledgeAlert(_ context.Context, id string) error {
 		return ErrNotFound
 	}
 	a.Acknowledged = true
-	s.alerts[id] = a
-	return s.persistLocked()
+	return putLocked(s, s.alerts, id, a)
 }
 func (s *Store) CreateAuditEvent(_ context.Context, a *domain.AuditEvent) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.audits = append(s.audits, *a)
-	if len(s.audits) > 10000 {
-		s.audits = s.audits[len(s.audits)-10000:]
+	next := append(s.audits, *a)
+	if len(next) > 10000 {
+		next = next[len(next)-10000:]
 	}
-	return s.persistLocked()
+	return replaceLocked(s, &s.audits, next)
 }
 func (s *Store) ListAuditEvents(_ context.Context, limit int) ([]domain.AuditEvent, error) {
 	s.mu.RLock()
@@ -1295,11 +1457,11 @@ func (s *Store) ListAuditEvents(_ context.Context, limit int) ([]domain.AuditEve
 func (s *Store) CreateTaskLog(_ context.Context, v *domain.TaskLog) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.taskLogs = append(s.taskLogs, *v)
-	if len(s.taskLogs) > 20000 {
-		s.taskLogs = append([]domain.TaskLog(nil), s.taskLogs[len(s.taskLogs)-20000:]...)
+	next := append(s.taskLogs, *v)
+	if len(next) > 20000 {
+		next = append([]domain.TaskLog(nil), next[len(next)-20000:]...)
 	}
-	return s.persistLocked()
+	return replaceLocked(s, &s.taskLogs, next)
 }
 func (s *Store) ListTaskLogs(_ context.Context, taskID string, limit int) ([]domain.TaskLog, error) {
 	s.mu.RLock()
@@ -1323,8 +1485,7 @@ func (s *Store) UpdateDataSource(_ context.Context, d *domain.DataSource) error 
 	if _, ok := s.datasources[d.ID]; !ok {
 		return ErrNotFound
 	}
-	s.datasources[d.ID] = cloneDS(*d)
-	return s.persistLocked()
+	return putLocked(s, s.datasources, d.ID, cloneDS(*d))
 }
 func (s *Store) DeleteDataSource(_ context.Context, id string) error {
 	s.mu.Lock()
@@ -1337,35 +1498,96 @@ func (s *Store) DeleteDataSource(_ context.Context, id string) error {
 			return fmt.Errorf("datasource is referenced by migration %s", m.ID)
 		}
 	}
-	delete(s.datasources, id)
-	return s.persistLocked()
+	return deleteLocked(s, s.datasources, id)
 }
 
 func (s *Store) CreateUser(_ context.Context, u *domain.User) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.createUserLocked(u)
+}
+func (s *Store) CreateInitialUser(_ context.Context, u *domain.User) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.users) != 0 {
+		return repository.ErrConflict
+	}
+	return s.createUserLocked(u)
+}
+func (s *Store) createUserLocked(u *domain.User) error {
+	if _, exists := s.users[u.ID]; exists {
+		return repository.ErrConflict
+	}
 	for _, x := range s.users {
 		if x.Username == u.Username {
 			return fmt.Errorf("username already exists")
 		}
 	}
-	s.users[u.ID] = *u
-	return s.persistLocked()
+	return putLocked(s, s.users, u.ID, *u)
 }
 func (s *Store) UpdateUser(_ context.Context, u *domain.User) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.users[u.ID]; !ok {
+	previous, ok := s.users[u.ID]
+	if !ok {
 		return ErrNotFound
+	}
+	if previous.Revision != u.Revision {
+		return repository.ErrConflict
+	}
+	if previous.Enabled && previous.Role == "admin" && (!u.Enabled || u.Role != "admin") {
+		hasOther := false
+		for id, other := range s.users {
+			if id != u.ID && other.Enabled && other.Role == "admin" {
+				hasOther = true
+				break
+			}
+		}
+		if !hasOther {
+			return repository.ErrLastAdmin
+		}
 	}
 	for id, x := range s.users {
 		if id != u.ID && x.Username == u.Username {
 			return fmt.Errorf("username already exists")
 		}
 	}
-	s.users[u.ID] = *u
-	return s.persistLocked()
+	next := *u
+	next.Revision++
+	if previous.LastLoginAt.After(next.LastLoginAt) {
+		next.LastLoginAt = previous.LastLoginAt
+	}
+	s.users[u.ID] = next
+	originalTokens := s.personalTokens
+	if !next.Enabled || next.PasswordHash != previous.PasswordHash {
+		s.personalTokens = maps.Clone(originalTokens)
+		maps.DeleteFunc(s.personalTokens, func(_ string, token domain.PersonalToken) bool { return token.UserID == u.ID })
+	}
+	if err := s.persistLocked(); err != nil {
+		s.users[u.ID] = previous
+		s.personalTokens = originalTokens
+		return err
+	}
+	*u = next
+	return nil
 }
+
+// Login telemetry must not write a previously read password, role or enabled
+// flag back over a concurrent administrative security update.
+func (s *Store) UpdateUserLastLogin(_ context.Context, id string, at time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	u, ok := s.users[id]
+	if !ok {
+		return ErrNotFound
+	}
+	if at.After(u.LastLoginAt) {
+		u.LastLoginAt = at
+		return putLocked(s, s.users, id, u)
+	}
+	return nil
+}
+
 func (s *Store) GetUser(_ context.Context, id string) (*domain.User, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -1421,8 +1643,8 @@ func (s *Store) CreateValidationArchive(_ context.Context, a *domain.ValidationA
 	}
 	c := *a
 	c.Tables = append([]domain.ValidationTableArchive(nil), a.Tables...)
-	s.validationArchives[a.TaskID] = c
-	return true, s.persistLocked()
+	err := putLocked(s, s.validationArchives, a.TaskID, c)
+	return err == nil, err
 }
 
 func validationReportArchiveKey(taskID, evidenceDigest string) string {
@@ -1457,8 +1679,8 @@ func (s *Store) CreateValidationReportArchive(_ context.Context, a *domain.Valid
 		return false, nil
 	}
 	c := *a
-	s.validationReportArchives[key] = c
-	return true, s.persistLocked()
+	err := putLocked(s, s.validationReportArchives, key, c)
+	return err == nil, err
 }
 
 func (s *Store) ListValidationEvidencePage(_ context.Context, taskID, tableID string, afterChunkNo int, afterID string, limit int) ([]repository.ValidationEvidenceRow, error) {
@@ -1501,7 +1723,7 @@ func (s *Store) ListValidationEvidencePage(_ context.Context, taskID, tableID st
 			continue
 		}
 		old, ok := latest[v.ChunkID]
-		if !ok || v.FinishedAt.After(old.FinishedAt) || (v.FinishedAt.Equal(old.FinishedAt) && v.ID > old.ID) {
+		if !ok || v.NewerThan(old) {
 			latest[v.ChunkID] = v
 		}
 	}
@@ -1524,7 +1746,7 @@ func (s *Store) LatestValidationStatusCounts(_ context.Context, taskID string) (
 			continue
 		}
 		old, ok := latest[v.ChunkID]
-		if !ok || v.FinishedAt.After(old.FinishedAt) || (v.FinishedAt.Equal(old.FinishedAt) && v.ID > old.ID) {
+		if !ok || v.NewerThan(old) {
 			latest[v.ChunkID] = v
 		}
 	}
@@ -1607,14 +1829,17 @@ func (s *Store) PruneMetadata(ctx context.Context, policy repository.MetadataRet
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	result := repository.MetadataPruneResult{ValidationArchivesCreated: archivesCreated}
+	previousLogs, previousAudits, previousPositions := s.taskLogs, s.audits, s.cdcPositions
+	removed := make(map[string]domain.ValidationResult)
 
 	if len(s.taskLogs) > 0 && (policy.TaskLogMaxAge > 0 || policy.TaskLogMaxRowsPerTask > 0) {
-		sort.SliceStable(s.taskLogs, func(i, j int) bool { return s.taskLogs[i].CreatedAt.Before(s.taskLogs[j].CreatedAt) })
-		kept := make([]domain.TaskLog, 0, len(s.taskLogs))
+		ordered := slices.Clone(s.taskLogs)
+		sort.SliceStable(ordered, func(i, j int) bool { return ordered[i].CreatedAt.Before(ordered[j].CreatedAt) })
+		kept := make([]domain.TaskLog, 0, len(ordered))
 		counts := map[string]int{}
-		keep := make([]bool, len(s.taskLogs))
-		for i := len(s.taskLogs) - 1; i >= 0; i-- {
-			v := s.taskLogs[i]
+		keep := make([]bool, len(ordered))
+		for i := len(ordered) - 1; i >= 0; i-- {
+			v := ordered[i]
 			tooOld := policy.TaskLogMaxAge > 0 && !v.CreatedAt.IsZero() && now.Sub(v.CreatedAt) > policy.TaskLogMaxAge
 			overRows := policy.TaskLogMaxRowsPerTask > 0 && counts[v.TaskID] >= policy.TaskLogMaxRowsPerTask
 			if tooOld || overRows {
@@ -1624,7 +1849,7 @@ func (s *Store) PruneMetadata(ctx context.Context, policy repository.MetadataRet
 			keep[i] = true
 			counts[v.TaskID]++
 		}
-		for i, v := range s.taskLogs {
+		for i, v := range ordered {
 			if keep[i] {
 				kept = append(kept, v)
 			}
@@ -1633,12 +1858,13 @@ func (s *Store) PruneMetadata(ctx context.Context, policy repository.MetadataRet
 	}
 
 	if len(s.audits) > 0 && (policy.AuditMaxAge > 0 || policy.AuditMaxRows > 0) {
-		sort.SliceStable(s.audits, func(i, j int) bool { return s.audits[i].CreatedAt.Before(s.audits[j].CreatedAt) })
-		kept := make([]domain.AuditEvent, 0, len(s.audits))
-		keep := make([]bool, len(s.audits))
+		ordered := slices.Clone(s.audits)
+		sort.SliceStable(ordered, func(i, j int) bool { return ordered[i].CreatedAt.Before(ordered[j].CreatedAt) })
+		kept := make([]domain.AuditEvent, 0, len(ordered))
+		keep := make([]bool, len(ordered))
 		count := 0
-		for i := len(s.audits) - 1; i >= 0; i-- {
-			v := s.audits[i]
+		for i := len(ordered) - 1; i >= 0; i-- {
+			v := ordered[i]
 			tooOld := policy.AuditMaxAge > 0 && !v.CreatedAt.IsZero() && now.Sub(v.CreatedAt) > policy.AuditMaxAge
 			overRows := policy.AuditMaxRows > 0 && count >= policy.AuditMaxRows
 			if tooOld || overRows {
@@ -1648,7 +1874,7 @@ func (s *Store) PruneMetadata(ctx context.Context, policy repository.MetadataRet
 			keep[i] = true
 			count++
 		}
-		for i, v := range s.audits {
+		for i, v := range ordered {
 			if keep[i] {
 				kept = append(kept, v)
 			}
@@ -1657,13 +1883,14 @@ func (s *Store) PruneMetadata(ctx context.Context, policy repository.MetadataRet
 	}
 
 	if len(s.cdcPositions) > 0 && (policy.CDCPositionMaxAge > 0 || policy.CDCPositionMaxRowsPerStream > 0) {
-		sort.SliceStable(s.cdcPositions, func(i, j int) bool { return s.cdcPositions[i].RecordedAt.Before(s.cdcPositions[j].RecordedAt) })
-		kept := make([]domain.CDCPosition, 0, len(s.cdcPositions))
-		keep := make([]bool, len(s.cdcPositions))
+		ordered := slices.Clone(s.cdcPositions)
+		sort.SliceStable(ordered, func(i, j int) bool { return ordered[i].RecordedAt.Before(ordered[j].RecordedAt) })
+		kept := make([]domain.CDCPosition, 0, len(ordered))
+		keep := make([]bool, len(ordered))
 		seen := map[string]bool{}
 		counts := map[string]int{}
-		for i := len(s.cdcPositions) - 1; i >= 0; i-- {
-			v := s.cdcPositions[i]
+		for i := len(ordered) - 1; i >= 0; i-- {
+			v := ordered[i]
 			key := v.TaskID + "\x00" + v.Direction
 			isNewest := !seen[key]
 			seen[key] = true
@@ -1676,7 +1903,7 @@ func (s *Store) PruneMetadata(ctx context.Context, policy repository.MetadataRet
 			keep[i] = true
 			counts[key]++
 		}
-		for i, v := range s.cdcPositions {
+		for i, v := range ordered {
 			if keep[i] {
 				kept = append(kept, v)
 			}
@@ -1713,6 +1940,7 @@ func (s *Store) PruneMetadata(ctx context.Context, policy repository.MetadataRet
 					deleteAttempt = true
 				}
 				if deleteAttempt {
+					removed[v.ID] = v
 					delete(s.validations, v.ID)
 					result.ValidationDeleted++
 				}
@@ -1723,7 +1951,12 @@ func (s *Store) PruneMetadata(ctx context.Context, policy repository.MetadataRet
 	if result.TotalDeleted() == 0 {
 		return result, nil
 	}
-	return result, s.persistLocked()
+	if err := s.persistLocked(); err != nil {
+		s.taskLogs, s.audits, s.cdcPositions = previousLogs, previousAudits, previousPositions
+		maps.Copy(s.validations, removed)
+		return repository.MetadataPruneResult{ValidationArchivesCreated: archivesCreated}, err
+	}
+	return result, nil
 }
 
 func (s *Store) SummarizeTaskChunks(_ context.Context, taskID string) (repository.TaskChunkSummary, error) {
@@ -1800,19 +2033,13 @@ func (s *Store) CountTableRunnable(_ context.Context, taskID, tableID string) (r
 	return out, nil
 }
 
-func cloneHotChunk(c domain.MigrationChunk) domain.MigrationChunk {
-	c.PlacementHint = maps.Clone(c.PlacementHint)
-	c.FaultDomain = maps.Clone(c.FaultDomain)
-	return c
-}
-
 func (s *Store) ListPendingTableChunks(_ context.Context, taskID, tableID string) ([]domain.MigrationChunk, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	out := make([]domain.MigrationChunk, 0)
 	for _, c := range s.chunks {
 		if c.TaskID == taskID && c.TableID == tableID && c.Status == domain.ChunkPending {
-			out = append(out, cloneHotChunk(c))
+			out = append(out, cloneChunk(c))
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ChunkNo < out[j].ChunkNo })
@@ -1825,7 +2052,7 @@ func (s *Store) ListRunningTopologyChunks(_ context.Context, taskID, topologyID 
 	out := make([]domain.MigrationChunk, 0)
 	for _, c := range s.chunks {
 		if c.TaskID == taskID && c.Status == domain.ChunkRunning && c.TopologyID == topologyID {
-			out = append(out, cloneHotChunk(c))
+			out = append(out, cloneChunk(c))
 		}
 	}
 	return out, nil
@@ -1837,7 +2064,7 @@ func (s *Store) ListRunningFaultDomainChunks(_ context.Context, taskID, scope, v
 	out := make([]domain.MigrationChunk, 0)
 	for _, c := range s.chunks {
 		if c.TaskID == taskID && c.Status == domain.ChunkRunning && c.FaultDomain[scope] == value {
-			out = append(out, cloneHotChunk(c))
+			out = append(out, cloneChunk(c))
 		}
 	}
 	return out, nil
@@ -1857,7 +2084,7 @@ func (s *Store) ListTableChunksPage(_ context.Context, taskID, tableID string, a
 		if ch.ChunkNo < afterChunkNo || (ch.ChunkNo == afterChunkNo && ch.ID <= afterID) {
 			continue
 		}
-		out = append(out, ch)
+		out = append(out, cloneChunk(ch))
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].ChunkNo == out[j].ChunkNo {
@@ -1870,6 +2097,33 @@ func (s *Store) ListTableChunksPage(_ context.Context, taskID, tableID string, a
 	}
 	return out, nil
 }
+func (s *Store) NumericRangeCoverage(ctx context.Context, table domain.MigrationTable) (bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	type interval struct{ start, end int64 }
+	var ranges []interval
+	for _, c := range s.chunks {
+		if c.TaskID == table.TaskID && c.TableID == table.ID {
+			switch c.SplitType {
+			case "PRIMARY_KEY_RANGE", "PK_RANGE", "PK_RANGE_ADAPTIVE", "PK_RANGE_REBALANCED":
+				ranges = append(ranges, interval{c.Start, c.End})
+			default:
+				return false, nil
+			}
+		}
+	}
+	sort.Slice(ranges, func(i, j int) bool { return ranges[i].start < ranges[j].start })
+	if len(ranges) == 0 || ranges[0].start != table.MinPK || ranges[len(ranges)-1].end != table.MaxPK {
+		return false, nil
+	}
+	for i, r := range ranges {
+		if r.start > r.end || i > 0 && (ranges[i-1].end >= r.start || ranges[i-1].end+1 != r.start) {
+			return false, nil
+		}
+	}
+	return true, ctx.Err()
+}
+
 func (s *Store) HasValidationResults(_ context.Context, taskID string) (bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -1889,7 +2143,7 @@ func (s *Store) FirstInvalidSuccessfulChunk(_ context.Context, taskID string) (s
 			continue
 		}
 		old, ok := latest[v.ChunkID]
-		if !ok || v.FinishedAt.After(old.FinishedAt) {
+		if !ok || v.NewerThan(old) {
 			latest[v.ChunkID] = v
 		}
 	}
@@ -1928,7 +2182,7 @@ func (s *Store) ListRepairableValidationChunkIDs(_ context.Context, taskID strin
 			continue
 		}
 		old, ok := latest[v.ChunkID]
-		if !ok || v.FinishedAt.After(old.FinishedAt) {
+		if !ok || v.NewerThan(old) {
 			latest[v.ChunkID] = v
 		}
 	}

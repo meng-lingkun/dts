@@ -11,6 +11,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -735,6 +736,10 @@ func readLenEncInt(b []byte, pos int) (uint64, int, bool) {
 
 func quoteIdent(s string) string { return "`" + strings.ReplaceAll(s, "`", "``") + "`" }
 func quoteSQLString(s string) string {
-	r := strings.NewReplacer("\\", "\\\\", "\x00", "\\0", "\n", "\\n", "\r", "\\r", "\x1a", "\\Z", "'", "\\'")
-	return "'" + r.Replace(s) + "'"
+	// Backslash has different meanings under NO_BACKSLASH_ESCAPES. Use a
+	// character-set-introduced hex string for byte-sensitive text.
+	if strings.ContainsAny(s, "\\\x00\n\r\x1a") {
+		return "_utf8mb4 X'" + hex.EncodeToString([]byte(s)) + "'"
+	}
+	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 }

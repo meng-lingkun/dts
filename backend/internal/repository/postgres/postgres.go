@@ -2,13 +2,13 @@ package postgres
 
 import (
 	"context"
+	"dts/backend/internal/connector/postgres"
+	"dts/backend/internal/domain"
+	"dts/backend/internal/repository"
 	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"dts/backend/internal/connector/postgres"
-	"dts/backend/internal/domain"
-	"dts/backend/internal/repository"
 	"sort"
 	"strconv"
 	"strings"
@@ -18,21 +18,21 @@ import (
 //go:embed schema.sql
 var schemaSQL string
 
-type Store struct{ db *postgresconnector.Connector }
+type Store struct{ db *metadataPool }
 
 var _ repository.ControlOperationLeaser = (*Store)(nil)
 
 func New(ctx context.Context, ds domain.DataSource, autoMigrate bool) (*Store, error) {
-	raw, err := postgresconnector.NewFactory().New(ds)
+	return NewWithPoolSize(ctx, ds, autoMigrate, 4)
+}
+
+func NewWithPoolSize(ctx context.Context, ds domain.DataSource, autoMigrate bool, size int) (*Store, error) {
+	db, err := newMetadataPool(ds, size)
 	if err != nil {
 		return nil, err
 	}
-	db, ok := raw.(*postgresconnector.Connector)
-	if !ok {
-		return nil, errors.New("invalid PostgreSQL connector")
-	}
 	s := &Store{db: db}
-	if err := db.TestConnection(ctx); err != nil {
+	if _, err := db.QuerySQL(ctx, "SELECT 1"); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -89,16 +89,22 @@ ORDER BY c.relname`
 // the idempotent schema bootstrap. Readiness uses it to reject partially
 // upgraded PostgreSQL metadata repositories.
 func (s *Store) MetadataSchemaVersion(ctx context.Context) (string, error) {
-	r, err := s.db.QuerySQL(ctx, "SELECT schema_version FROM metadata_schema_state WHERE id=1")
+	r, err := s.db.QuerySQL(ctx, "SELECT schema_version,to_regclass('dts_user_sessions') IS NOT NULL,to_regclass('dts_personal_tokens') IS NOT NULL FROM metadata_schema_state WHERE id=1")
 	if err != nil {
 		return "", err
 	}
 	if len(r.Rows) == 0 || len(r.Rows[0]) == 0 {
 		return "", errors.New("metadata schema version is not initialized")
 	}
+	if sv(r.Rows[0], 0) == "0.15.0-rc50" && !bv(r.Rows[0], 1) {
+		return "", errors.New("metadata lacks the session registry; apply migration 084_v015_rc50_user_sessions.sql")
+	}
+	if sv(r.Rows[0], 0) == "0.15.0-rc50" && !bv(r.Rows[0], 2) {
+		return "", errors.New("metadata lacks the personal token registry; apply migration 085_v015_rc50_personal_tokens.sql")
+	}
 	return sv(r.Rows[0], 0), nil
 }
-func qs(v string) string { return "'" + strings.ReplaceAll(v, "'", "''") + "'" }
+func qs(v string) string { return postgresconnector.QuoteTextLiteral(v) }
 func qn(v string) string {
 	if v == "" {
 		return "NULL"
@@ -172,7 +178,7 @@ func (s *Store) ListDataSources(ctx context.Context) ([]domain.DataSource, error
 	return out, nil
 }
 func (s *Store) GetDataSource(ctx context.Context, id string) (*domain.DataSource, error) {
-	r, e := s.db.QuerySQL(ctx, "SELECT "+datasourceCols()+" FROM datasources WHERE id="+qs(id))
+	r, e := s.db.QueryParams(ctx, "SELECT "+datasourceCols()+" FROM datasources WHERE id=$1", id)
 	if e != nil {
 		return nil, e
 	}
@@ -184,7 +190,7 @@ func (s *Store) GetDataSource(ctx context.Context, id string) (*domain.DataSourc
 }
 
 func migrationCols() string {
-	return "id,name,source_datasource_id,target_datasource_id,mode,status,full_engine,COALESCE(cdc_engine,''),table_mappings::text,chunk_rows,batch_rows,parallelism,max_retries,auto_create_table,validation_enabled,validation_mode,read_limit_mbps,write_limit_mbps,progress,total_chunks,finished_chunks,rows_migrated,bytes_migrated,speed_bytes_sec,cdc_lag_ms,cdc_start_timestamp_ms,COALESCE(cdc_start_position_type,''),COALESCE(cdc_start_position_value,''),COALESCE(cdc_start_resource,''),COALESCE(last_error,'')," + epoch("created_at") + "," + epoch("updated_at") + ",COALESCE(paused_from_status,''),COALESCE(post_load_ddl_mode,'INDEXES'),COALESCE(rollback_cdc_engine,''),COALESCE(cdc_ddl_mode,'REJECT'),COALESCE(cdc_conflict_mode,'SOURCE_WINS'),COALESCE(cdc_conflict_column,'')," + epoch("sequence_synced_at") + ",COALESCE(worker_selector_json,'{}'::jsonb)::text,COALESCE(worker_affinity,'PREFERRED'),COALESCE(NULLIF(effective_parallelism,0),parallelism),COALESCE(flow_control_level,'NORMAL'),COALESCE(flow_control_reason,''),rows_limit_per_sec,qps_limit,COALESCE(rate_limit_timezone,'Local'),COALESCE(rate_limit_windows,'[]'::jsonb)::text,speed_rows_sec,eta_seconds,COALESCE(transform_rules_json,'[]'::jsonb)::text,COALESCE(validation_barrier_position_type,''),COALESCE(validation_barrier_position_value,''),COALESCE(validation_barrier_resource,'')," + epoch("validation_barrier_captured_at") + ",COALESCE(cdc_spool_growth_bytes_sec,0),COALESCE(cdc_spool_critical_eta_seconds,0),COALESCE(target_throughput_mbps,0),COALESCE(auto_throughput_enabled,false),COALESCE(completion_sla_seconds,0)," + epoch("sla_started_at") + ",COALESCE(controller_target_bytes_sec,0),COALESCE(throughput_controller_reason,''),COALESCE(adaptive_hotspot_splits,0),COALESCE(adaptive_running_yields,0),COALESCE(controller_auto_probe_pct,0),COALESCE(controller_sla_headroom_pct,0),COALESCE(controller_learning_samples,0),COALESCE(sla_p95_eta_seconds,0),COALESCE(sla_p99_eta_seconds,0),COALESCE(sla_risk_level,''),COALESCE(sla_risk_reason,''),COALESCE(adaptive_topology_drains,0),COALESCE(adaptive_topology_degraded_yields,0),COALESCE(adaptive_fault_domain_yields,0)"
+	return "id,name,source_datasource_id,target_datasource_id,mode,status,full_engine,COALESCE(cdc_engine,''),table_mappings::text,chunk_rows,batch_rows,parallelism,max_retries,auto_create_table,validation_enabled,validation_mode,read_limit_mbps,write_limit_mbps,progress,total_chunks,finished_chunks,rows_migrated,bytes_migrated,speed_bytes_sec,cdc_lag_ms,cdc_start_timestamp_ms,COALESCE(cdc_start_position_type,''),COALESCE(cdc_start_position_value,''),COALESCE(cdc_start_resource,''),COALESCE(last_error,'')," + epoch("created_at") + "," + epoch("updated_at") + ",COALESCE(paused_from_status,''),COALESCE(post_load_ddl_mode,'INDEXES'),COALESCE(rollback_cdc_engine,''),COALESCE(cdc_ddl_mode,'REJECT'),COALESCE(cdc_conflict_mode,'SOURCE_WINS'),COALESCE(cdc_conflict_column,'')," + epoch("sequence_synced_at") + ",COALESCE(worker_selector_json,'{}'::jsonb)::text,COALESCE(worker_affinity,'PREFERRED'),COALESCE(NULLIF(effective_parallelism,0),parallelism),COALESCE(flow_control_level,'NORMAL'),COALESCE(flow_control_reason,''),rows_limit_per_sec,qps_limit,COALESCE(rate_limit_timezone,'Local'),COALESCE(rate_limit_windows,'[]'::jsonb)::text,speed_rows_sec,eta_seconds,COALESCE(transform_rules_json,'[]'::jsonb)::text,COALESCE(validation_barrier_position_type,''),COALESCE(validation_barrier_position_value,''),COALESCE(validation_barrier_resource,'')," + epoch("validation_barrier_captured_at") + ",COALESCE(cdc_spool_growth_bytes_sec,0),COALESCE(cdc_spool_critical_eta_seconds,0),COALESCE(target_throughput_mbps,0),COALESCE(auto_throughput_enabled,false),COALESCE(completion_sla_seconds,0)," + epoch("sla_started_at") + ",COALESCE(controller_target_bytes_sec,0),COALESCE(throughput_controller_reason,''),COALESCE(adaptive_hotspot_splits,0),COALESCE(adaptive_running_yields,0),COALESCE(controller_auto_probe_pct,0),COALESCE(controller_sla_headroom_pct,0),COALESCE(controller_learning_samples,0),COALESCE(sla_p95_eta_seconds,0),COALESCE(sla_p99_eta_seconds,0),COALESCE(sla_risk_level,''),COALESCE(sla_risk_reason,''),COALESCE(adaptive_topology_drains,0),COALESCE(adaptive_topology_degraded_yields,0),COALESCE(adaptive_fault_domain_yields,0),revision,cutover_operation::text,rollback_operation::text"
 }
 func parseMigration(row [][]byte) domain.MigrationTask {
 	m := domain.MigrationTask{ID: sv(row, 0), Name: sv(row, 1), SourceID: sv(row, 2), TargetID: sv(row, 3), Mode: domain.MigrationMode(sv(row, 4)), Status: domain.MigrationStatus(sv(row, 5)), FullEngine: sv(row, 6), CDCEngine: sv(row, 7), ChunkRows: iv(row, 9), BatchRows: int(iv(row, 10)), Parallelism: int(iv(row, 11)), MaxRetries: int(iv(row, 12)), AutoCreateTable: bv(row, 13), ValidationEnabled: bv(row, 14), ValidationMode: sv(row, 15), ReadLimitMBps: iv(row, 16), WriteLimitMBps: iv(row, 17), Progress: fv(row, 18), TotalChunks: int(iv(row, 19)), FinishedChunks: int(iv(row, 20)), RowsMigrated: iv(row, 21), BytesMigrated: iv(row, 22), SpeedBytesSec: iv(row, 23), CDCLagMS: iv(row, 24), CDCStartTimestampMS: iv(row, 25), CDCStartPositionType: sv(row, 26), CDCStartPositionValue: sv(row, 27), CDCStartResource: sv(row, 28), LastError: sv(row, 29), CreatedAt: tv(row, 30), UpdatedAt: tv(row, 31), PausedFromStatus: domain.MigrationStatus(sv(row, 32)), PostLoadDDLMode: sv(row, 33), RollbackCDCEngine: sv(row, 34), CDCDDLMode: sv(row, 35), CDCConflictMode: sv(row, 36), CDCConflictColumn: sv(row, 37), SequenceSyncedAt: tv(row, 38), WorkerAffinity: sv(row, 40), EffectiveParallelism: int(iv(row, 41)), FlowControlLevel: sv(row, 42), FlowControlReason: sv(row, 43), RowsLimitPerSec: iv(row, 44), QPSLimit: int(iv(row, 45)), RateLimitTimezone: sv(row, 46), SpeedRowsSec: iv(row, 48), ETASeconds: iv(row, 49)}
@@ -216,10 +222,13 @@ func parseMigration(row [][]byte) domain.MigrationTask {
 	m.AdaptiveTopologyDrains = iv(row, 72)
 	m.AdaptiveTopologyDegradedYields = iv(row, 73)
 	m.AdaptiveFaultDomainYields = iv(row, 74)
+	_ = json.Unmarshal([]byte(sv(row, 76)), &m.CutoverOperation)
+	_ = json.Unmarshal([]byte(sv(row, 77)), &m.RollbackOperation)
+	m.Revision = iv(row, 75)
 	return m
 }
 func (s *Store) CreateMigration(ctx context.Context, m *domain.MigrationTask) error {
-	q := fmt.Sprintf("INSERT INTO migration_tasks(id,name,source_datasource_id,target_datasource_id,mode,status,full_engine,cdc_engine,table_mappings,chunk_rows,batch_rows,parallelism,max_retries,auto_create_table,validation_enabled,validation_mode,read_limit_mbps,write_limit_mbps,progress,total_chunks,finished_chunks,rows_migrated,bytes_migrated,speed_bytes_sec,cdc_lag_ms,cdc_start_timestamp_ms,cdc_start_position_type,cdc_start_position_value,cdc_start_resource,last_error,created_at,updated_at,paused_from_status,post_load_ddl_mode,rollback_cdc_engine,cdc_ddl_mode,cdc_conflict_mode,cdc_conflict_column,sequence_synced_at,worker_selector_json,worker_affinity,effective_parallelism,flow_control_level,flow_control_reason,rows_limit_per_sec,qps_limit,rate_limit_timezone,rate_limit_windows,speed_rows_sec,eta_seconds,transform_rules_json,validation_barrier_position_type,validation_barrier_position_value,validation_barrier_resource,validation_barrier_captured_at,cdc_spool_growth_bytes_sec,cdc_spool_critical_eta_seconds,target_throughput_mbps,auto_throughput_enabled,completion_sla_seconds,sla_started_at,controller_target_bytes_sec,throughput_controller_reason,adaptive_hotspot_splits) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%d,%d,%d,%d,%s,%s,%s,%d,%d,%f,%d,%d,%d,%d,%d,%d,%d,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%d,%s,%s,%d,%d,%s,%s,%d,%d,%s,%s,%s,%s,%s,%d,%d,%d,%s,%d,%s,%d,%s,%d)", qs(m.ID), qs(m.Name), qs(m.SourceID), qs(m.TargetID), qs(string(m.Mode)), qs(string(m.Status)), qs(m.FullEngine), qn(m.CDCEngine), ji(m.Tables), m.ChunkRows, m.BatchRows, m.Parallelism, m.MaxRetries, qb(m.AutoCreateTable), qb(m.ValidationEnabled), qs(m.ValidationMode), m.ReadLimitMBps, m.WriteLimitMBps, m.Progress, m.TotalChunks, m.FinishedChunks, m.RowsMigrated, m.BytesMigrated, m.SpeedBytesSec, m.CDCLagMS, m.CDCStartTimestampMS, qn(m.CDCStartPositionType), qn(m.CDCStartPositionValue), qn(m.CDCStartResource), qn(m.LastError), qt(m.CreatedAt), qt(m.UpdatedAt), qn(string(m.PausedFromStatus)), qs(m.PostLoadDDLMode), qn(m.RollbackCDCEngine), qs(m.CDCDDLMode), qs(m.CDCConflictMode), qn(m.CDCConflictColumn), qt(m.SequenceSyncedAt), ji(m.WorkerSelector), qs(m.WorkerAffinity), m.EffectiveParallelism, qs(m.FlowControlLevel), qn(m.FlowControlReason), m.RowsLimitPerSec, m.QPSLimit, qs(m.RateLimitTimezone), ji(m.RateLimitWindows), m.SpeedRowsSec, m.ETASeconds, ji(m.TransformRules), qn(m.ValidationBarrierPositionType), qn(m.ValidationBarrierPositionValue), qn(m.ValidationBarrierResource), qt(m.ValidationBarrierCapturedAt), m.CDCSpoolGrowthBytesSec, m.CDCSpoolCriticalETASeconds, m.TargetThroughputMBps, qb(m.AutoThroughputEnabled), m.CompletionSLASeconds, qt(m.SLAStartedAt), m.ControllerTargetBytesSec, qn(m.ThroughputControllerReason), m.AdaptiveHotspotSplits)
+	q := fmt.Sprintf("INSERT INTO migration_tasks(id,name,source_datasource_id,target_datasource_id,mode,status,full_engine,cdc_engine,table_mappings,chunk_rows,batch_rows,parallelism,max_retries,auto_create_table,validation_enabled,validation_mode,read_limit_mbps,write_limit_mbps,progress,total_chunks,finished_chunks,rows_migrated,bytes_migrated,speed_bytes_sec,cdc_lag_ms,cdc_start_timestamp_ms,cdc_start_position_type,cdc_start_position_value,cdc_start_resource,last_error,created_at,updated_at,paused_from_status,post_load_ddl_mode,rollback_cdc_engine,cdc_ddl_mode,cdc_conflict_mode,cdc_conflict_column,sequence_synced_at,worker_selector_json,worker_affinity,effective_parallelism,flow_control_level,flow_control_reason,rows_limit_per_sec,qps_limit,rate_limit_timezone,rate_limit_windows,speed_rows_sec,eta_seconds,transform_rules_json,validation_barrier_position_type,validation_barrier_position_value,validation_barrier_resource,validation_barrier_captured_at,cdc_spool_growth_bytes_sec,cdc_spool_critical_eta_seconds,target_throughput_mbps,auto_throughput_enabled,completion_sla_seconds,sla_started_at,controller_target_bytes_sec,throughput_controller_reason,adaptive_hotspot_splits) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%d,%d,%d,%d,%s,%s,%s,%d,%d,%f,%d,%d,%d,%d,%d,%d,%d,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%d,%s,%s,%d,%d,%s,%s,%d,%d,%s,%s,%s,%s,%s,%d,%d,%d,%s,%d,%s,%d,%s,%d)", qs(m.ID), qs(m.Name), qs(m.SourceID), qs(m.TargetID), qs(string(m.Mode)), qs(string(m.Status)), qs(m.FullEngine), qn(m.CDCEngine), ji(m.Tables), m.ChunkRows, m.BatchRows, m.Parallelism, m.MaxRetries, qb(m.AutoCreateTable), qb(m.ValidationEnabled), qs(m.ValidationMode), m.ReadLimitMBps, m.WriteLimitMBps, m.Progress, m.TotalChunks, m.FinishedChunks, m.RowsMigrated, m.BytesMigrated, m.SpeedBytesSec, m.CDCLagMS, m.CDCStartTimestampMS, qn(m.CDCStartPositionType), qn(m.CDCStartPositionValue), qn(m.CDCStartResource), qn(m.LastError), qt(m.CreatedAt), qt(m.UpdatedAt), qn(string(m.PausedFromStatus)), qs(m.PostLoadDDLMode), qn(m.RollbackCDCEngine), qs(m.CDCDDLMode), qs(m.CDCConflictMode), qn(m.CDCConflictColumn), qt(m.SequenceSyncedAt), ji(m.WorkerSelector), qs(m.WorkerAffinity), m.EffectiveParallelism, qs(m.FlowControlLevel), qs(m.FlowControlReason), m.RowsLimitPerSec, m.QPSLimit, qs(m.RateLimitTimezone), ji(m.RateLimitWindows), m.SpeedRowsSec, m.ETASeconds, ji(m.TransformRules), qn(m.ValidationBarrierPositionType), qn(m.ValidationBarrierPositionValue), qn(m.ValidationBarrierResource), qt(m.ValidationBarrierCapturedAt), m.CDCSpoolGrowthBytesSec, m.CDCSpoolCriticalETASeconds, m.TargetThroughputMBps, qb(m.AutoThroughputEnabled), m.CompletionSLASeconds, qt(m.SLAStartedAt), m.ControllerTargetBytesSec, qn(m.ThroughputControllerReason), m.AdaptiveHotspotSplits)
 	return s.db.ExecSQL(ctx, q)
 }
 
@@ -235,19 +244,28 @@ func (s *Store) ListMigrations(ctx context.Context) ([]domain.MigrationTask, err
 	return out, nil
 }
 func (s *Store) GetMigration(ctx context.Context, id string) (*domain.MigrationTask, error) {
-	r, e := s.db.QuerySQL(ctx, "SELECT "+migrationCols()+" FROM migration_tasks WHERE id="+qs(id))
+	r, e := s.db.QueryParams(ctx, "SELECT "+migrationCols()+" FROM migration_tasks WHERE id=$1", id)
 	if e != nil {
 		return nil, e
 	}
 	if len(r.Rows) == 0 {
-		return nil, errors.New("not found")
+		return nil, repository.ErrNotFound
 	}
 	v := parseMigration(r.Rows[0])
 	return &v, nil
 }
 func (s *Store) UpdateMigration(ctx context.Context, m *domain.MigrationTask) error {
-	q := fmt.Sprintf("UPDATE migration_tasks SET name=%s,mode=%s,status=%s,full_engine=%s,cdc_engine=%s,table_mappings=%s,chunk_rows=%d,batch_rows=%d,parallelism=%d,max_retries=%d,auto_create_table=%s,validation_enabled=%s,validation_mode=%s,read_limit_mbps=%d,write_limit_mbps=%d,target_throughput_mbps=%d,auto_throughput_enabled=%s,completion_sla_seconds=%d,sla_started_at=%s,controller_target_bytes_sec=%d,throughput_controller_reason=%s,adaptive_hotspot_splits=%d,adaptive_running_yields=%d,adaptive_topology_drains=%d,adaptive_topology_degraded_yields=%d,adaptive_fault_domain_yields=%d,controller_auto_probe_pct=%d,controller_sla_headroom_pct=%d,controller_learning_samples=%d,sla_p95_eta_seconds=%d,sla_p99_eta_seconds=%d,sla_risk_level=%s,sla_risk_reason=%s,worker_selector_json=%s,worker_affinity=%s,effective_parallelism=%d,flow_control_level=%s,flow_control_reason=%s,cdc_spool_growth_bytes_sec=%d,cdc_spool_critical_eta_seconds=%d,rows_limit_per_sec=%d,qps_limit=%d,rate_limit_timezone=%s,rate_limit_windows=%s,transform_rules_json=%s,speed_rows_sec=%d,eta_seconds=%d,progress=%f,total_chunks=%d,finished_chunks=%d,rows_migrated=%d,bytes_migrated=%d,speed_bytes_sec=%d,cdc_lag_ms=%d,cdc_start_timestamp_ms=%d,cdc_start_position_type=%s,cdc_start_position_value=%s,cdc_start_resource=%s,last_error=%s,paused_from_status=%s,post_load_ddl_mode=%s,rollback_cdc_engine=%s,cdc_ddl_mode=%s,cdc_conflict_mode=%s,cdc_conflict_column=%s,sequence_synced_at=%s,validation_barrier_position_type=%s,validation_barrier_position_value=%s,validation_barrier_resource=%s,validation_barrier_captured_at=%s,updated_at=%s WHERE id=%s", qs(m.Name), qs(string(m.Mode)), qs(string(m.Status)), qs(m.FullEngine), qn(m.CDCEngine), ji(m.Tables), m.ChunkRows, m.BatchRows, m.Parallelism, m.MaxRetries, qb(m.AutoCreateTable), qb(m.ValidationEnabled), qs(m.ValidationMode), m.ReadLimitMBps, m.WriteLimitMBps, m.TargetThroughputMBps, qb(m.AutoThroughputEnabled), m.CompletionSLASeconds, qt(m.SLAStartedAt), m.ControllerTargetBytesSec, qn(m.ThroughputControllerReason), m.AdaptiveHotspotSplits, m.AdaptiveRunningYields, m.AdaptiveTopologyDrains, m.AdaptiveTopologyDegradedYields, m.AdaptiveFaultDomainYields, m.ControllerAutoProbePct, m.ControllerSLAHeadroomPct, m.ControllerLearningSamples, m.SLAP95ETASeconds, m.SLAP99ETASeconds, qn(m.SLARiskLevel), qn(m.SLARiskReason), ji(m.WorkerSelector), qs(m.WorkerAffinity), m.EffectiveParallelism, qs(m.FlowControlLevel), qn(m.FlowControlReason), m.CDCSpoolGrowthBytesSec, m.CDCSpoolCriticalETASeconds, m.RowsLimitPerSec, m.QPSLimit, qs(m.RateLimitTimezone), ji(m.RateLimitWindows), ji(m.TransformRules), m.SpeedRowsSec, m.ETASeconds, m.Progress, m.TotalChunks, m.FinishedChunks, m.RowsMigrated, m.BytesMigrated, m.SpeedBytesSec, m.CDCLagMS, m.CDCStartTimestampMS, qn(m.CDCStartPositionType), qn(m.CDCStartPositionValue), qn(m.CDCStartResource), qn(m.LastError), qn(string(m.PausedFromStatus)), qs(m.PostLoadDDLMode), qn(m.RollbackCDCEngine), qs(m.CDCDDLMode), qs(m.CDCConflictMode), qn(m.CDCConflictColumn), qt(m.SequenceSyncedAt), qn(m.ValidationBarrierPositionType), qn(m.ValidationBarrierPositionValue), qn(m.ValidationBarrierResource), qt(m.ValidationBarrierCapturedAt), qt(m.UpdatedAt), qs(m.ID))
-	return s.db.ExecSQL(ctx, q)
+	q := fmt.Sprintf("UPDATE migration_tasks SET cutover_operation=%s,rollback_operation=%s,revision=revision+1,name=%s,mode=%s,status=%s,full_engine=%s,cdc_engine=%s,table_mappings=%s,chunk_rows=%d,batch_rows=%d,parallelism=%d,max_retries=%d,auto_create_table=%s,validation_enabled=%s,validation_mode=%s,read_limit_mbps=%d,write_limit_mbps=%d,target_throughput_mbps=%d,auto_throughput_enabled=%s,completion_sla_seconds=%d,sla_started_at=%s,controller_target_bytes_sec=%d,throughput_controller_reason=%s,adaptive_hotspot_splits=%d,adaptive_running_yields=%d,adaptive_topology_drains=%d,adaptive_topology_degraded_yields=%d,adaptive_fault_domain_yields=%d,controller_auto_probe_pct=%d,controller_sla_headroom_pct=%d,controller_learning_samples=%d,sla_p95_eta_seconds=%d,sla_p99_eta_seconds=%d,sla_risk_level=%s,sla_risk_reason=%s,worker_selector_json=%s,worker_affinity=%s,effective_parallelism=%d,flow_control_level=%s,flow_control_reason=%s,cdc_spool_growth_bytes_sec=%d,cdc_spool_critical_eta_seconds=%d,rows_limit_per_sec=%d,qps_limit=%d,rate_limit_timezone=%s,rate_limit_windows=%s,transform_rules_json=%s,speed_rows_sec=%d,eta_seconds=%d,progress=%f,total_chunks=%d,finished_chunks=%d,rows_migrated=%d,bytes_migrated=%d,speed_bytes_sec=%d,cdc_lag_ms=%d,cdc_start_timestamp_ms=%d,cdc_start_position_type=%s,cdc_start_position_value=%s,cdc_start_resource=%s,last_error=%s,paused_from_status=%s,post_load_ddl_mode=%s,rollback_cdc_engine=%s,cdc_ddl_mode=%s,cdc_conflict_mode=%s,cdc_conflict_column=%s,sequence_synced_at=%s,validation_barrier_position_type=%s,validation_barrier_position_value=%s,validation_barrier_resource=%s,validation_barrier_captured_at=%s,updated_at=%s WHERE id=%s", ji(m.CutoverOperation), ji(m.RollbackOperation), qs(m.Name), qs(string(m.Mode)), qs(string(m.Status)), qs(m.FullEngine), qn(m.CDCEngine), ji(m.Tables), m.ChunkRows, m.BatchRows, m.Parallelism, m.MaxRetries, qb(m.AutoCreateTable), qb(m.ValidationEnabled), qs(m.ValidationMode), m.ReadLimitMBps, m.WriteLimitMBps, m.TargetThroughputMBps, qb(m.AutoThroughputEnabled), m.CompletionSLASeconds, qt(m.SLAStartedAt), m.ControllerTargetBytesSec, qn(m.ThroughputControllerReason), m.AdaptiveHotspotSplits, m.AdaptiveRunningYields, m.AdaptiveTopologyDrains, m.AdaptiveTopologyDegradedYields, m.AdaptiveFaultDomainYields, m.ControllerAutoProbePct, m.ControllerSLAHeadroomPct, m.ControllerLearningSamples, m.SLAP95ETASeconds, m.SLAP99ETASeconds, qn(m.SLARiskLevel), qn(m.SLARiskReason), ji(m.WorkerSelector), qs(m.WorkerAffinity), m.EffectiveParallelism, qs(m.FlowControlLevel), qs(m.FlowControlReason), m.CDCSpoolGrowthBytesSec, m.CDCSpoolCriticalETASeconds, m.RowsLimitPerSec, m.QPSLimit, qs(m.RateLimitTimezone), ji(m.RateLimitWindows), ji(m.TransformRules), m.SpeedRowsSec, m.ETASeconds, m.Progress, m.TotalChunks, m.FinishedChunks, m.RowsMigrated, m.BytesMigrated, m.SpeedBytesSec, m.CDCLagMS, m.CDCStartTimestampMS, qn(m.CDCStartPositionType), qn(m.CDCStartPositionValue), qn(m.CDCStartResource), qn(m.LastError), qn(string(m.PausedFromStatus)), qs(m.PostLoadDDLMode), qn(m.RollbackCDCEngine), qs(m.CDCDDLMode), qs(m.CDCConflictMode), qn(m.CDCConflictColumn), qt(m.SequenceSyncedAt), qn(m.ValidationBarrierPositionType), qn(m.ValidationBarrierPositionValue), qn(m.ValidationBarrierResource), qt(m.ValidationBarrierCapturedAt), qt(m.UpdatedAt), qs(m.ID))
+	q += fmt.Sprintf(" AND revision=%d RETURNING revision", m.Revision)
+	r, err := s.db.QuerySQL(ctx, q)
+	if err != nil {
+		return err
+	}
+	if len(r.Rows) == 0 {
+		return repository.ErrConflict
+	}
+	m.Revision = iv(r.Rows[0], 0)
+	return nil
 }
 
 func controlLeaseSeconds(lease time.Duration) int64 {
@@ -259,12 +277,12 @@ func controlLeaseSeconds(lease time.Duration) int64 {
 }
 
 func (s *Store) AcquireControlOperation(ctx context.Context, taskID, operation, owner string, lease time.Duration) (bool, error) {
-	q := fmt.Sprintf(`INSERT INTO control_operation_leases(task_id,operation,owner_id,lease_until,updated_at)
-VALUES(%s,%s,%s,now()+make_interval(secs => %d),now())
+	const q = `INSERT INTO control_operation_leases(task_id,operation,owner_id,lease_until,updated_at)
+VALUES($1,$2,$3,now()+make_interval(secs => $4),now())
 ON CONFLICT(task_id) DO UPDATE SET operation=EXCLUDED.operation,owner_id=EXCLUDED.owner_id,lease_until=EXCLUDED.lease_until,updated_at=now()
 WHERE control_operation_leases.lease_until <= now()
-RETURNING task_id`, qs(taskID), qs(operation), qs(owner), controlLeaseSeconds(lease))
-	r, err := s.db.QuerySQL(ctx, q)
+RETURNING task_id`
+	r, err := s.db.QueryParams(ctx, q, taskID, operation, owner, strconv.FormatInt(controlLeaseSeconds(lease), 10))
 	if err != nil {
 		return false, err
 	}
@@ -272,9 +290,9 @@ RETURNING task_id`, qs(taskID), qs(operation), qs(owner), controlLeaseSeconds(le
 }
 
 func (s *Store) RenewControlOperation(ctx context.Context, taskID, operation, owner string, lease time.Duration) error {
-	q := fmt.Sprintf(`UPDATE control_operation_leases SET lease_until=now()+make_interval(secs => %d),updated_at=now()
-WHERE task_id=%s AND operation=%s AND owner_id=%s RETURNING task_id`, controlLeaseSeconds(lease), qs(taskID), qs(operation), qs(owner))
-	r, err := s.db.QuerySQL(ctx, q)
+	const q = `UPDATE control_operation_leases SET lease_until=now()+make_interval(secs => $4),updated_at=now()
+WHERE task_id=$1 AND operation=$2 AND owner_id=$3 AND lease_until > now() RETURNING task_id`
+	r, err := s.db.QueryParams(ctx, q, taskID, operation, owner, strconv.FormatInt(controlLeaseSeconds(lease), 10))
 	if err != nil {
 		return err
 	}
@@ -285,8 +303,8 @@ WHERE task_id=%s AND operation=%s AND owner_id=%s RETURNING task_id`, controlLea
 }
 
 func (s *Store) ReleaseControlOperation(ctx context.Context, taskID, operation, owner string) error {
-	q := fmt.Sprintf(`DELETE FROM control_operation_leases WHERE task_id=%s AND operation=%s AND owner_id=%s RETURNING task_id`, qs(taskID), qs(operation), qs(owner))
-	r, err := s.db.QuerySQL(ctx, q)
+	const q = `DELETE FROM control_operation_leases WHERE task_id=$1 AND operation=$2 AND owner_id=$3 RETURNING task_id`
+	r, err := s.db.QueryParams(ctx, q, taskID, operation, owner)
 	if err != nil {
 		return err
 	}
@@ -334,7 +352,7 @@ func parseTable(r [][]byte) domain.MigrationTable {
 	return v
 }
 func (s *Store) CreateMigrationTable(ctx context.Context, t *domain.MigrationTable) error {
-	if err := s.db.ExecSQL(ctx, fmt.Sprintf("INSERT INTO migration_tables(id,task_id,engine,source_schema,source_table,target_schema,target_table,primary_key,target_primary_key,primary_key_type,columns_json,target_columns_json,estimated_rows,data_length,min_pk,max_pk,total_chunks,finished_chunks,rows_migrated,bytes_migrated,status,indexes_json,foreign_keys_json,topology_json,partitions_json,split_strategy,custom_where,hash_buckets) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%d,%d,%d,%d,%d,%d,%d,%d,%s,%s,%s,%s,%s,%s,%s,%d)", qs(t.ID), qs(t.TaskID), qs(t.Engine), qs(t.SourceSchema), qs(t.SourceTable), qs(t.TargetSchema), qs(t.TargetTable), qs(t.PrimaryKey), qn(t.TargetPrimaryKey), qs(t.PrimaryKeyType), ji(t.Columns), ji(t.TargetColumns), t.EstimatedRows, t.DataLength, t.MinPK, t.MaxPK, t.TotalChunks, t.FinishedChunks, t.RowsMigrated, t.BytesMigrated, qs(t.Status), ji(t.Indexes), ji(t.ForeignKeys), ji(t.Topology), ji(t.Partitions), qs(t.SplitStrategy), qn(t.CustomWhere), t.HashBuckets)); err != nil {
+	if err := s.db.ExecSQL(ctx, fmt.Sprintf("INSERT INTO migration_tables(id,task_id,engine,source_schema,source_table,target_schema,target_table,primary_key,target_primary_key,primary_key_type,columns_json,target_columns_json,estimated_rows,data_length,min_pk,max_pk,total_chunks,finished_chunks,rows_migrated,bytes_migrated,status,indexes_json,foreign_keys_json,topology_json,partitions_json,split_strategy,custom_where,hash_buckets) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%d,%d,%d,%d,%d,%d,%d,%d,%s,%s,%s,%s,%s,%s,%s,%d)", qs(t.ID), qs(t.TaskID), qs(t.Engine), qs(t.SourceSchema), qs(t.SourceTable), qs(t.TargetSchema), qs(t.TargetTable), qs(t.PrimaryKey), qn(t.TargetPrimaryKey), qs(t.PrimaryKeyType), ji(t.Columns), ji(t.TargetColumns), t.EstimatedRows, t.DataLength, t.MinPK, t.MaxPK, t.TotalChunks, t.FinishedChunks, t.RowsMigrated, t.BytesMigrated, qs(t.Status), ji(t.Indexes), ji(t.ForeignKeys), ji(t.Topology), ji(t.Partitions), qs(t.SplitStrategy), qs(t.CustomWhere), t.HashBuckets)); err != nil {
 		return err
 	}
 	return s.UpdateMigrationTable(ctx, t)
@@ -351,7 +369,7 @@ func (s *Store) ListMigrationTables(ctx context.Context, task string) ([]domain.
 	return out, nil
 }
 func (s *Store) GetMigrationTable(ctx context.Context, id string) (*domain.MigrationTable, error) {
-	r, e := s.db.QuerySQL(ctx, "SELECT "+tableCols()+" FROM migration_tables WHERE id="+qs(id))
+	r, e := s.db.QueryParams(ctx, "SELECT "+tableCols()+" FROM migration_tables WHERE id=$1", id)
 	if e != nil {
 		return nil, e
 	}
@@ -362,7 +380,7 @@ func (s *Store) GetMigrationTable(ctx context.Context, id string) (*domain.Migra
 	return &v, nil
 }
 func (s *Store) UpdateMigrationTable(ctx context.Context, t *domain.MigrationTable) error {
-	return s.db.ExecSQL(ctx, fmt.Sprintf("UPDATE migration_tables SET engine=%s,target_primary_key=%s,target_columns_json=%s,indexes_json=%s,foreign_keys_json=%s,topology_json=%s,partitions_json=%s,split_strategy=%s,custom_where=%s,hash_buckets=%d,total_chunks=%d,finished_chunks=%d,rows_migrated=%d,bytes_migrated=%d,profile_bytes_per_sec=%d,profile_rows_per_sec=%d,recommended_chunk_rows=%d,performance_samples=%d,topology_performance_json=%s,status=%s WHERE id=%s", qs(t.Engine), qn(t.TargetPrimaryKey), ji(t.TargetColumns), ji(t.Indexes), ji(t.ForeignKeys), ji(t.Topology), ji(t.Partitions), qs(t.SplitStrategy), qn(t.CustomWhere), t.HashBuckets, t.TotalChunks, t.FinishedChunks, t.RowsMigrated, t.BytesMigrated, t.ProfileBytesPerSec, t.ProfileRowsPerSec, t.RecommendedChunkRows, t.PerformanceSamples, ji(t.TopologyPerformance), qs(t.Status), qs(t.ID)))
+	return s.db.ExecSQL(ctx, fmt.Sprintf("UPDATE migration_tables SET engine=%s,target_primary_key=%s,target_columns_json=%s,indexes_json=%s,foreign_keys_json=%s,topology_json=%s,partitions_json=%s,split_strategy=%s,custom_where=%s,hash_buckets=%d,total_chunks=%d,finished_chunks=%d,rows_migrated=%d,bytes_migrated=%d,profile_bytes_per_sec=%d,profile_rows_per_sec=%d,recommended_chunk_rows=%d,performance_samples=%d,topology_performance_json=%s,status=%s WHERE id=%s", qs(t.Engine), qn(t.TargetPrimaryKey), ji(t.TargetColumns), ji(t.Indexes), ji(t.ForeignKeys), ji(t.Topology), ji(t.Partitions), qs(t.SplitStrategy), qs(t.CustomWhere), t.HashBuckets, t.TotalChunks, t.FinishedChunks, t.RowsMigrated, t.BytesMigrated, t.ProfileBytesPerSec, t.ProfileRowsPerSec, t.RecommendedChunkRows, t.PerformanceSamples, ji(t.TopologyPerformance), qs(t.Status), qs(t.ID)))
 }
 
 func (s *Store) FindMigrationTableProfile(ctx context.Context, sourceID, targetID, schema, table string) (*domain.MigrationTable, error) {
@@ -379,10 +397,10 @@ func (s *Store) FindMigrationTableProfile(ctx context.Context, sourceID, targetI
 }
 
 func chunkCols() string {
-	return "id,task_id,table_id,chunk_no,split_type,primary_key,start_value,end_value,COALESCE(start_cursor_json,''),COALESCE(end_cursor_json,''),COALESCE(cursor_json,''),status,COALESCE(worker_id,'')," + epoch("lease_until") + ",rows_read,rows_written,bytes_read,bytes_written,retry_count,COALESCE(last_error,''),last_read_ms,last_write_ms,last_batch_rows,COALESCE(backpressure_level,'')," + epoch("started_at") + "," + epoch("finished_at") + ",COALESCE(placement_hint_json,'{}'::jsonb)::text,COALESCE(topology_id,''),COALESCE(topology_kind,''),COALESCE(partition_name,''),COALESCE(hash_bucket,0),COALESCE(hash_buckets,0),COALESCE(custom_where,''),COALESCE(fault_domain_json,'{}'::jsonb)::text"
+	return "id,task_id,table_id,chunk_no,split_type,primary_key,start_value,end_value,COALESCE(start_cursor_json,''),COALESCE(end_cursor_json,''),COALESCE(cursor_json,''),status,COALESCE(worker_id,'')," + epoch("lease_until") + ",rows_read,rows_written,bytes_read,bytes_written,retry_count,COALESCE(last_error,''),last_read_ms,last_write_ms,last_batch_rows,COALESCE(backpressure_level,'')," + epoch("started_at") + "," + epoch("finished_at") + ",COALESCE(placement_hint_json,'{}'::jsonb)::text,COALESCE(topology_id,''),COALESCE(topology_kind,''),COALESCE(partition_name,''),COALESCE(hash_bucket,0),COALESCE(hash_buckets,0),COALESCE(custom_where,''),COALESCE(fault_domain_json,'{}'::jsonb)::text,lease_generation"
 }
 func parseChunk(r [][]byte) domain.MigrationChunk {
-	return domain.MigrationChunk{ID: sv(r, 0), TaskID: sv(r, 1), TableID: sv(r, 2), ChunkNo: int(iv(r, 3)), SplitType: sv(r, 4), PrimaryKey: sv(r, 5), Start: iv(r, 6), End: iv(r, 7), StartCursorJSON: sv(r, 8), EndCursorJSON: sv(r, 9), CursorJSON: sv(r, 10), Status: domain.ChunkStatus(sv(r, 11)), WorkerID: sv(r, 12), LeaseUntil: tv(r, 13), RowsRead: iv(r, 14), RowsWritten: iv(r, 15), BytesRead: iv(r, 16), BytesWritten: iv(r, 17), RetryCount: int(iv(r, 18)), LastError: sv(r, 19), LastReadMS: iv(r, 20), LastWriteMS: iv(r, 21), LastBatchRows: int(iv(r, 22)), BackpressureLevel: sv(r, 23), StartedAt: tv(r, 24), FinishedAt: tv(r, 25), PlacementHint: map[string]string{}, TopologyID: sv(r, 27), TopologyKind: sv(r, 28), PartitionName: sv(r, 29), HashBucket: int(iv(r, 30)), HashBuckets: int(iv(r, 31)), CustomWhere: sv(r, 32), FaultDomain: map[string]string{}}
+	return domain.MigrationChunk{LeaseGeneration: iv(r, 34), ID: sv(r, 0), TaskID: sv(r, 1), TableID: sv(r, 2), ChunkNo: int(iv(r, 3)), SplitType: sv(r, 4), PrimaryKey: sv(r, 5), Start: iv(r, 6), End: iv(r, 7), StartCursorJSON: sv(r, 8), EndCursorJSON: sv(r, 9), CursorJSON: sv(r, 10), Status: domain.ChunkStatus(sv(r, 11)), WorkerID: sv(r, 12), LeaseUntil: tv(r, 13), RowsRead: iv(r, 14), RowsWritten: iv(r, 15), BytesRead: iv(r, 16), BytesWritten: iv(r, 17), RetryCount: int(iv(r, 18)), LastError: sv(r, 19), LastReadMS: iv(r, 20), LastWriteMS: iv(r, 21), LastBatchRows: int(iv(r, 22)), BackpressureLevel: sv(r, 23), StartedAt: tv(r, 24), FinishedAt: tv(r, 25), PlacementHint: map[string]string{}, TopologyID: sv(r, 27), TopologyKind: sv(r, 28), PartitionName: sv(r, 29), HashBucket: int(iv(r, 30)), HashBuckets: int(iv(r, 31)), CustomWhere: sv(r, 32), FaultDomain: map[string]string{}}
 }
 func parseChunkPlacement(r [][]byte, c *domain.MigrationChunk) {
 	if c == nil {
@@ -393,16 +411,53 @@ func parseChunkPlacement(r [][]byte, c *domain.MigrationChunk) {
 }
 
 func chunkInsertSQL(c domain.MigrationChunk) string {
-	return fmt.Sprintf("INSERT INTO migration_chunks(id,task_id,table_id,chunk_no,split_type,primary_key,start_value,end_value,start_cursor_json,end_cursor_json,cursor_json,status,retry_count,placement_hint_json,topology_id,topology_kind,partition_name,hash_bucket,hash_buckets,custom_where,fault_domain_json) VALUES(%s,%s,%s,%d,%s,%s,%d,%d,%s,%s,%s,%s,%d,%s,%s,%s,%s,%d,%d,%s,%s)", qs(c.ID), qs(c.TaskID), qs(c.TableID), c.ChunkNo, qs(c.SplitType), qs(c.PrimaryKey), c.Start, c.End, qn(c.StartCursorJSON), qn(c.EndCursorJSON), qn(c.CursorJSON), qs(string(c.Status)), c.RetryCount, ji(c.PlacementHint), qn(c.TopologyID), qn(c.TopologyKind), qn(c.PartitionName), c.HashBucket, c.HashBuckets, qn(c.CustomWhere), ji(c.FaultDomain))
+	return fmt.Sprintf("INSERT INTO migration_chunks(id,task_id,table_id,chunk_no,split_type,primary_key,start_value,end_value,start_cursor_json,end_cursor_json,cursor_json,status,retry_count,placement_hint_json,topology_id,topology_kind,partition_name,hash_bucket,hash_buckets,custom_where,fault_domain_json) VALUES(%s,%s,%s,%d,%s,%s,%d,%d,%s,%s,%s,%s,%d,%s,%s,%s,%s,%d,%d,%s,%s)", qs(c.ID), qs(c.TaskID), qs(c.TableID), c.ChunkNo, qs(c.SplitType), qs(c.PrimaryKey), c.Start, c.End, qn(c.StartCursorJSON), qn(c.EndCursorJSON), qn(c.CursorJSON), qs(string(c.Status)), c.RetryCount, ji(c.PlacementHint), qn(c.TopologyID), qn(c.TopologyKind), qn(c.PartitionName), c.HashBucket, c.HashBuckets, qs(c.CustomWhere), ji(c.FaultDomain))
 }
 func (s *Store) CreateChunks(ctx context.Context, chunks []domain.MigrationChunk) error {
-	for _, c := range chunks {
-		if err := s.db.ExecSQL(ctx, chunkInsertSQL(c)); err != nil {
+	if len(chunks) == 0 {
+		return nil
+	}
+	return s.db.InTransaction(ctx, func(tx *postgresconnector.SQLTransaction) error {
+		for _, c := range chunks {
+			if err := tx.ExecSQL(ctx, chunkInsertSQL(c)); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+func (s *Store) SplitPendingChunk(ctx context.Context, expected domain.MigrationChunk, pieces []domain.MigrationChunk) error {
+	return s.db.InTransaction(ctx, func(tx *postgresconnector.SQLTransaction) error {
+		r, err := tx.QuerySQL(ctx, "SELECT "+chunkCols()+" FROM migration_chunks WHERE id="+qs(expected.ID)+" FOR UPDATE")
+		if err != nil {
 			return err
 		}
-	}
-	return nil
+		if len(r.Rows) == 0 {
+			return repository.ErrConflict
+		}
+		current := parseChunk(r.Rows[0])
+		parseChunkPlacement(r.Rows[0], &current)
+		if err := repository.CheckPendingSplit(expected, current, pieces); err != nil {
+			return err
+		}
+		head := pieces[0]
+		q := fmt.Sprintf("UPDATE migration_chunks SET start_value=%d,end_value=%d,split_type=%s,start_cursor_json=%s,end_cursor_json=%s,lease_generation=lease_generation+1 WHERE id=%s", head.Start, head.End, qs(head.SplitType), qn(head.StartCursorJSON), qn(head.EndCursorJSON), qs(head.ID))
+		if err := tx.ExecSQL(ctx, q); err != nil {
+			return err
+		}
+		for _, piece := range pieces[1:] {
+			inserted, err := tx.QuerySQL(ctx, chunkInsertSQL(piece)+" ON CONFLICT DO NOTHING RETURNING id")
+			if err != nil {
+				return err
+			}
+			if len(inserted.Rows) == 0 {
+				return repository.ErrConflict
+			}
+		}
+		return nil
+	})
 }
+
 func (s *Store) ListChunks(ctx context.Context, task string) ([]domain.MigrationChunk, error) {
 	r, e := s.db.QuerySQL(ctx, "SELECT "+chunkCols()+" FROM migration_chunks WHERE task_id="+qs(task)+" ORDER BY table_id,chunk_no")
 	if e != nil {
@@ -485,7 +540,7 @@ func (s *Store) ListRunningFaultDomainChunks(ctx context.Context, taskID, scope,
 }
 
 func (s *Store) GetChunk(ctx context.Context, id string) (*domain.MigrationChunk, error) {
-	r, e := s.db.QuerySQL(ctx, "SELECT "+chunkCols()+" FROM migration_chunks WHERE id="+qs(id))
+	r, e := s.db.QueryParams(ctx, "SELECT "+chunkCols()+" FROM migration_chunks WHERE id=$1", id)
 	if e != nil {
 		return nil, e
 	}
@@ -496,9 +551,20 @@ func (s *Store) GetChunk(ctx context.Context, id string) (*domain.MigrationChunk
 	parseChunkPlacement(r.Rows[0], &v)
 	return &v, nil
 }
+func chunkMutationSQL(c *domain.MigrationChunk) string {
+	return fmt.Sprintf("UPDATE migration_chunks SET chunk_no=%d,split_type=%s,primary_key=%s,start_value=%d,end_value=%d,start_cursor_json=%s,end_cursor_json=%s,cursor_json=%s,status=%s,worker_id=%s,lease_until=%s,rows_read=%d,rows_written=%d,bytes_read=%d,bytes_written=%d,retry_count=%d,last_error=%s,last_read_ms=%d,last_write_ms=%d,last_batch_rows=%d,backpressure_level=%s,placement_hint_json=%s,topology_id=%s,topology_kind=%s,partition_name=%s,hash_bucket=%d,hash_buckets=%d,custom_where=%s,fault_domain_json=%s,started_at=%s,finished_at=%s WHERE id=%s", c.ChunkNo, qs(c.SplitType), qs(c.PrimaryKey), c.Start, c.End, qn(c.StartCursorJSON), qn(c.EndCursorJSON), qn(c.CursorJSON), qs(string(c.Status)), qn(c.WorkerID), qt(c.LeaseUntil), c.RowsRead, c.RowsWritten, c.BytesRead, c.BytesWritten, c.RetryCount, qn(c.LastError), c.LastReadMS, c.LastWriteMS, c.LastBatchRows, qs(c.BackpressureLevel), ji(c.PlacementHint), qn(c.TopologyID), qn(c.TopologyKind), qn(c.PartitionName), c.HashBucket, c.HashBuckets, qs(c.CustomWhere), ji(c.FaultDomain), qt(c.StartedAt), qt(c.FinishedAt), qs(c.ID))
+}
 func (s *Store) UpdateChunk(ctx context.Context, c *domain.MigrationChunk) error {
-	q := fmt.Sprintf("UPDATE migration_chunks SET chunk_no=%d,split_type=%s,primary_key=%s,start_value=%d,end_value=%d,start_cursor_json=%s,end_cursor_json=%s,cursor_json=%s,status=%s,worker_id=%s,lease_until=%s,rows_read=%d,rows_written=%d,bytes_read=%d,bytes_written=%d,retry_count=%d,last_error=%s,last_read_ms=%d,last_write_ms=%d,last_batch_rows=%d,backpressure_level=%s,placement_hint_json=%s,topology_id=%s,topology_kind=%s,partition_name=%s,hash_bucket=%d,hash_buckets=%d,custom_where=%s,fault_domain_json=%s,started_at=%s,finished_at=%s WHERE id=%s", c.ChunkNo, qs(c.SplitType), qs(c.PrimaryKey), c.Start, c.End, qn(c.StartCursorJSON), qn(c.EndCursorJSON), qn(c.CursorJSON), qs(string(c.Status)), qn(c.WorkerID), qt(c.LeaseUntil), c.RowsRead, c.RowsWritten, c.BytesRead, c.BytesWritten, c.RetryCount, qn(c.LastError), c.LastReadMS, c.LastWriteMS, c.LastBatchRows, qn(c.BackpressureLevel), ji(c.PlacementHint), qn(c.TopologyID), qn(c.TopologyKind), qn(c.PartitionName), c.HashBucket, c.HashBuckets, qn(c.CustomWhere), ji(c.FaultDomain), qt(c.StartedAt), qt(c.FinishedAt), qs(c.ID))
-	return s.db.ExecSQL(ctx, q)
+	q := chunkMutationSQL(c) + fmt.Sprintf(" AND lease_generation=%d RETURNING lease_generation", c.LeaseGeneration)
+	r, err := s.db.QuerySQL(ctx, q)
+	if err != nil {
+		return err
+	}
+	if len(r.Rows) == 0 {
+		return repository.ErrConflict
+	}
+	c.LeaseGeneration = iv(r.Rows[0], 0)
+	return nil
 }
 
 func (s *Store) ClaimChunk(ctx context.Context, worker string, lease time.Duration, capabilities []string) (*domain.MigrationChunk, error) {
@@ -564,7 +630,7 @@ func (s *Store) ClaimChunk(ctx context.Context, worker string, lease time.Durati
 		faultDomainRunning = "(CASE WHEN " + regionRisk + ">0 THEN " + regionRunning + " WHEN " + zoneRisk + ">0 THEN " + zoneRunning + " WHEN " + rackRisk + ">0 THEN " + rackRunning + " ELSE 0 END)"
 		faultDomainAllowed = "(CASE WHEN " + faultDomainPeerRisk + ">=2 THEN " + faultDomainRunning + " < " + strconv.Itoa(repository.FaultDomainCriticalMaxConcurrency()) + " WHEN " + faultDomainPeerRisk + "=1 THEN " + faultDomainRunning + " < " + strconv.Itoa(repository.FaultDomainDegradedMaxConcurrency()) + " ELSE true END)"
 	}
-	q := `WITH candidate AS (SELECT c.id FROM migration_chunks c JOIN migration_tasks m ON m.id=c.task_id JOIN migration_tables t ON t.id=c.table_id JOIN workers w ON w.id=` + qs(worker) + ` WHERE c.status='PENDING' AND m.status='FULL_MIGRATING' AND ` + engineFilter + ` AND ` + affinityAllowed + ` AND ` + topologyAllowed + ` AND ` + faultDomainAllowed + ` AND (SELECT count(*) FROM migration_chunks r WHERE r.task_id=c.task_id AND r.status='RUNNING') < COALESCE(NULLIF(m.effective_parallelism,0),m.parallelism) ORDER BY ` + affinityRank + `,` + topologyHealthRank + `,` + faultDomainPeerRisk + `,` + faultDomainRunning + `,` + placementRank + `,` + topologyRunning + `,(SELECT count(*) FROM migration_chunks tr WHERE tr.table_id=c.table_id AND tr.status='RUNNING'),c.task_id,c.table_id,c.chunk_no FOR UPDATE SKIP LOCKED LIMIT 1) UPDATE migration_chunks c SET status='RUNNING',worker_id=` + qs(worker) + `,lease_until=now()+interval '` + strconv.Itoa(seconds) + ` seconds',started_at=COALESCE(started_at,now()),last_error=NULL FROM candidate x WHERE c.id=x.id RETURNING ` + chunkCols()
+	q := `WITH candidate AS (SELECT c.id FROM migration_chunks c JOIN migration_tasks m ON m.id=c.task_id JOIN migration_tables t ON t.id=c.table_id JOIN workers w ON w.id=` + qs(worker) + ` WHERE c.status='PENDING' AND m.status='FULL_MIGRATING' AND ` + engineFilter + ` AND ` + affinityAllowed + ` AND ` + topologyAllowed + ` AND ` + faultDomainAllowed + ` AND (SELECT count(*) FROM migration_chunks r WHERE r.task_id=c.task_id AND r.status='RUNNING') < COALESCE(NULLIF(m.effective_parallelism,0),m.parallelism) ORDER BY ` + affinityRank + `,` + topologyHealthRank + `,` + faultDomainPeerRisk + `,` + faultDomainRunning + `,` + placementRank + `,` + topologyRunning + `,(SELECT count(*) FROM migration_chunks tr WHERE tr.table_id=c.table_id AND tr.status='RUNNING'),c.task_id,c.table_id,c.chunk_no FOR UPDATE SKIP LOCKED LIMIT 1), claimed AS (UPDATE migration_chunks c SET lease_generation=c.lease_generation+1,status='RUNNING',worker_id=` + qs(worker) + `,lease_until=now()+interval '` + strconv.Itoa(seconds) + ` seconds',started_at=COALESCE(started_at,now()),last_error=NULL FROM candidate x WHERE c.id=x.id RETURNING c.*) SELECT ` + chunkCols() + ` FROM claimed`
 	r, e := s.db.QuerySQL(ctx, q)
 	if e != nil {
 		return nil, e
@@ -579,6 +645,7 @@ func (s *Store) ClaimChunk(ctx context.Context, worker string, lease time.Durati
 func (s *Store) RenewChunkLease(ctx context.Context, id, worker string, lease time.Duration) error {
 	sec := int(lease.Seconds())
 	q := "UPDATE migration_chunks SET lease_until=now()+interval '" + strconv.Itoa(sec) + " seconds' WHERE id=" + qs(id) + " AND worker_id=" + qs(worker) + " AND status='RUNNING' RETURNING id"
+	q = strings.Replace(q, " RETURNING id", workerFenceSQL(ctx)+" RETURNING id", 1)
 	r, e := s.db.QuerySQL(ctx, q)
 	if e != nil {
 		return e
@@ -590,7 +657,8 @@ func (s *Store) RenewChunkLease(ctx context.Context, id, worker string, lease ti
 }
 
 func (s *Store) UpdateChunkProgress(ctx context.Context, id, worker string, progress domain.ChunkProgress) error {
-	q := fmt.Sprintf("UPDATE migration_chunks SET cursor_json=%s,rows_read=%d,rows_written=%d,bytes_read=%d,bytes_written=%d,last_read_ms=%d,last_write_ms=%d,last_batch_rows=%d,backpressure_level=%s WHERE id=%s AND worker_id=%s AND status='RUNNING' RETURNING id", qn(progress.CursorJSON), progress.RowsRead, progress.RowsWritten, progress.BytesRead, progress.BytesWritten, progress.LastReadMS, progress.LastWriteMS, progress.LastBatchRows, qn(progress.BackpressureLevel), qs(id), qs(worker))
+	q := fmt.Sprintf("UPDATE migration_chunks SET cursor_json=%s,rows_read=%d,rows_written=%d,bytes_read=%d,bytes_written=%d,last_read_ms=%d,last_write_ms=%d,last_batch_rows=%d,backpressure_level=%s WHERE id=%s AND worker_id=%s AND status='RUNNING' RETURNING id", qn(progress.CursorJSON), progress.RowsRead, progress.RowsWritten, progress.BytesRead, progress.BytesWritten, progress.LastReadMS, progress.LastWriteMS, progress.LastBatchRows, qs(progress.BackpressureLevel), qs(id), qs(worker))
+	q = strings.Replace(q, " RETURNING id", workerFenceSQL(ctx)+" RETURNING id", 1)
 	r, e := s.db.QuerySQL(ctx, q)
 	if e != nil {
 		return e
@@ -605,29 +673,49 @@ func (s *Store) YieldChunk(ctx context.Context, worker string, completed *domain
 	if completed == nil {
 		return errors.New("yielded chunk is nil")
 	}
-	update := fmt.Sprintf("UPDATE migration_chunks SET chunk_no=%d,split_type=%s,primary_key=%s,start_value=%d,end_value=%d,start_cursor_json=%s,end_cursor_json=%s,cursor_json=%s,status=%s,worker_id=%s,lease_until=%s,rows_read=%d,rows_written=%d,bytes_read=%d,bytes_written=%d,retry_count=%d,last_error=%s,last_read_ms=%d,last_write_ms=%d,last_batch_rows=%d,backpressure_level=%s,placement_hint_json=%s,topology_id=%s,topology_kind=%s,partition_name=%s,hash_bucket=%d,hash_buckets=%d,custom_where=%s,fault_domain_json=%s,started_at=%s,finished_at=%s WHERE id=%s", completed.ChunkNo, qs(completed.SplitType), qs(completed.PrimaryKey), completed.Start, completed.End, qn(completed.StartCursorJSON), qn(completed.EndCursorJSON), qn(completed.CursorJSON), qs(string(completed.Status)), qn(completed.WorkerID), qt(completed.LeaseUntil), completed.RowsRead, completed.RowsWritten, completed.BytesRead, completed.BytesWritten, completed.RetryCount, qn(completed.LastError), completed.LastReadMS, completed.LastWriteMS, completed.LastBatchRows, qn(completed.BackpressureLevel), ji(completed.PlacementHint), qn(completed.TopologyID), qn(completed.TopologyKind), qn(completed.PartitionName), completed.HashBucket, completed.HashBuckets, qn(completed.CustomWhere), ji(completed.FaultDomain), qt(completed.StartedAt), qt(completed.FinishedAt), qs(completed.ID))
-	var b strings.Builder
-	b.WriteString("DO $qmig$ BEGIN ")
-	b.WriteString("IF NOT EXISTS (SELECT 1 FROM migration_chunks WHERE id=" + qs(completed.ID) + " AND worker_id=" + qs(worker) + " AND status='RUNNING') THEN RAISE EXCEPTION 'chunk lease owner mismatch'; END IF; ")
-	b.WriteString(update + "; ")
-	for _, ch := range created {
-		b.WriteString(chunkInsertSQL(ch) + "; ")
+	var generation int64
+	err := s.db.InTransaction(ctx, func(tx *postgresconnector.SQLTransaction) error {
+		r, err := tx.QuerySQL(ctx, "SELECT "+chunkCols()+" FROM migration_chunks WHERE id="+qs(completed.ID)+" FOR UPDATE")
+		if err != nil {
+			return err
+		}
+		if len(r.Rows) == 0 {
+			return repository.ErrLeaseOwner
+		}
+		current := parseChunk(r.Rows[0])
+		if current.Status != domain.ChunkRunning || current.WorkerID != worker || current.LeaseGeneration != completed.LeaseGeneration || !repository.WorkerLeaseValid(ctx, current.LeaseGeneration, current.LeaseUntil) {
+			return repository.ErrLeaseOwner
+		}
+		q := strings.Replace(chunkMutationSQL(completed), "SET ", "SET lease_generation=lease_generation+1,", 1) + " RETURNING lease_generation"
+		r, err = tx.QuerySQL(ctx, q)
+		if err != nil {
+			return err
+		}
+		generation = iv(r.Rows[0], 0)
+		for _, ch := range created {
+			if err := tx.ExecSQL(ctx, chunkInsertSQL(ch)); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err == nil {
+		completed.LeaseGeneration = generation
 	}
-	b.WriteString("END $qmig$;")
-	return s.db.ExecSQL(ctx, b.String())
+	return err
 }
 
 func engineJobCols() string {
-	return "id,task_id,kind,direction,engine,status,COALESCE(worker_id,'')," + epoch("lease_until") + ",retry_count,COALESCE(last_error,'')," + epoch("started_at") + "," + epoch("updated_at") + "," + epoch("finished_at")
+	return "id,task_id,kind,direction,engine,status,COALESCE(worker_id,'')," + epoch("lease_until") + ",retry_count,COALESCE(last_error,'')," + epoch("started_at") + "," + epoch("updated_at") + "," + epoch("finished_at") + ",lease_generation"
 }
 func parseEngineJob(r [][]byte) domain.EngineJob {
-	return domain.EngineJob{ID: sv(r, 0), TaskID: sv(r, 1), Kind: sv(r, 2), Direction: sv(r, 3), Engine: sv(r, 4), Status: domain.EngineJobStatus(sv(r, 5)), WorkerID: sv(r, 6), LeaseUntil: tv(r, 7), RetryCount: int(iv(r, 8)), LastError: sv(r, 9), StartedAt: tv(r, 10), UpdatedAt: tv(r, 11), FinishedAt: tv(r, 12)}
+	return domain.EngineJob{LeaseGeneration: iv(r, 13), ID: sv(r, 0), TaskID: sv(r, 1), Kind: sv(r, 2), Direction: sv(r, 3), Engine: sv(r, 4), Status: domain.EngineJobStatus(sv(r, 5)), WorkerID: sv(r, 6), LeaseUntil: tv(r, 7), RetryCount: int(iv(r, 8)), LastError: sv(r, 9), StartedAt: tv(r, 10), UpdatedAt: tv(r, 11), FinishedAt: tv(r, 12)}
 }
 func (s *Store) CreateEngineJob(ctx context.Context, j *domain.EngineJob) error {
 	return s.db.ExecSQL(ctx, fmt.Sprintf("INSERT INTO engine_jobs(id,task_id,kind,direction,engine,status,worker_id,lease_until,retry_count,last_error,started_at,updated_at,finished_at) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%d,%s,%s,%s,%s)", qs(j.ID), qs(j.TaskID), qs(j.Kind), qs(j.Direction), qs(j.Engine), qs(string(j.Status)), qn(j.WorkerID), qt(j.LeaseUntil), j.RetryCount, qn(j.LastError), qt(j.StartedAt), qt(j.UpdatedAt), qt(j.FinishedAt)))
 }
 func (s *Store) GetEngineJob(ctx context.Context, id string) (*domain.EngineJob, error) {
-	r, e := s.db.QuerySQL(ctx, "SELECT "+engineJobCols()+" FROM engine_jobs WHERE id="+qs(id))
+	r, e := s.db.QueryParams(ctx, "SELECT "+engineJobCols()+" FROM engine_jobs WHERE id=$1", id)
 	if e != nil {
 		return nil, e
 	}
@@ -652,9 +740,20 @@ func (s *Store) ListEngineJobs(ctx context.Context, taskID string) ([]domain.Eng
 	}
 	return out, nil
 }
+func engineMutationSQL(j *domain.EngineJob) string {
+	return fmt.Sprintf("UPDATE engine_jobs SET kind=%s,direction=%s,engine=%s,status=%s,worker_id=%s,lease_until=%s,retry_count=%d,last_error=%s,started_at=%s,updated_at=%s,finished_at=%s WHERE id=%s", qs(j.Kind), qs(j.Direction), qs(j.Engine), qs(string(j.Status)), qn(j.WorkerID), qt(j.LeaseUntil), j.RetryCount, qn(j.LastError), qt(j.StartedAt), qt(j.UpdatedAt), qt(j.FinishedAt), qs(j.ID))
+}
 func (s *Store) UpdateEngineJob(ctx context.Context, j *domain.EngineJob) error {
-	q := fmt.Sprintf("UPDATE engine_jobs SET kind=%s,direction=%s,engine=%s,status=%s,worker_id=%s,lease_until=%s,retry_count=%d,last_error=%s,started_at=%s,updated_at=%s,finished_at=%s WHERE id=%s", qs(j.Kind), qs(j.Direction), qs(j.Engine), qs(string(j.Status)), qn(j.WorkerID), qt(j.LeaseUntil), j.RetryCount, qn(j.LastError), qt(j.StartedAt), qt(j.UpdatedAt), qt(j.FinishedAt), qs(j.ID))
-	return s.db.ExecSQL(ctx, q)
+	q := engineMutationSQL(j) + fmt.Sprintf(" AND lease_generation=%d RETURNING lease_generation", j.LeaseGeneration)
+	r, err := s.db.QuerySQL(ctx, q)
+	if err != nil {
+		return err
+	}
+	if len(r.Rows) == 0 {
+		return repository.ErrConflict
+	}
+	j.LeaseGeneration = iv(r.Rows[0], 0)
+	return nil
 }
 func (s *Store) ClaimEngineJob(ctx context.Context, worker string, lease time.Duration, capabilities []string) (*domain.EngineJob, error) {
 	_ = s.db.ExecSQL(ctx, "UPDATE engine_jobs SET status='PENDING',worker_id=NULL,lease_until=NULL,retry_count=retry_count+1,last_error='worker lease expired',updated_at=now() WHERE status='RUNNING' AND lease_until IS NOT NULL AND lease_until<now()")
@@ -676,7 +775,7 @@ func (s *Store) ClaimEngineJob(ctx context.Context, worker string, lease time.Du
 	if sec < 1 {
 		sec = 300
 	}
-	q := `WITH candidate AS (SELECT id FROM engine_jobs WHERE status='PENDING' AND engine IN (` + strings.Join(quoted, ",") + `) ORDER BY updated_at,id FOR UPDATE SKIP LOCKED LIMIT 1) UPDATE engine_jobs j SET status='RUNNING',worker_id=` + qs(worker) + `,lease_until=now()+interval '` + strconv.Itoa(sec) + ` seconds',started_at=COALESCE(started_at,now()),updated_at=now(),last_error=NULL FROM candidate x WHERE j.id=x.id RETURNING ` + engineJobCols()
+	q := `WITH candidate AS (SELECT id FROM engine_jobs WHERE status='PENDING' AND engine IN (` + strings.Join(quoted, ",") + `) ORDER BY updated_at,id FOR UPDATE SKIP LOCKED LIMIT 1), claimed AS (UPDATE engine_jobs j SET lease_generation=j.lease_generation+1,status='RUNNING',worker_id=` + qs(worker) + `,lease_until=now()+interval '` + strconv.Itoa(sec) + ` seconds',started_at=COALESCE(started_at,now()),updated_at=now(),last_error=NULL FROM candidate x WHERE j.id=x.id RETURNING j.*) SELECT ` + engineJobCols() + ` FROM claimed`
 	r, e := s.db.QuerySQL(ctx, q)
 	if e != nil {
 		return nil, e
@@ -692,7 +791,8 @@ func (s *Store) RenewEngineJobLease(ctx context.Context, id, worker string, leas
 	if sec < 1 {
 		sec = 300
 	}
-	r, e := s.db.QuerySQL(ctx, "UPDATE engine_jobs SET lease_until=now()+interval '"+strconv.Itoa(sec)+" seconds',updated_at=now() WHERE id="+qs(id)+" AND worker_id="+qs(worker)+" AND status='RUNNING' RETURNING id")
+	q := "UPDATE engine_jobs SET lease_until=now()+interval '" + strconv.Itoa(sec) + " seconds',updated_at=now() WHERE id=" + qs(id) + " AND worker_id=" + qs(worker) + " AND status IN ('RUNNING','STOP_REQUESTED')" + workerFenceSQL(ctx) + " RETURNING id"
+	r, e := s.db.QuerySQL(ctx, q)
 	if e != nil {
 		return e
 	}
@@ -727,7 +827,7 @@ func (s *Store) ListWorkers(ctx context.Context) ([]domain.Worker, error) {
 	return out, nil
 }
 func (s *Store) GetWorker(ctx context.Context, id string) (*domain.Worker, error) {
-	r, e := s.db.QuerySQL(ctx, "SELECT "+workerCols()+" FROM workers WHERE id="+qs(id))
+	r, e := s.db.QueryParams(ctx, "SELECT "+workerCols()+" FROM workers WHERE id=$1", id)
 	if e != nil {
 		return nil, e
 	}
@@ -739,7 +839,9 @@ func (s *Store) GetWorker(ctx context.Context, id string) (*domain.Worker, error
 }
 
 func (s *Store) CreateCDCPosition(ctx context.Context, p *domain.CDCPosition) error {
-	return s.db.ExecSQL(ctx, fmt.Sprintf("INSERT INTO cdc_positions(id,task_id,direction,database_type,position_type,position_value,resource,source_timestamp_ms,apply_timestamp_ms,lag_ms,events_total,events_pending,recorded_at) VALUES(%s,%s,%s,%s,%s,%s,%s,%d,%d,%d,%d,%d,%s)", qs(p.ID), qs(p.TaskID), qs(p.Direction), qn(p.DatabaseType), qn(p.PositionType), qn(p.PositionValue), qn(p.Resource), p.SourceTimestampMS, p.ApplyTimestampMS, p.LagMS, p.EventsTotal, p.EventsPending, qt(p.RecordedAt)))
+	return s.withAdmission(ctx, p.TaskID, p.Direction, func(db admissionSQL) error {
+		return db.ExecSQL(ctx, fmt.Sprintf("INSERT INTO cdc_positions(id,task_id,direction,database_type,position_type,position_value,resource,source_timestamp_ms,apply_timestamp_ms,lag_ms,events_total,events_pending,recorded_at) VALUES(%s,%s,%s,%s,%s,%s,%s,%d,%d,%d,%d,%d,%s)", qs(p.ID), qs(p.TaskID), qs(p.Direction), qn(p.DatabaseType), qn(p.PositionType), qn(p.PositionValue), qn(p.Resource), p.SourceTimestampMS, p.ApplyTimestampMS, p.LagMS, p.EventsTotal, p.EventsPending, qt(p.RecordedAt)))
+	})
 }
 func (s *Store) ListCDCPositions(ctx context.Context, task string, limit int) ([]domain.CDCPosition, error) {
 	if limit <= 0 || limit > 1000 {
@@ -765,11 +867,14 @@ func parseSpool(row [][]byte) domain.CDCSpoolRecord {
 	return v
 }
 func (s *Store) CreateCDCSpool(ctx context.Context, v *domain.CDCSpoolRecord) error {
+	return s.withAdmission(ctx, v.TaskID, v.Direction, func(db admissionSQL) error { return createCDCSpool(ctx, db, v) })
+}
+func createCDCSpool(ctx context.Context, db admissionSQL, v *domain.CDCSpoolRecord) error {
 	if v.EventCount == 0 {
 		v.EventCount = len(v.Events)
 	}
 	q := fmt.Sprintf("INSERT INTO cdc_spool(id,task_id,direction,position_type,position_value,resource,source_timestamp_ms,event_count,payload_bytes,events_json,events_ciphertext,status,created_at) VALUES(%s,%s,%s,%s,%s,%s,%d,%d,%d,%s,%s,%s,%s) ON CONFLICT(id) DO NOTHING RETURNING sequence", qs(v.ID), qs(v.TaskID), qs(v.Direction), qn(v.PositionType), qn(v.PositionValue), qn(v.Resource), v.SourceTimestampMS, v.EventCount, v.PayloadBytes, ji(v.Events), qn(v.EventsCiphertext), qs(string(v.Status)), qt(v.CreatedAt))
-	r, err := s.db.QuerySQL(ctx, q)
+	r, err := db.QuerySQL(ctx, q)
 	if err != nil {
 		return err
 	}
@@ -777,7 +882,7 @@ func (s *Store) CreateCDCSpool(ctx context.Context, v *domain.CDCSpoolRecord) er
 		v.Sequence = iv(r.Rows[0], 0)
 		return nil
 	}
-	r, err = s.db.QuerySQL(ctx, "SELECT sequence FROM cdc_spool WHERE id="+qs(v.ID))
+	r, err = db.QuerySQL(ctx, "SELECT sequence FROM cdc_spool WHERE id="+qs(v.ID))
 	if err != nil {
 		return err
 	}
@@ -807,13 +912,19 @@ func (s *Store) LatestPendingCDCSpool(ctx context.Context, taskID, direction str
 		return nil, err
 	}
 	if len(r.Rows) == 0 {
-		return nil, errors.New("not found")
+		return nil, nil
 	}
 	v := parseSpool(r.Rows[0])
 	return &v, nil
 }
 func (s *Store) MarkCDCSpoolApplied(ctx context.Context, id string, at time.Time) error {
-	return s.db.ExecSQL(ctx, "UPDATE cdc_spool SET status='APPLIED',applied_at="+qt(at)+" WHERE id="+qs(id))
+	f, required := repository.CDCFenceFrom(ctx)
+	if !required {
+		return s.db.ExecSQL(ctx, "UPDATE cdc_spool SET status='APPLIED',applied_at="+qt(at)+" WHERE id="+qs(id))
+	}
+	return s.withAdmission(ctx, f.TaskID, f.Direction, func(db admissionSQL) error {
+		return db.ExecSQL(ctx, "UPDATE cdc_spool SET status='APPLIED',applied_at="+qt(at)+" WHERE id="+qs(id)+" AND task_id="+qs(f.TaskID)+" AND direction="+qs(f.Direction))
+	})
 }
 func (s *Store) DeleteAppliedCDCSpool(ctx context.Context, taskID, direction string, keep int) error {
 	if keep < 0 {
@@ -838,7 +949,7 @@ func (s *Store) AcquireCDCSpoolDrainLease(ctx context.Context, taskID, direction
 	if seconds < 10 {
 		seconds = 300
 	}
-	q := fmt.Sprintf("INSERT INTO cdc_spool_drain_leases(task_id,direction,owner,lease_until,updated_at) VALUES(%s,%s,%s,now()+interval '%d seconds',now()) ON CONFLICT(task_id,direction) DO UPDATE SET owner=EXCLUDED.owner,lease_until=EXCLUDED.lease_until,updated_at=EXCLUDED.updated_at WHERE cdc_spool_drain_leases.lease_until<now() OR cdc_spool_drain_leases.owner=EXCLUDED.owner RETURNING owner", qs(taskID), qs(direction), qs(owner), seconds)
+	q := fmt.Sprintf("INSERT INTO cdc_spool_drain_leases(task_id,direction,owner,lease_until,updated_at,generation) VALUES(%s,%s,%s,now()+interval '%d seconds',now(),1) ON CONFLICT(task_id,direction) DO UPDATE SET owner=EXCLUDED.owner,lease_until=EXCLUDED.lease_until,updated_at=EXCLUDED.updated_at,generation=cdc_spool_drain_leases.generation+1 WHERE cdc_spool_drain_leases.lease_until<now() RETURNING owner", qs(taskID), qs(direction), qs(owner), seconds)
 	r, err := s.db.QuerySQL(ctx, q)
 	if err != nil {
 		return false, err
@@ -847,7 +958,7 @@ func (s *Store) AcquireCDCSpoolDrainLease(ctx context.Context, taskID, direction
 }
 
 func (s *Store) ReleaseCDCSpoolDrainLease(ctx context.Context, taskID, direction, owner string) error {
-	return s.db.ExecSQL(ctx, "DELETE FROM cdc_spool_drain_leases WHERE task_id="+qs(taskID)+" AND direction="+qs(direction)+" AND owner="+qs(owner))
+	return s.db.ExecSQL(ctx, "UPDATE cdc_spool_drain_leases SET owner='',lease_until=now(),updated_at=now() WHERE task_id="+qs(taskID)+" AND direction="+qs(direction)+" AND owner="+qs(owner))
 }
 
 func deadLetterCols() string {
@@ -859,15 +970,18 @@ func parseDeadLetter(row [][]byte) domain.CDCDeadLetter {
 	return v
 }
 func (s *Store) CreateCDCDeadLetter(ctx context.Context, v *domain.CDCDeadLetter) error {
+	return s.withAdmission(ctx, v.TaskID, v.Direction, func(db admissionSQL) error { return createCDCDeadLetter(ctx, db, v) })
+}
+func createCDCDeadLetter(ctx context.Context, db admissionSQL, v *domain.CDCDeadLetter) error {
 	q := fmt.Sprintf("INSERT INTO cdc_dead_letters(id,task_id,direction,position_type,position_value,resource,events_json,events_ciphertext,last_error,retry_count,status,created_at,updated_at,resolved_at) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%d,%s,%s,%s,%s) ON CONFLICT(id) DO UPDATE SET events_json=EXCLUDED.events_json,events_ciphertext=EXCLUDED.events_ciphertext,last_error=EXCLUDED.last_error,retry_count=EXCLUDED.retry_count,status=EXCLUDED.status,updated_at=EXCLUDED.updated_at,resolved_at=EXCLUDED.resolved_at", qs(v.ID), qs(v.TaskID), qs(v.Direction), qn(v.PositionType), qn(v.PositionValue), qn(v.Resource), ji(v.Events), qn(v.EventsCiphertext), qs(v.LastError), v.RetryCount, qs(string(v.Status)), qt(v.CreatedAt), qt(v.UpdatedAt), qt(v.ResolvedAt))
-	return s.db.ExecSQL(ctx, q)
+	return db.ExecSQL(ctx, q)
 }
 func (s *Store) UpdateCDCDeadLetter(ctx context.Context, v *domain.CDCDeadLetter) error {
 	q := fmt.Sprintf("UPDATE cdc_dead_letters SET events_json=%s,events_ciphertext=%s,last_error=%s,retry_count=%d,status=%s,updated_at=%s,resolved_at=%s WHERE id=%s", ji(v.Events), qn(v.EventsCiphertext), qs(v.LastError), v.RetryCount, qs(string(v.Status)), qt(v.UpdatedAt), qt(v.ResolvedAt), qs(v.ID))
-	return s.db.ExecSQL(ctx, q)
+	return s.withAdmission(ctx, v.TaskID, v.Direction, func(db admissionSQL) error { return db.ExecSQL(ctx, q) })
 }
 func (s *Store) GetCDCDeadLetter(ctx context.Context, id string) (*domain.CDCDeadLetter, error) {
-	r, e := s.db.QuerySQL(ctx, "SELECT "+deadLetterCols()+" FROM cdc_dead_letters WHERE id="+qs(id))
+	r, e := s.db.QueryParams(ctx, "SELECT "+deadLetterCols()+" FROM cdc_dead_letters WHERE id=$1", id)
 	if e != nil {
 		return nil, e
 	}
@@ -893,7 +1007,13 @@ func (s *Store) ListCDCDeadLetters(ctx context.Context, taskID string) ([]domain
 	return out, nil
 }
 func (s *Store) DeleteCDCDeadLetter(ctx context.Context, id string) error {
-	return s.db.ExecSQL(ctx, "DELETE FROM cdc_dead_letters WHERE id="+qs(id))
+	f, required := repository.CDCFenceFrom(ctx)
+	if !required {
+		return s.db.ExecSQL(ctx, "DELETE FROM cdc_dead_letters WHERE id="+qs(id))
+	}
+	return s.withAdmission(ctx, f.TaskID, f.Direction, func(db admissionSQL) error {
+		return db.ExecSQL(ctx, "DELETE FROM cdc_dead_letters WHERE id="+qs(id)+" AND task_id="+qs(f.TaskID)+" AND direction="+qs(f.Direction))
+	})
 }
 func (s *Store) CreateCDCConflict(ctx context.Context, v *domain.CDCConflictRecord) error {
 	return s.db.ExecSQL(ctx, fmt.Sprintf("INSERT INTO cdc_conflicts(id,task_id,direction,source_schema,source_table,key_fingerprint,policy,decision,source_version,target_version,position_type,position_value,created_at) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT(id) DO NOTHING", qs(v.ID), qs(v.TaskID), qs(v.Direction), qs(v.SourceSchema), qs(v.SourceTable), qs(v.KeyFingerprint), qs(v.Policy), qs(string(v.Decision)), qn(v.SourceVersion), qn(v.TargetVersion), qn(v.PositionType), qn(v.PositionValue), qt(v.CreatedAt)))
@@ -973,35 +1093,103 @@ var _ repository.Repository = (*Store)(nil)
 var _ = sort.Strings
 
 func userCols() string {
-	return "id,username,password_hash,role,enabled," + epoch("created_at") + "," + epoch("updated_at") + "," + epoch("last_login_at")
+	return "id,username,password_hash,role,enabled," + epoch("created_at") + "," + epoch("updated_at") + "," + epoch("last_login_at") + ",revision"
 }
 func parseUser(r [][]byte) domain.User {
-	return domain.User{ID: sv(r, 0), Username: sv(r, 1), PasswordHash: sv(r, 2), Role: sv(r, 3), Enabled: bv(r, 4), CreatedAt: tv(r, 5), UpdatedAt: tv(r, 6), LastLoginAt: tv(r, 7)}
+	return domain.User{ID: sv(r, 0), Username: sv(r, 1), PasswordHash: sv(r, 2), Role: sv(r, 3), Enabled: bv(r, 4), CreatedAt: tv(r, 5), UpdatedAt: tv(r, 6), LastLoginAt: tv(r, 7), Revision: iv(r, 8)}
+}
+func userInsertSQL(u *domain.User) string {
+	return fmt.Sprintf("INSERT INTO users(id,username,password_hash,role,enabled,created_at,updated_at,last_login_at) VALUES(%s,%s,%s,%s,%s,%s,%s,%s)", qs(u.ID), qs(u.Username), qs(u.PasswordHash), qs(u.Role), qb(u.Enabled), qt(u.CreatedAt), qt(u.UpdatedAt), qt(u.LastLoginAt))
 }
 func (s *Store) CreateUser(ctx context.Context, u *domain.User) error {
-	return s.db.ExecSQL(ctx, fmt.Sprintf("INSERT INTO users(id,username,password_hash,role,enabled,created_at,updated_at,last_login_at) VALUES(%s,%s,%s,%s,%s,%s,%s,%s)", qs(u.ID), qs(u.Username), qs(u.PasswordHash), qs(u.Role), qb(u.Enabled), qt(u.CreatedAt), qt(u.UpdatedAt), qt(u.LastLoginAt)))
+	return s.db.ExecSQL(ctx, userInsertSQL(u))
+}
+func (s *Store) CreateInitialUser(ctx context.Context, u *domain.User) error {
+	return s.db.InTransaction(ctx, func(tx *postgresconnector.SQLTransaction) error {
+		// Serialize this one-time bootstrap with every concurrent user insert.
+		if err := tx.ExecSQL(ctx, "LOCK TABLE users IN SHARE ROW EXCLUSIVE MODE"); err != nil {
+			return err
+		}
+		r, err := tx.QuerySQL(ctx, "SELECT 1 FROM users LIMIT 1")
+		if err != nil {
+			return err
+		}
+		if len(r.Rows) != 0 {
+			return repository.ErrConflict
+		}
+		return tx.ExecSQL(ctx, userInsertSQL(u))
+	})
 }
 func (s *Store) UpdateUser(ctx context.Context, u *domain.User) error {
-	return s.db.ExecSQL(ctx, fmt.Sprintf("UPDATE users SET username=%s,password_hash=%s,role=%s,enabled=%s,updated_at=%s,last_login_at=%s WHERE id=%s", qs(u.Username), qs(u.PasswordHash), qs(u.Role), qb(u.Enabled), qt(u.UpdatedAt), qt(u.LastLoginAt), qs(u.ID)))
+	var committed domain.User
+	err := s.db.InTransaction(ctx, func(tx *postgresconnector.SQLTransaction) error {
+		// Acquire before reading the row/count: the next statement gets a fresh
+		// READ COMMITTED snapshot after the previous administrator commits.
+		if err := tx.ExecSQL(ctx, "SELECT pg_advisory_xact_lock(5849328471001)"); err != nil {
+			return err
+		}
+		r, err := tx.QuerySQL(ctx, "SELECT "+userCols()+" FROM users WHERE id="+qs(u.ID)+" FOR UPDATE")
+		if err != nil {
+			return err
+		}
+		if len(r.Rows) == 0 {
+			return errors.New("user not found")
+		}
+		previous := parseUser(r.Rows[0])
+		if previous.Revision != u.Revision {
+			return repository.ErrConflict
+		}
+		if previous.Enabled && previous.Role == "admin" && (!u.Enabled || u.Role != "admin") {
+			admins, err := tx.QuerySQL(ctx, "SELECT id FROM users WHERE enabled AND role='admin' AND id<>"+qs(u.ID)+" LIMIT 1")
+			if err != nil {
+				return err
+			}
+			if len(admins.Rows) == 0 {
+				return repository.ErrLastAdmin
+			}
+		}
+		q := fmt.Sprintf("UPDATE users SET username=%s,password_hash=%s,role=%s,enabled=%s,updated_at=%s,last_login_at=GREATEST(last_login_at,%s),revision=revision+1 WHERE id=%s AND revision=%d RETURNING "+userCols(), qs(u.Username), qs(u.PasswordHash), qs(u.Role), qb(u.Enabled), qt(u.UpdatedAt), qt(u.LastLoginAt), qs(u.ID), u.Revision)
+		r, err = tx.QuerySQL(ctx, q)
+		if err != nil {
+			return err
+		}
+		if len(r.Rows) == 0 {
+			return repository.ErrConflict
+		}
+		committed = parseUser(r.Rows[0])
+		if !committed.Enabled || committed.PasswordHash != previous.PasswordHash {
+			_, err = tx.QueryParams(ctx, "DELETE FROM dts_personal_tokens WHERE user_id=$1", u.ID)
+			return err
+		}
+		return nil
+	})
+	if err == nil {
+		*u = committed
+	}
+	return err
 }
+func (s *Store) UpdateUserLastLogin(ctx context.Context, id string, at time.Time) error {
+	return s.db.ExecSQL(ctx, fmt.Sprintf("UPDATE users SET last_login_at=GREATEST(last_login_at,%s) WHERE id=%s", qt(at), qs(id)))
+}
+
 func (s *Store) GetUser(ctx context.Context, id string) (*domain.User, error) {
-	r, e := s.db.QuerySQL(ctx, "SELECT "+userCols()+" FROM users WHERE id="+qs(id))
+	r, e := s.db.QueryParams(ctx, "SELECT "+userCols()+" FROM users WHERE id=$1", id)
 	if e != nil {
 		return nil, e
 	}
 	if len(r.Rows) == 0 {
-		return nil, errors.New("not found")
+		return nil, repository.ErrNotFound
 	}
 	v := parseUser(r.Rows[0])
 	return &v, nil
 }
 func (s *Store) GetUserByUsername(ctx context.Context, name string) (*domain.User, error) {
-	r, e := s.db.QuerySQL(ctx, "SELECT "+userCols()+" FROM users WHERE username="+qs(name))
+	r, e := s.db.QueryParams(ctx, "SELECT "+userCols()+" FROM users WHERE username=$1", name)
 	if e != nil {
 		return nil, e
 	}
 	if len(r.Rows) == 0 {
-		return nil, errors.New("not found")
+		return nil, repository.ErrNotFound
 	}
 	v := parseUser(r.Rows[0])
 	return &v, nil
@@ -1295,6 +1483,27 @@ func (s *Store) ListTableChunksPage(ctx context.Context, taskID, tableID string,
 		out = append(out, v)
 	}
 	return out, nil
+}
+
+func (s *Store) NumericRangeCoverage(ctx context.Context, table domain.MigrationTable) (bool, error) {
+	// Order by key bounds. Adaptive children have newer chunk numbers than
+	// later ranges. Cast before subtraction to cover the complete BIGINT domain.
+	q := fmt.Sprintf(`WITH ranges AS (
+ SELECT start_value, end_value, split_type,
+   lag(end_value) OVER w AS previous_end, lead(start_value) OVER w AS next_start
+ FROM migration_chunks WHERE task_id=%s AND table_id=%s
+ WINDOW w AS (ORDER BY start_value,id)
+)
+SELECT COALESCE(bool_and(
+ split_type IN ('PRIMARY_KEY_RANGE','PK_RANGE','PK_RANGE_ADAPTIVE','PK_RANGE_REBALANCED')
+ AND start_value<=end_value
+ AND CASE WHEN previous_end IS NULL THEN start_value=%d ELSE start_value::numeric-previous_end=1 END
+ AND (next_start IS NOT NULL OR end_value=%d)), false) FROM ranges`, qs(table.TaskID), qs(table.ID), table.MinPK, table.MaxPK)
+	r, err := s.db.QuerySQL(ctx, q)
+	if err != nil {
+		return false, err
+	}
+	return len(r.Rows) == 1 && sv(r.Rows[0], 0) == "t", nil
 }
 
 func (s *Store) HasValidationResults(ctx context.Context, taskID string) (bool, error) {

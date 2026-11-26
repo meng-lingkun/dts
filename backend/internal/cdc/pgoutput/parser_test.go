@@ -2,6 +2,7 @@ package pgoutput
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/binary"
 	"testing"
 	"time"
@@ -107,5 +108,33 @@ func TestLSNRoundTrip(t *testing.T) {
 	}
 	if FormatLSN(v) != "16/B374D848" {
 		t.Fatal(FormatLSN(v))
+	}
+}
+
+func TestBinaryFieldsUseOriginalBytes(t *testing.T) {
+	rel := Relation{Columns: []Column{{Name: "label", TypeOID: 25}, {Name: "raw", Flags: 1, TypeOID: 17}}}
+	raw := []byte{0, 255, '\\', 'x'}
+	for _, v := range []TupleValue{{Kind: 't', Data: []byte("\\x00ff5c78")}, {Kind: 't', Data: []byte("\\000\\377\\\\x")}, {Kind: 'b', Data: raw}} {
+		fields, err := tupleFields(rel, []TupleValue{v}, true)
+		if err != nil || len(fields) != 1 || fields[0].Column != "raw" || fields[0].Value != base64.StdEncoding.EncodeToString(raw) || fields[0].Encoding != "base64" {
+			t.Fatalf("fields=%+v, err=%v", fields, err)
+		}
+	}
+	for _, input := range []string{"\\x1", "\\xgg", "\\401", "\\04", "\\q"} {
+		if _, err := tupleFields(rel, []TupleValue{{Kind: 't', Data: []byte(input)}}, true); err == nil {
+			t.Errorf("accepted malformed bytea %q", input)
+		}
+	}
+	if _, err := tupleFields(rel, []TupleValue{{Kind: 't', Data: []byte("missing raw column")}}, false); err == nil {
+		t.Fatal("accepted incomplete row")
+	}
+}
+
+// Strict parsing matters because positions also enter replication commands.
+func TestLSNRejectsTrailingText(t *testing.T) {
+	for _, input := range []string{"A/1tail", "A/1 extra", "1/", "1/100000000"} {
+		if _, err := ParseLSN(input); err == nil {
+			t.Errorf("accepted %q", input)
+		}
 	}
 }

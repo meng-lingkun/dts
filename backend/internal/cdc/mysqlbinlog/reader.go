@@ -12,12 +12,25 @@ var FileMagic = []byte{0xfe, 'b', 'i', 'n'}
 
 type Reader struct {
 	r      *bufio.Reader
-	parser Parser
-	magic  bool
+	parser EventParser
 }
 
 func NewReader(r io.Reader, checksumBytes int) *Reader {
-	return &Reader{r: bufio.NewReader(r), parser: Parser{ChecksumBytes: checksumBytes}}
+	return &Reader{r: bufio.NewReader(r), parser: NewEventParser(checksumBytes)}
+}
+
+// EventParser accepts one complete binlog event at a time.
+type EventParser interface {
+	Parse([]byte) (*Event, error)
+}
+
+// NewEventParser selects per-file negotiation with -1, or fixed trailer
+// lengths for inspecting event fragments that lack a format description.
+func NewEventParser(checksumBytes int) EventParser {
+	if checksumBytes == -1 {
+		return &StreamParser{}
+	}
+	return Parser{ChecksumBytes: checksumBytes}
 }
 
 // ReadMagic validates the 4-byte header present in raw mysql-bin.* files.
@@ -32,7 +45,6 @@ func (r *Reader) ReadMagic() error {
 			return fmt.Errorf("invalid binlog file magic %x", buf)
 		}
 	}
-	r.magic = true
 	return nil
 }
 

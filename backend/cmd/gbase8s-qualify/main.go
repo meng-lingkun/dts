@@ -16,7 +16,7 @@ import (
 	"dts/backend/internal/domain"
 )
 
-const toolVersion = "0.15.0-rc49"
+const toolVersion = "0.15.0-rc50"
 
 type check struct {
 	Name       string         `json:"name"`

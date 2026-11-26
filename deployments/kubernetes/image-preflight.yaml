@@ -13,7 +13,7 @@ spec:
       automountServiceAccountToken: false
       initContainers:
       - name: web-image
-        image: dts/web:0.15.0-rc49
+        image: dts/web:0.15.0-rc50
         imagePullPolicy: Never
         command: ["/bin/sh", "-c", "true"]
       - name: postgres-image
@@ -22,7 +22,7 @@ spec:
         command: ["/bin/sh", "-c", "true"]
       containers:
       - name: server-image
-        image: dts/server:0.15.0-rc49
+        image: dts/server:0.15.0-rc50
         imagePullPolicy: Never
         command: ["/bin/sh", "-c", "sleep 3600"]
         resources:

@@ -1,6 +1,6 @@
 # Kubernetes deployment
 
-Kubernetes with containerd is the only supported container deployment path. Docker is used only to build and export images; no Docker Engine or Compose installation is required on application nodes. The package entry points are `sh install.sh`, `sh verify.sh` and `sh uninstall.sh` (preserving data and Secrets).
+The Kubernetes package uses containerd on application nodes. Its entry points are `sh install.sh`, `sh verify.sh` and `sh uninstall.sh` (preserving data and Secrets). The separate single-node Docker distribution is described in [Compose offline](../compose-offline/README.md).
 
 `dts.yaml` provides the distributed application topology:
 
@@ -24,14 +24,14 @@ kubectl -n dts create secret generic dts-secrets \
   --from-literal=master-key="$(openssl rand -hex 48)" \
   --from-literal=worker-token="$(openssl rand -hex 48)" \
   --from-literal=auth-secret="$(openssl rand -hex 48)" \
-  --from-literal=bootstrap-admin-password='Cljslrl0620!'
+  --from-literal=bootstrap-admin-password="$(openssl rand -hex 32)"
 kubectl apply -f deployments/kubernetes/postgres.yaml
 kubectl apply -f deployments/kubernetes/spool-pvc.yaml
 kubectl apply -f deployments/kubernetes/dts.yaml
 kubectl -n dts port-forward svc/web 8088:80
 ```
 
-The initial username is `admin` and the initial password is `Cljslrl0620!`. Change it immediately in **用户与权限** after the first login. The bootstrap value creates a missing user only; it never resets an existing administrator.
+The initial username is `admin`. The example creates an independent random initial password; an authorized cluster administrator can retrieve it from the `bootstrap-admin-password` field of `dts-secrets`. The offline installer also saves the generated credentials in `INITIAL_ADMIN_CREDENTIALS.txt` with mode 600. Production bootstrap passwords must contain at least 16 characters and must not be placeholders. The bootstrap value creates a missing user only; it never resets an existing administrator. Existing installations must rotate historical default passwords themselves.
 
 Images use local offline tags and `imagePullPolicy: Never`. Import all three image archives into every schedulable node before deployment, or use `deployments/offline/load-images-kubernetes.sh` from the offline package. `install-kubernetes.sh` automates Secret creation, manifest application and rollout checks against an existing cluster.
 
@@ -105,3 +105,10 @@ For multi-Server deployments you may replace the RWX filesystem spool with `DTS_
 # Customer database DNS
 
 Database hostnames are supported. Pods use cluster DNS and do not inherit node hosts files. Configure enterprise DNS conditional forwarding in CoreDNS for dynamic endpoints, or use the packaged installer's `DTS_DNS_PATCH_FILE` with `dns-hosts.patch.example.yaml` for static hostAliases on both server and worker Deployments. This example is a merge patch, not a resource to apply directly. See [customer DNS configuration and verification](../offline/README.md#客户数据库域名解析) for installation, updates, and cutover limitations.
+### Optional pod ingress isolation
+
+On a cluster with NetworkPolicy enforcement, apply `kubectl apply -f deployments/kubernetes/network-policy.yaml` after checking maintenance and monitoring clients. It restricts inbound traffic to the API and bundled database, and denies inbound traffic to workers. Web remains the user-facing ingress. Cross-namespace scrapers must run in a namespace labeled `dts-metrics-access=true` and carry the pod label `dts-metrics-client=true`. An external metadata service and outbound migrations use the site's existing network rules. Give dedicated maintenance jobs explicit access before enabling this profile.
+
+With External Secrets Operator installed, configure a namespace-scoped SecretStore and the five external secret keys in `external-secret.example.yaml`, then wait for its Ready condition before installing with the existing Secret. For CSI or secret-agent file mounts, use `DTS_METADATA_PASSWORD_FILE`, `DTS_MASTER_KEY_FILE`, `DTS_AUTH_SECRET_FILE`, `DTS_WORKER_TOKEN_FILE` and `DTS_BOOTSTRAP_ADMIN_PASSWORD_FILE` in place of the corresponding literal environment variables. Values are loaded at process startup. Schedule a coordinated restart for credential changes and use the documented data re-encryption procedure when changing the encryption key.
+
+Set `DTS_LOG_FORMAT=json` to collect single-line JSON HTTP request logs with a request ID, path, method and latency. Set `DTS_METRICS_TOKEN_FILE` on all Server replicas to require a dedicated Bearer token for Prometheus, including requests proxied by Web.

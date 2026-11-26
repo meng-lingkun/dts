@@ -31,7 +31,7 @@ type layerEntry struct {
 
 func main() {
 	var binaryDir, webDir, nginxConfig, outputDir, version, baseWebArchive, imageList, registryPrefix, mergeList, mergedArchive string
-	var serverOnly bool
+	var serverOnly, webOnly bool
 	flag.StringVar(&binaryDir, "binary-dir", "", "directory containing linux/amd64 DTS binaries")
 	flag.StringVar(&webDir, "web-dir", "", "built web dist directory")
 	flag.StringVar(&nginxConfig, "nginx-config", "", "nginx default.conf")
@@ -39,11 +39,15 @@ func main() {
 	flag.StringVar(&version, "version", "", "DTS version")
 	flag.StringVar(&baseWebArchive, "base-web-archive", "", "existing web Docker archive to refresh without a registry")
 	flag.BoolVar(&serverOnly, "server-only", false, "build only the server image archive")
+	flag.BoolVar(&webOnly, "web-only", false, "build only the web image with its pinned nginx runtime")
 	flag.StringVar(&imageList, "image-list", "", "file of exact image references to export without rebuilding applications")
 	flag.StringVar(&registryPrefix, "registry-prefix", "", "optional public mirror prefix for image-list downloads; canonical tags are preserved")
 	flag.StringVar(&mergeList, "merge-list", "", "file of Docker image archive paths to combine")
 	flag.StringVar(&mergedArchive, "merged-archive", "", "output multi-image Docker tar")
 	flag.Parse()
+	if serverOnly && webOnly {
+		fatalf("choose either --server-only or --web-only")
+	}
 	if mergeList != "" {
 		if mergedArchive == "" {
 			fatalf("--merged-archive is required")
@@ -130,7 +134,7 @@ func main() {
 		return
 	}
 	required := map[string]string{"output-dir": outputDir, "version": version}
-	if baseWebArchive == "" {
+	if baseWebArchive == "" && !webOnly {
 		required["binary-dir"] = binaryDir
 	}
 	if !serverOnly {
@@ -163,15 +167,17 @@ func main() {
 		return
 	}
 
-	server, err := buildServer(ctx, platform, binaryDir)
-	if err != nil {
-		fatalf("build server image: %v", err)
-	}
-	if err := writeImage(filepath.Join(outputDir, "dts-server-"+version+".tar"), "dts/server:"+version, server); err != nil {
-		fatalf("write server image: %v", err)
-	}
-	if serverOnly {
-		return
+	if !webOnly {
+		server, err := buildServer(ctx, platform, binaryDir)
+		if err != nil {
+			fatalf("build server image: %v", err)
+		}
+		if err := writeImage(filepath.Join(outputDir, "dts-server-"+version+".tar"), "dts/server:"+version, server); err != nil {
+			fatalf("write server image: %v", err)
+		}
+		if serverOnly {
+			return
+		}
 	}
 
 	web, err := buildWeb(ctx, platform, webDir, nginxConfig)
@@ -180,6 +186,9 @@ func main() {
 	}
 	if err := writeImage(filepath.Join(outputDir, "dts-web-"+version+".tar"), "dts/web:"+version, web); err != nil {
 		fatalf("write web image: %v", err)
+	}
+	if webOnly {
+		return
 	}
 
 	postgres, err := pullImage(ctx, "postgres:17", platform)
@@ -236,7 +245,7 @@ func buildServer(ctx context.Context, platform v1.Platform, binaryDir string) (v
 	}
 	entries := map[string]layerEntry{}
 	required := []string{
-		"dts-server", "dts-worker", "dtsctl", "dts-cdc-bridge", "dts-binlog-inspect",
+		"dts-server", "dts-worker", "dtsctl", "dts-certgen", "dts-cdc-bridge", "dts-binlog-inspect",
 		"dts-mysql-cdc", "dts-tidb-cdc", "dts-postgres-cdc", "dts-opengauss-cdc",
 		"dts-gaussdb-cdc", "dts-sqlserver-cdc", "dts-oracle-cdc", "dts-db2-cdc",
 		"dts-dameng-cdc", "dts-gbase-cdc", "dts-gbase8s-cdc",
@@ -277,7 +286,7 @@ func buildServer(ctx context.Context, platform v1.Platform, binaryDir string) (v
 }
 
 func buildWeb(ctx context.Context, platform v1.Platform, webDir, nginxConfig string) (v1.Image, error) {
-	base, err := pullImage(ctx, "nginxinc/nginx-unprivileged:1.29-alpine", platform)
+	base, err := pullImage(ctx, "nginx/nginx-unprivileged:stable-alpine-slim@sha256:64a2a533a92f64b868d5f6d262dbc8c9bdc0302154f631389170ac409761047a", platform)
 	if err != nil {
 		return nil, err
 	}
@@ -432,7 +441,10 @@ func makeLayer(entries map[string]layerEntry) (v1.Layer, error) {
 	if err := tw.Close(); err != nil {
 		return nil, err
 	}
-	return tarball.LayerFromReader(bytes.NewReader(data.Bytes()))
+	payload := data.Bytes()
+	return tarball.LayerFromOpener(func() (io.ReadCloser, error) {
+		return io.NopCloser(bytes.NewReader(payload)), nil
+	})
 }
 
 func readFirstTarFile(compressed []byte, wanted string) ([]byte, error) {

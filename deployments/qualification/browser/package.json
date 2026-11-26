@@ -1,0 +1,7 @@
+{
+  "name": "dts-browser-qualification",
+  "private": true,
+  "type": "module",
+  "scripts": {"test": "node --test session.test.mjs"},
+  "devDependencies": {"playwright-core": "1.61.1"}
+}

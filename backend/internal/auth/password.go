@@ -60,16 +60,17 @@ func pbkdf2SHA256(password, salt []byte, iterations, keyLen int) []byte {
 	hLen := sha256.Size
 	blocks := (keyLen + hLen - 1) / hLen
 	out := make([]byte, 0, blocks*hLen)
+	mac := hmac.New(sha256.New, password)
 	for block := 1; block <= blocks; block++ {
-		mac := hmac.New(sha256.New, password)
+		mac.Reset()
 		_, _ = mac.Write(salt)
 		mac.Write([]byte{byte(block >> 24), byte(block >> 16), byte(block >> 8), byte(block)})
 		u := mac.Sum(nil)
 		t := append([]byte(nil), u...)
 		for i := 1; i < iterations; i++ {
-			mac = hmac.New(sha256.New, password)
+			mac.Reset()
 			_, _ = mac.Write(u)
-			u = mac.Sum(nil)
+			u = mac.Sum(u[:0])
 			for j := range t {
 				t[j] ^= u[j]
 			}

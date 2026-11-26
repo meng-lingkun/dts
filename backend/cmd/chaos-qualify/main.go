@@ -16,7 +16,7 @@ import (
 	"dts/backend/internal/repository/memory"
 )
 
-const toolVersion = "0.15.0-rc49"
+const toolVersion = "0.15.0-rc50"
 
 type state struct {
 	writes, deletes, begins, commits, rollbacks int
@@ -39,7 +39,10 @@ func (*conn) ListTables(context.Context, string) ([]domain.TableInfo, error) { r
 func (*conn) GetTableMetadata(context.Context, string, string) (*domain.TableMetadata, error) {
 	return nil, errors.New("not used")
 }
-func (*conn) Close() error { return nil }
+func (*conn) Close() error                                            { return nil }
+func (*conn) EnsureExecutionFence(context.Context) error              { return nil }
+func (*conn) VerifyFencedTable(context.Context, string, string) error { return nil }
+func (*conn) FenceTransaction(context.Context, string, int64) error   { return nil }
 func (*conn) ReadBatch(context.Context, connector.ReadBatchRequest) (*connector.RowBatch, error) {
 	return &connector.RowBatch{}, nil
 }

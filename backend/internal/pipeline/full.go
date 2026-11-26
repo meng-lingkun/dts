@@ -138,7 +138,11 @@ func (r Runner) Run(parent context.Context, cfg Config) (Stats, error) {
 	}
 	cfg = normalizeConfig(cfg)
 	ctx, cancel := context.WithCancel(parent)
-	defer cancel()
+	readerDone := make(chan struct{})
+	defer func() {
+		cancel()
+		<-readerDone
+	}()
 
 	var batchRows atomic.Int64
 	batchRows.Store(int64(cfg.InitialBatchRows))
@@ -147,8 +151,9 @@ func (r Runner) Run(parent context.Context, cfg Config) (Stats, error) {
 	ch := make(chan readResult, cfg.BufferBatches)
 
 	go func() {
+		defer close(readerDone)
 		defer close(ch)
-		for {
+		for ctx.Err() == nil {
 			limit := clamp(int(batchRows.Load()), cfg.MinBatchRows, cfg.MaxBatchRows)
 			b, err := r.Read(ctx, limit)
 			if err != nil {
@@ -167,14 +172,16 @@ func (r Runner) Run(parent context.Context, cfg Config) (Stats, error) {
 			case <-ctx.Done():
 				return
 			}
-			if b.Rows < limit {
-				return
-			}
+			// Connectors may impose their own page size. Only an empty page
+			// means the current range or keyset has been exhausted.
 		}
 	}()
 
 	stats := cfg.InitialStats
 	for item := range ch {
+		if err := ctx.Err(); err != nil {
+			return stats, err
+		}
 		if item.err != nil {
 			return stats, item.err
 		}
@@ -244,5 +251,5 @@ func (r Runner) Run(parent context.Context, cfg Config) (Stats, error) {
 			}
 		}
 	}
-	return stats, nil
+	return stats, ctx.Err()
 }

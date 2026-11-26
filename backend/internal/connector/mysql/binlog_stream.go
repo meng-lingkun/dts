@@ -2,12 +2,12 @@ package mysqlconnector
 
 import (
 	"context"
+	"dts/backend/internal/cdc/mysqlbinlog"
+	"dts/backend/internal/connector"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
-	"dts/backend/internal/cdc/mysqlbinlog"
-	"dts/backend/internal/connector"
 )
 
 const (
@@ -18,6 +18,15 @@ const (
 
 type binlogStream struct {
 	client *protocolClient
+}
+
+// The replica session variable selects the checksum for the synthetic rotate
+// before the first file. Each actual file advertises its mode in its FDE.
+func negotiateBinlogChecksum(ctx context.Context, p *protocolClient) error {
+	if _, err := p.exec(ctx, "SET @master_binlog_checksum='NONE'"); err != nil {
+		return fmt.Errorf("negotiate MySQL replication checksum: %w", err)
+	}
+	return nil
 }
 
 func (s *binlogStream) Close() error {
@@ -75,11 +84,8 @@ func (c *Connector) OpenBinlogStream(ctx context.Context, file string, position 
 		return nil, err
 	}
 	fail := func(e error) (connector.RawCDCStream, error) { _ = p.close(); return nil, e }
-	// Ask the server to omit trailing CRC32 bytes. This keeps the native parser
-	// deterministic; production deployments can later enable checksum verify mode.
-	if _, err := p.exec(ctx, "SET @master_binlog_checksum='NONE'"); err != nil {
-		// Some compatible databases do not expose this session variable. Continue:
-		// the parser can be configured with a 4-byte checksum when needed.
+	if err := negotiateBinlogChecksum(ctx, p); err != nil {
+		return fail(err)
 	}
 	payload := make([]byte, 1+4+2+4+len(file))
 	payload[0] = comBinlogDump
@@ -119,8 +125,8 @@ func (c *Connector) OpenBinlogGTIDStream(ctx context.Context, gtidSet string, se
 		return nil, err
 	}
 	fail := func(e error) (connector.RawCDCStream, error) { _ = p.close(); return nil, e }
-	if _, err := p.exec(ctx, "SET @master_binlog_checksum='NONE'"); err != nil {
-		// Compatible servers may not expose the variable; streaming can still work.
+	if err := negotiateBinlogChecksum(ctx, p); err != nil {
+		return fail(err)
 	}
 	// COM_BINLOG_DUMP_GTID payload:
 	// command, flags, server-id, filename-len, filename, position(uint64),

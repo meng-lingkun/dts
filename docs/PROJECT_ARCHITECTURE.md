@@ -1,6 +1,7 @@
 # DTS 项目架构文档
 
-文档基线：`0.15.0-rc49`  
+文档基线为 `0.15.0-rc50`。
+
 分析日期：2026-09-02  
 事实来源：当前仓库代码、部署清单和自动化脚本；历史 Release Notes 仅作参考。
 
@@ -65,7 +66,7 @@ Web 和 CLI 属于管理面；Server 负责生命周期、策略和持久化；W
 - 校验中心、割接中心、监控中心；
 - Worker、告警、审计、用户与权限、访问设置。
 
-`web/src/api/client.ts` 统一处理 Session Token、静态 API Token、Blob 下载和 WebSocket 鉴权。Nginx 在生产镜像中托管静态资源并将 `/api/`、`/metrics` 代理到 Server。
+`web/src/api/client.ts` 使用同源会话 Cookie 访问 API、下载 Blob 和连接 WebSocket。Server 签发 HttpOnly Cookie 并校验浏览器写请求和 WebSocket 的来源。Nginx 在生产镜像中托管静态资源并将 `/api/`、`/metrics` 代理到 Server。
 
 当前前端仍是轻量管理台：业务状态主要留在各 Vue 页面内，Pinia 虽已安装但未承担统一会话、权限和任务状态管理。
 
@@ -161,7 +162,9 @@ CREATED
 
 `PAUSED`、`FAILED`、`CANCELLED` 是旁路状态。状态转换由 `internal/migration/state_machine.go` 显式约束。
 
-Server 为 Precheck 和 Validation 写入带 TTL 的 `control_operation_leases` 并持续续租。启动后每 30 秒巡检中断状态：Precheck 可安全重放，Validation 会清理本轮不完整结果后重跑；Prepare 一旦可能修改目标对象便不自动重放，租约过期后失败关闭并要求人工核查。Cutover/Rollback 尚未拆为持久 Saga，是当前控制面韧性的主要剩余缺口。
+Server 为 Precheck、Validation、Cutover 和 Rollback 写入带 TTL 的 `control_operation_leases` 并持续续租，File/S3 和加密包装层均保留租约能力。启动后每 30 秒巡检中断状态：Precheck 可安全重放，Validation 会清理本轮不完整结果后重跑；Prepare 一旦可能修改目标对象便不自动重放，租约过期后失败关闭并要求人工核查。最终割接/回切的 RUNNING 状态中断后同样失败关闭；尚未拆为持久 Saga，也未实现完整的跨 Server 数据面 fencing，详见[企业就绪度复查](ENTERPRISE_READINESS.md)。
+
+CDC 直接/托管 Apply、Spool 排空、死信处置、进度上报和校验屏障还共享按任务、方向划分的 `cdc_spool_drain_leases`。每次执行使用独立 Owner 并续期，COMMIT 与 Checkpoint 前检查租约；直接 Apply 先处理历史 Spool，未解决死信阻止后续事务越过。该协调依赖所有 Server 使用同一版本，不等同于目标库提交的原子 fencing。
 
 ## 9. 数据与持久化
 
@@ -184,7 +187,7 @@ Server 为 Precheck 和 Validation 写入带 TTL 的 `control_operation_leases` 
 
 ### 9.3 Schema 版本
 
-Server 启动时会执行嵌入的幂等 `schema.sql`；外部脚本也可以按顺序执行 `backend/migrations/*.sql`。`/readyz` 会比较 `metadata_schema_state.schema_version` 与二进制版本，当前期望值为 `0.15.0-rc49`。
+Server 和手工升级脚本共用幂等 `schema.sql`。每个 Server 通过有界连接池访问元数据库，事务独占连接直至提交或回滚。`/readyz` 会比较 `metadata_schema_state.schema_version` 与二进制版本，当前期望值为 `0.15.0-rc50`。
 
 ## 10. Connector 能力边界
 
@@ -207,7 +210,7 @@ Server 启动时会执行嵌入的幂等 `schema.sql`；外部脚本也可以按
 
 ### 运行底座
 
-Kubernetes 是唯一容器部署入口，使用 containerd 执行 Pod。Server、Worker、Web 通过 Deployment 和 Service 管理，元数据及 Spool 使用持久存储。Dockerfile 与 Docker 镜像格式用于制作和分发镜像，运行阶段不依赖 Docker Engine 或 Compose。
+多节点使用 Kubernetes/containerd 执行 Pod。Server、Worker、Web 通过 Deployment 和 Service 管理，元数据及 Spool 使用持久存储。单机可以使用独立的 Docker Compose 离线包，其中包含 Docker Engine、Compose v2 和所需镜像。
 
 ### Kubernetes 示例
 
@@ -224,7 +227,23 @@ Kubernetes 是唯一容器部署入口，使用 containerd 执行 Pod。Server�
 - Readiness：`/readyz`；
 - Prometheus：`/metrics`。
 
-API 覆盖数据源、迁移、校验报告、CDC、DLQ、割接、Worker、用户、告警和审计。当前没有 OpenAPI 文件，接口契约以 Go Handler、Domain Model 和 CLI 为准。
+API 覆盖数据源、迁移、校验报告、CDC、DLQ、割接、Worker、用户、告警和审计。[OpenAPI 3.1 接口规范](openapi.json) 列出了 HTTP 路由、请求和响应类型、鉴权方式与状态码。修改接口后，在 `backend` 目录运行 `go run ./cmd/openapi-gen` 重新生成规范，运行 `go run ./cmd/openapi-gen -check` 检查与当前代码是否一致。
+
+API 响应通过 `X-Request-ID` 返回请求关联号。客户端传入 1–96 个字母、数字、点、下划线或连字符时沿用该值。JSON 错误包含 `error`、`code` 和 `request_id`，服务日志可按同一关联号查询。
+
+开发开放模式下，空用户库只允许首次登记一个已启用的管理员。多个请求同时创建首个账号时，只有一个请求会成功。各 Server 副本在放行开放模式请求及 WebSocket 推送前核对共享用户库，发现首次登记后即要求身份认证。启用 `DTS_AUTH_REQUIRED` 的部署需提前配置引导管理员或有效的静态凭据。
+
+登录会话登记在共享元数据库。用户可以在“访问设置”查看和撤销自己的会话，管理员可在“用户与权限 → 编辑”管理指定用户的会话。退出登录会撤销当前会话。后续 HTTP 请求和 WebSocket 推送会重新检查撤销状态。身份库暂时不可用时，API 返回 503，事件流稍后重连，恢复后仍可使用未过期的原会话。旧版本签发的有效会话在首次请求时自动登记，登记前不会出现在列表中。机器 Token 仍通过部署配置管理。
+
+升级时所有 Server 须切换到同一版本。使用外部迁移的实例需要按顺序执行 `084_v015_rc50_user_sessions.sql` 和 `085_v015_rc50_personal_tokens.sql`，包括元数据版本字段已经是 RC50 的实例。启用自动迁移的部署在启动时创建两张登记表。恢复备份可能恢复早期撤销状态，恢复后应更换各副本共同使用的 `DTS_AUTH_SECRET`，使历史登录会话和个人 API 令牌失效。
+
+登录后可在“访问设置 → 我的 API 令牌”签发或撤销本人使用的命令行凭据。API 客户端用有效的用户会话向 `POST /api/v1/auth/personal-tokens` 提交 `name` 和 RFC 3339 格式的 `expires_at`。名称最多 80 个字符，截止时间须在未来 365 天内，每个账号可保有 100 个有效令牌。创建响应的 `token` 只出现一次，客户端以 `Authorization: Bearer <token>` 访问业务 API。其他两个入口为 `GET /api/v1/auth/personal-tokens` 和 `DELETE /api/v1/auth/personal-tokens/{token_id}`。
+
+Server 按请求读取账号当前角色和有效期。账号禁用或修改密码时同步删除其个人令牌，重新启用账号需重新签发。个人令牌只支持 HTTP Bearer，WebSocket、Worker 内部接口和个人凭据管理均使用各自的认证方式。`DTS_OIDC_ONLY=true` 时个人令牌签发与认证均关闭。普通登录会话退出后，已签发的个人令牌可用至主动撤销、账号失效或截止时间。
+
+企业 OIDC 登录支持单一 HTTPS Issuer 的授权码流程，使用 PKCE S256、state、nonce 和远端 JWKS 验签。在所有 Server 副本设置相同的 `DTS_OIDC_ISSUER`、`DTS_OIDC_CLIENT_ID`、`DTS_OIDC_REDIRECT_URL` 和至少 32 字节的 `DTS_AUTH_SECRET`。机密客户端还需通过 Secret 设置 `DTS_OIDC_CLIENT_SECRET`。在身份提供方登记完整 HTTPS 回调地址，路径为 `/api/v1/auth/oidc/callback`。绑定配置 `DTS_OIDC_BINDINGS` 的示例为 `{"https://id.example.org":{"external-subject":"usr_123"}}`，其中值是 DTS 已有用户的不可变 ID。登录后沿用本地角色、禁用状态和会话撤销机制。更改绑定并重启所有副本后，每次使用已有企业会话都将重新核对绑定。
+
+设置 `DTS_OIDC_ONLY=true` 可强制用户使用企业登录，包括切换前签发的密码会话和静态用户 Token 都会被拒绝。独立 Worker 密钥仍用于节点通信。部署前应完成至少一个本地管理员的外部身份绑定。可将 `DTS_OIDC_REQUIRED_ACR` 设置为身份提供方定义的 MFA 保证级别，服务在授权时请求该值并校验签名 ID token 中的 `acr`。LDAP 对接或 MFA 验证器由身份提供方配置。
 
 ## 13. 安全模型
 

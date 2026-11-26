@@ -1,12 +1,14 @@
 package pgoutput
 
 import (
+	"dts/backend/internal/connector"
+	"dts/backend/internal/domain"
 	"encoding/base64"
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"dts/backend/internal/domain"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -66,12 +68,17 @@ func (d *Decoder) Relation(id uint32) (Relation, bool) { r, ok := d.relations[id
 
 func FormatLSN(v uint64) string { return fmt.Sprintf("%X/%X", uint32(v>>32), uint32(v)) }
 func ParseLSN(s string) (uint64, error) {
-	var hi, lo uint64
-	if _, err := fmt.Sscanf(s, "%X/%X", &hi, &lo); err != nil {
+	left, right, ok := strings.Cut(strings.TrimSpace(s), "/")
+	if !ok || len(left) > 8 || len(right) > 8 {
+		return 0, errors.New("invalid PostgreSQL LSN")
+	}
+	hi, err := strconv.ParseUint(left, 16, 32)
+	if err != nil {
 		return 0, err
 	}
-	if hi > 0xffffffff || lo > 0xffffffff {
-		return 0, errors.New("LSN component overflow")
+	lo, err := strconv.ParseUint(right, 16, 32)
+	if err != nil {
+		return 0, err
 	}
 	return hi<<32 | lo, nil
 }
@@ -198,7 +205,7 @@ func parseTuple(c *cursor) ([]TupleValue, error) {
 	return out, nil
 }
 
-func tupleFields(rel Relation, values []TupleValue, keyOnly bool) []domain.CDCField {
+func tupleFields(rel Relation, values []TupleValue, keyOnly bool) ([]domain.CDCField, error) {
 	columns := rel.Columns
 	if keyOnly && len(values) != len(rel.Columns) {
 		keys := make([]Column, 0, len(rel.Columns))
@@ -207,13 +214,14 @@ func tupleFields(rel Relation, values []TupleValue, keyOnly bool) []domain.CDCFi
 				keys = append(keys, col)
 			}
 		}
-		if len(keys) == len(values) {
-			columns = keys
-		}
+		columns = keys
+	}
+	if len(values) != len(columns) {
+		return nil, fmt.Errorf("pgoutput tuple for %s.%s has %d fields, expected %d", rel.Namespace, rel.Name, len(values), len(columns))
 	}
 	out := make([]domain.CDCField, 0, len(values))
 	for i, v := range values {
-		if i >= len(columns) || v.Kind == 'u' {
+		if v.Kind == 'u' {
 			continue
 		}
 		f := domain.CDCField{Column: columns[i].Name}
@@ -221,14 +229,26 @@ func tupleFields(rel Relation, values []TupleValue, keyOnly bool) []domain.CDCFi
 		case 'n':
 			f.Null = true
 		case 't':
-			f.Value = string(v.Data)
+			if columns[i].TypeOID == 17 { // bytea
+				data, err := connector.DecodePostgreSQLBytea(v.Data)
+				if err != nil {
+					return nil, fmt.Errorf("pgoutput bytea column %s: %w", f.Column, err)
+				}
+				f.Value = base64.StdEncoding.EncodeToString(data)
+				f.Encoding = "base64"
+			} else {
+				f.Value = string(v.Data)
+			}
 		case 'b':
+			if columns[i].TypeOID != 17 {
+				return nil, fmt.Errorf("unexpected binary pgoutput value for column %s (OID %d) in text-mode stream", f.Column, columns[i].TypeOID)
+			}
 			f.Value = base64.StdEncoding.EncodeToString(v.Data)
 			f.Encoding = "base64"
 		}
 		out = append(out, f)
 	}
-	return out
+	return out, nil
 }
 
 func (d *Decoder) decodeRelation(c *cursor) error {
@@ -285,9 +305,12 @@ func (d *Decoder) relationAndTuple(c *cursor) (Relation, []TupleValue, error) {
 	if !ok {
 		return Relation{}, nil, fmt.Errorf("unknown pgoutput relation %d", id)
 	}
-	_, e = c.u8()
+	tag, e := c.u8()
 	if e != nil {
 		return Relation{}, nil, e
+	}
+	if tag != 'N' {
+		return Relation{}, nil, fmt.Errorf("pgoutput INSERT expected new tuple, got %q", tag)
 	}
 	t, e := parseTuple(c)
 	return r, t, e
@@ -311,6 +334,9 @@ func (d *Decoder) Push(copyData []byte) (*Transaction, error) {
 	typ, _ := c.u8()
 	switch typ {
 	case 'B':
+		if d.current != nil {
+			return nil, errors.New("pgoutput BEGIN before prior transaction committed")
+		}
 		final, e := c.u64()
 		if e != nil {
 			return nil, e
@@ -368,7 +394,11 @@ func (d *Decoder) Push(copyData []byte) (*Transaction, error) {
 		if d.current == nil {
 			return nil, errors.New("pgoutput INSERT outside transaction")
 		}
-		d.current.Events = append(d.current.Events, domain.CDCEvent{ID: d.idPrefix + ":" + strconv.FormatUint(uint64(x.WALStart), 10), Operation: domain.CDCInsert, SourceSchema: r.Namespace, SourceTable: r.Name, After: tupleFields(r, t, false)})
+		afterFields, e := tupleFields(r, t, false)
+		if e != nil {
+			return nil, e
+		}
+		d.current.Events = append(d.current.Events, domain.CDCEvent{ID: d.idPrefix + ":" + strconv.FormatUint(uint64(x.WALStart), 10), Operation: domain.CDCInsert, SourceSchema: r.Namespace, SourceTable: r.Name, After: afterFields})
 	case 'U':
 		id, e := c.u32()
 		if e != nil {
@@ -404,7 +434,18 @@ func (d *Decoder) Push(copyData []byte) (*Transaction, error) {
 		if d.current == nil {
 			return nil, errors.New("pgoutput UPDATE outside transaction")
 		}
-		d.current.Events = append(d.current.Events, domain.CDCEvent{ID: d.idPrefix + ":" + strconv.FormatUint(uint64(x.WALStart), 10), Operation: domain.CDCUpdate, SourceSchema: r.Namespace, SourceTable: r.Name, Before: tupleFields(r, before, keyOnly), After: tupleFields(r, after, false)})
+		var beforeFields []domain.CDCField
+		if before != nil {
+			beforeFields, e = tupleFields(r, before, keyOnly)
+			if e != nil {
+				return nil, e
+			}
+		}
+		afterFields, e := tupleFields(r, after, false)
+		if e != nil {
+			return nil, e
+		}
+		d.current.Events = append(d.current.Events, domain.CDCEvent{ID: d.idPrefix + ":" + strconv.FormatUint(uint64(x.WALStart), 10), Operation: domain.CDCUpdate, SourceSchema: r.Namespace, SourceTable: r.Name, Before: beforeFields, After: afterFields})
 	case 'D':
 		id, e := c.u32()
 		if e != nil {
@@ -428,10 +469,16 @@ func (d *Decoder) Push(copyData []byte) (*Transaction, error) {
 		if d.current == nil {
 			return nil, errors.New("pgoutput DELETE outside transaction")
 		}
-		d.current.Events = append(d.current.Events, domain.CDCEvent{ID: d.idPrefix + ":" + strconv.FormatUint(uint64(x.WALStart), 10), Operation: domain.CDCDelete, SourceSchema: r.Namespace, SourceTable: r.Name, Before: tupleFields(r, before, tag == 'K')})
+		beforeFields, e := tupleFields(r, before, tag == 'K')
+		if e != nil {
+			return nil, e
+		}
+		d.current.Events = append(d.current.Events, domain.CDCEvent{ID: d.idPrefix + ":" + strconv.FormatUint(uint64(x.WALStart), 10), Operation: domain.CDCDelete, SourceSchema: r.Namespace, SourceTable: r.Name, Before: beforeFields})
 	case 'Y': // Type message; relation OIDs are sufficient for text-mode replay.
 		return nil, nil
-	case 'O', 'M', 'T': // origin/message/truncate are not row mutations in V0.5.
+	case 'T':
+		return nil, errors.New("pgoutput TRUNCATE requires manual handling; refusing to acknowledge an unapplied table mutation")
+	case 'O', 'M': // Logical messages contribute a committed checkpoint, not rows.
 		return nil, nil
 	default:
 		return nil, fmt.Errorf("unsupported pgoutput message type %q", typ)

@@ -1,14 +1,20 @@
 # DTS 使用手册
 
-适用版本：`0.15.0-rc49`
+适用源码版本为 `0.15.0-rc50`。
 
 ## 1. 使用前须知
 
 DTS 当前是 RC 版本。建议先在非生产环境完成目标数据库版本、数据类型、CDC 前置条件、长稳和故障恢复验证。
 
-Kubernetes 部署已强制认证和生产配置校验。新部署管理员账号默认为 `admin` / `Cljslrl0620!`，首次登录后必须立即修改；数据库密码、Master Key、Worker Token 和 Auth Secret 仍须使用互不相同的强随机值，并将私有环境文件排除在版本控制之外。
+Kubernetes 部署已强制认证和生产配置校验。新部署管理员账号默认为 `admin`，离线安装器生成随机密码并写入安装目录的 `INITIAL_ADMIN_CREDENTIALS.txt`（权限 600）；手工部署须设置至少 16 字符的独立随机密码。升级保留已有密码，历史部署应主动更换原默认密码。数据库密码、Master Key、Worker Token 和 Auth Secret 须使用互不相同的强随机值，并将私有环境文件排除在版本控制之外。重置账号密码后，旧登录会话失效，已有 WebSocket 在下一次推送周期关闭，需重新登录。
 
 ## 2. 环境要求
+
+### MySQL 原生增量迁移
+
+如果选中的源表含有 `ENUM` 或 `SET` 列，请在生成待迁移的 binlog **之前**，将源库的 `binlog_row_metadata` 设置为 `FULL`，并确认实际写入连接使用了该设置。DTS 通过行事件对应的 `TABLE_MAP` 获取当时的成员标签，将枚举序号和集合位图转换为原值。
+
+若恢复位置对应的旧日志缺少成员标签，DTS 会报告具体列名并停止解码。修改配置只影响之后生成的日志。恢复需要使用含完整标签的日志，或者在配置生效后重新建立全量基线，再从相应位点启动增量。
 
 ### Kubernetes 方式
 
@@ -19,14 +25,20 @@ Kubernetes 部署已强制认证和生产配置校验。新部署管理员账号
 
 ### 源码方式
 
-- Go 1.23；
+- Go 构建版本取自仓库根目录的 `.go-version`（本版为 1.26.11）；
 - Node.js 22 和 npm；
 - PostgreSQL 17（生产元数据模式）；
 - Linux 是正式构建/运行基线；File Spool 同时提供 Linux `statfs` 与 Windows `GetDiskFreeSpaceExW` 实现，便于开发机执行测试。
 
 ## 3. Kubernetes 离线安装
 
-使用 `dts-kubernetes-offline-<版本>-linux-amd64.tar.gz`，核验同名 SHA-256 文件后解压。在每个可调度节点运行：
+核验 `dts-kubernetes-offline-<版本>-linux-amd64.tar.gz` 的外层 SHA-256 后解压。完整建群包包含 `deploy.sh`、`CLUSTER_INSTALL.md` 和统一镜像包。将 `automation/inventory.single-node.example.ini` 或 `automation/inventory.multi-node.example.ini` 复制到包外，按实际机器填写 SSH 地址和安装目录，然后在解压目录执行：
+
+```bash
+bash deploy.sh /root/dts-hosts.ini
+```
+
+已有 Kubernetes 集群使用精简应用包时，在每个可调度节点运行：
 
 ```bash
 sudo sh load-images-kubernetes.sh
@@ -43,7 +55,7 @@ sh install.sh
 
 `sh verify.sh` 检查包完整性及 Kubernetes 运行状态；`sh uninstall.sh` 移除应用和入口，保留 PostgreSQL、PVC、namespace 和 Secret。重装需使用相同数据库及存储配置。
 
-本包包含应用镜像和 kubectl，不安装 Kubernetes 控制面、containerd、CNI 或 CSI。Docker Engine、Compose 已从运行与安装流程中移除。
+完整建群包另含 Kubernetes 1.32.5 工具和控制面镜像、containerd、CNI、Flannel、私有仓库镜像和麒麟系统 RPM。运行节点使用 containerd。多节点共享持久存储按现场环境配置。
 
 ## 4. 安全启动
 
@@ -52,7 +64,7 @@ sh install.sh
 | 配置 | 要求 |
 |---|---|
 | `DTS_AUTH_REQUIRED=true` | 强制 API 认证 |
-| `DTS_BOOTSTRAP_ADMIN_PASSWORD` | 首次启动创建管理员；包内默认 `Cljslrl0620!`，登录后立即修改并移除 |
+| `DTS_BOOTSTRAP_ADMIN_PASSWORD` | 首次启动创建管理员；生产至少 16 字符且禁止示例值；离线安装器随机生成，也可通过 `DTS_ADMIN_PASSWORD` 自行指定；不重置已有账号 |
 | `DTS_AUTH_SECRET` | 长随机值，用于 Session 签名 |
 | `DTS_MASTER_KEY` | 长随机值，用于静态加密；必须独立备份 |
 | `DTS_WORKER_TOKEN` | 长随机值，Server 与 Worker 一致 |
@@ -66,6 +78,10 @@ Kubernetes 清单通过 ConfigMap/Secret 传入这些配置。`DTS_PRODUCTION=tr
 ```text
 DTS_RBAC_TOKENS=admin:tokenA,dba:tokenB,operator:tokenC,viewer:tokenD
 ```
+
+浏览器升级后需要重新登录。控制台会移除本地保存的旧令牌，使用 HttpOnly、SameSite=Strict 会话 Cookie，HTTPS 下同时启用 Secure。生产环境请通过 HTTPS 访问，反向代理须保留浏览器的 Host 和端口。使用纯 HTTP NodePort 时，密码和会话在网络上传输时没有 TLS 保护。自动化客户端仍可使用 Bearer 或 `X-DTS-API-Token` 请求头。
+
+登录请求体上限为 8 KiB。每个 Server 副本按用户名和对端 IP 分别限制每分钟 8 次和 120 次登录，同时最多处理 4 次密码校验。达到限额时返回 HTTP 429，API 响应的 `Retry-After` 表示可重试的等待秒数。
 
 ## 5. 创建数据源
 
@@ -123,7 +139,7 @@ DTS_RBAC_TOKENS=admin:tokenA,dba:tokenB,operator:tokenC,viewer:tokenD
 ]
 ```
 
-支持的 Split Strategy：`AUTO`、`PRIMARY_KEY_RANGE`、`UNIQUE_KEY_RANGE`、`HASH`、`PARTITION`、`CUSTOM_SQL`。使用 `CUSTOM_SQL` 时只填写受限制的 `custom_where` 条件，不要拼接完整 SELECT。
+全量任务支持 `AUTO`、`PRIMARY_KEY_RANGE`、`UNIQUE_KEY_RANGE`、`HASH`、`PARTITION`、`CUSTOM_SQL`。其中 `CUSTOM_SQL` 按源表列过滤，例如 `tenant_id = 42 AND status IN ('READY', 'DONE')`。支持比较、`AND/OR/NOT`、`IS NULL`、`IN`、`BETWEEN` 和 `LIKE`，列可带当前源表名前缀。函数、子查询、反斜杠转义和多条语句均会被拒绝。带行过滤的旧任务升级前应核对条件，含 CDC 的任务须重新规划，因为增量事件按表选取。处理已经运行过的任务时，应先核对目标数据和位点。
 
 留空表映射时，系统按源端默认库/Schema 发现表；正式任务建议显式选择并复核对象范围。
 

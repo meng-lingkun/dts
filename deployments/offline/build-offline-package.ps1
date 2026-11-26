@@ -2,13 +2,33 @@ param(
     [string]$OutputDirectory = "",
     [ValidateSet("amd64")][string]$Architecture = "amd64",
     [switch]$FinalizeOnly,
-    [string]$ClusterPayloadDirectory = ""
+    [string]$ClusterPayloadDirectory = "",
+    [string]$CachedPackageDirectory = "",
+    [string]$RefreshedImageDirectory = ""
 )
 
 $ErrorActionPreference = "Stop"
+if ($CachedPackageDirectory -and ($FinalizeOnly -or $ClusterPayloadDirectory)) {
+    throw "CachedPackageDirectory is a full rebuild mode and supplies its own cluster payload."
+}
+if ($RefreshedImageDirectory -and -not $CachedPackageDirectory) {
+    throw "RefreshedImageDirectory requires CachedPackageDirectory."
+}
 $scriptDirectory = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repositoryRoot = [System.IO.Path]::GetFullPath((Join-Path $scriptDirectory "..\.."))
 $version = (Get-Content -LiteralPath (Join-Path $repositoryRoot "VERSION") -Raw).Trim()
+$goVersion = (Get-Content -LiteralPath (Join-Path $repositoryRoot ".go-version") -Raw).Trim()
+
+function Invoke-BuildGo {
+    $previousToolchain = $env:GOTOOLCHAIN
+    try {
+        $env:GOTOOLCHAIN = "go$goVersion"
+        & go @args
+        if ($LASTEXITCODE -ne 0) { throw "Go $goVersion command failed: $($args[0])" }
+    } finally {
+        $env:GOTOOLCHAIN = $previousToolchain
+    }
+}
 if (-not $OutputDirectory) { $OutputDirectory = Join-Path $repositoryRoot "dist" }
 $outputRoot = [System.IO.Path]::GetFullPath($OutputDirectory)
 $packageName = "dts-kubernetes-offline-$version-linux-$Architecture"
@@ -24,12 +44,24 @@ if (-not $stage.StartsWith($outputRoot + [System.IO.Path]::DirectorySeparatorCha
     -not ([System.IO.Path]::GetFullPath($archive)).StartsWith($outputRoot + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)) {
     throw "Refusing to clean stage outside output directory: $stage"
 }
+if ($CachedPackageDirectory) {
+    $CachedPackageDirectory = (Resolve-Path -LiteralPath $CachedPackageDirectory).Path
+    if (($CachedPackageDirectory + '\').StartsWith($stage + '\', [StringComparison]::OrdinalIgnoreCase) -or
+        ($CachedPackageDirectory + '\').StartsWith($binaryDirectory + '\', [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Runtime cache must be outside the build stage and binary directory."
+    }
+}
 if (-not $FinalizeOnly) {
     if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
     if (Test-Path -LiteralPath $binaryDirectory) { Remove-Item -LiteralPath $binaryDirectory -Recurse -Force }
     New-Item -ItemType Directory -Force -Path $stage, (Join-Path $stage "images"), (Join-Path $stage "bin"), (Join-Path $stage "migrations"), (Join-Path $stage "docs"), (Join-Path $stage "kubernetes"), $binaryDirectory | Out-Null
 } else {
     if (-not (Test-Path -LiteralPath (Join-Path $stage "images"))) { throw "FinalizeOnly requires existing image archives in $stage" }
+    foreach ($runtimeSecret in 'INITIAL_ADMIN_CREDENTIALS.txt', '.env') {
+        if (Test-Path -LiteralPath (Join-Path $stage $runtimeSecret)) {
+            throw "Refusing to package an installed directory containing $runtimeSecret. Finalize a clean build stage."
+        }
+    }
     New-Item -ItemType Directory -Force -Path (Join-Path $stage "bin"), (Join-Path $stage "migrations"), (Join-Path $stage "docs"), (Join-Path $stage "kubernetes") | Out-Null
 }
 
@@ -37,7 +69,7 @@ if (-not $FinalizeOnly) {
 Write-Host "[1/8] Building reproducible Web assets"
 Push-Location (Join-Path $repositoryRoot "web")
 try {
-    npm ci --ignore-scripts --no-audit --no-fund
+    npm ci --prefer-offline --ignore-scripts --no-audit --no-fund
     if ($LASTEXITCODE -ne 0) { throw "npm ci failed" }
     npm run build
     if ($LASTEXITCODE -ne 0) { throw "npm run build failed" }
@@ -64,8 +96,7 @@ try {
         if ($command -eq "server") { $outputName = "dts-server" }
         if ($command -eq "worker") { $outputName = "dts-worker" }
         if ($command -eq "dtsctl") { $outputName = "dtsctl" }
-        go build -trimpath -ldflags="-s -w" -o (Join-Path $binaryDirectory $outputName) "./cmd/$command"
-        if ($LASTEXITCODE -ne 0) { throw "Go build failed for $command" }
+        Invoke-BuildGo build -trimpath -ldflags="-s -w" -o (Join-Path $binaryDirectory $outputName) "./cmd/$command"
     }
 } finally {
     Pop-Location
@@ -75,12 +106,18 @@ try {
 }
 
 Write-Host "[3/8] Creating Docker-compatible Linux image archives without a daemon"
+if ($CachedPackageDirectory) {
+    $imageArguments = @()
+    if ($RefreshedImageDirectory) { $imageArguments = @("--runtime-images", $RefreshedImageDirectory) }
+    python (Join-Path $scriptDirectory "refresh-cached-runtime.py") --cache $CachedPackageDirectory --stage $stage --bin $binaryDirectory --web (Join-Path $repositoryRoot "web/dist") --nginx (Join-Path $repositoryRoot "deployments/nginx.conf") --version $version @imageArguments
+    if ($LASTEXITCODE -ne 0) { throw "Offline application rebuild failed" }
+} else {
 Push-Location (Join-Path $repositoryRoot "tools\offline-image-builder")
 try {
-    go run . --binary-dir $binaryDirectory --web-dir (Join-Path $repositoryRoot "web\dist") --nginx-config (Join-Path $repositoryRoot "deployments\nginx.conf") --output-dir (Join-Path $stage "images") --version $version
-    if ($LASTEXITCODE -ne 0) { throw "offline image builder failed" }
+    Invoke-BuildGo run . --binary-dir $binaryDirectory --web-dir (Join-Path $repositoryRoot "web\dist") --nginx-config (Join-Path $repositoryRoot "deployments\nginx.conf") --output-dir (Join-Path $stage "images") --version $version
 } finally {
     Pop-Location
+}
 }
 
 }
@@ -120,6 +157,8 @@ foreach ($tool in "kubeadm", "kubelet") {
     Get-VerifiedRuntimeFile -Uri "https://dl.k8s.io/release/v$($runtimeValues.KUBECTL_VERSION)/bin/linux/amd64/$tool" -Destination (Join-Path $runtimeDirectory $tool) -ExpectedSHA256 $runtimeValues["$($tool.ToUpperInvariant())_SHA256"]
 }
 Write-Host "[5/8] Staging installer and operational material"
+python (Join-Path $repositoryRoot "tools/s3-recovery/build.py") --out (Join-Path $stage "tools")
+if ($LASTEXITCODE -ne 0) { throw "S3 recovery tool build failed" }
 foreach ($file in "install.sh", "install-kubernetes.sh", "install-kubernetes-tools.sh", "load-images-kubernetes.sh", "verify.sh", "uninstall.sh", "uninstall-all.sh", "README.md") {
     Copy-Item -LiteralPath (Join-Path $scriptDirectory $file) -Destination $stage
 }
@@ -133,10 +172,17 @@ if (-not $FinalizeOnly) {
     throw "FinalizeOnly requires staged dtsctl and dts-certgen binaries from the matching release"
 }
 Copy-Item -Path (Join-Path $repositoryRoot "backend\migrations\*.sql") -Destination (Join-Path $stage "migrations")
-foreach ($doc in "USER_GUIDE.md", "MAINTENANCE_GUIDE.md", "PROJECT_ARCHITECTURE.md", "ARCHITECTURE_ASSESSMENT.md", "DTS_RENAME_UPGRADE.md") {
+Copy-Item -LiteralPath (Join-Path $repositoryRoot "backend/internal/repository/postgres/schema.sql") -Destination (Join-Path $stage "migrations/schema.sql")
+New-Item -ItemType Directory -Force -Path (Join-Path $stage "scripts") | Out-Null
+Copy-Item -LiteralPath (Join-Path $repositoryRoot "deployments/scripts/migrate-metadata.sh") -Destination (Join-Path $stage "scripts")
+Copy-Item -LiteralPath (Join-Path $repositoryRoot "deployments/scripts/recovery-set.sh") -Destination (Join-Path $stage "scripts")
+Copy-Item -LiteralPath (Join-Path $repositoryRoot "deployments/kubernetes/README.md") -Destination (Join-Path $stage "kubernetes/README.md")
+foreach ($doc in "USER_GUIDE.md", "MAINTENANCE_GUIDE.md", "PROJECT_ARCHITECTURE.md", "ARCHITECTURE_ASSESSMENT.md", "DTS_RENAME_UPGRADE.md", "ENTERPRISE_HARDENING_RC50.md", "OFFLINE_RELEASE_SECURITY.md", "SUPPORT_MATRIX_V0.15_RC50.md", "openapi.json") {
     Copy-Item -LiteralPath (Join-Path $repositoryRoot "docs\$doc") -Destination (Join-Path $stage "docs")
 }
 
+New-Item -ItemType Directory -Force -Path (Join-Path $stage "tools/release-security") | Out-Null
+Copy-Item -LiteralPath (Join-Path $repositoryRoot "tools/release-security/release.py") -Destination (Join-Path $stage "tools/release-security")
 Write-Host "[6/8] Writing package manifest"
 if ($ClusterPayloadDirectory) {
     $clusterSource = [System.IO.Path]::GetFullPath($ClusterPayloadDirectory)
@@ -181,8 +227,7 @@ if ($ClusterPayloadDirectory) {
     [IO.File]::WriteAllLines($mergeList, $mergeInputs, [Text.UTF8Encoding]::new($false))
     Push-Location (Join-Path $repositoryRoot 'tools/offline-image-builder')
     try {
-        go run . --merge-list $mergeList --merged-archive $combinedTar
-        if ($LASTEXITCODE -ne 0) { throw 'Multi-image archive merge failed' }
+        Invoke-BuildGo run . --merge-list $mergeList --merged-archive $combinedTar
     } finally { Pop-Location }
     if (Test-Path -LiteralPath "$combinedTar.sha256") { Remove-Item -LiteralPath "$combinedTar.sha256" -Force }
     $inputStream = [IO.File]::OpenRead($combinedTar)
@@ -193,7 +238,7 @@ if ($ClusterPayloadDirectory) {
         if (-not ([IO.Path]::GetFullPath($file)).StartsWith($stage + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw 'Refusing cleanup outside stage' }
         Remove-Item -LiteralPath $file -Force
     }
-} elseif ($FinalizeOnly -and (Test-Path -LiteralPath (Join-Path $stage "cluster/runtime/containerd-static-2.3.5-linux-amd64.tar.gz"))) {
+} elseif (($FinalizeOnly -or $CachedPackageDirectory) -and (Test-Path -LiteralPath (Join-Path $stage "cluster/runtime/containerd-static-2.3.5-linux-amd64.tar.gz"))) {
     # Operational-only releases reuse the already verified unified image archive and
     # cluster payload, but must refresh every script, inventory and configuration file.
     $clusterStage = Join-Path $stage "cluster"
@@ -213,7 +258,7 @@ $manifest = [ordered]@{
     version = $version
     platform = "linux/$Architecture"
     created_at = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
-    base_images = @("alpine:3.22", "nginxinc/nginx-unprivileged:1.29-alpine", "postgres:17")
+    base_images = @("alpine:3.22", "nginx/nginx-unprivileged:stable-alpine-slim@sha256:64a2a533a92f64b868d5f6d262dbc8c9bdc0302154f631389170ac409761047a", "postgres:17")
     deployment = "kubernetes"
     node_runtime = "containerd (provided by existing Kubernetes cluster)"
     cgroup_profiles = @("Kylin 4.19/cgroup v1 compatibility", "kernel 5.10+/cgroup v2")
@@ -233,6 +278,10 @@ $manifest = [ordered]@{
     })
 }
 if ($hasClusterPayload) { $manifest.node_runtime = "containerd 2.3.5 bundled; offline kubeadm bootstrap available" }
+if (Test-Path -LiteralPath (Join-Path $runtimeDirectory 'image-cache-provenance.json')) {
+    $manifest.Remove('base_images')
+    $manifest.image_provenance = 'runtime/image-cache-provenance.json'
+}
 $manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $stage "manifest.json") -Encoding utf8
 
 # Fail closed when an old Compose payload is accidentally reused.
@@ -259,11 +308,18 @@ if ([System.IO.File]::ReadAllBytes($checksumPath) -contains 13) {
 }
 
 Write-Host "[8/8] Creating final archive"
-if (Test-Path -LiteralPath $archive) { Remove-Item -LiteralPath $archive -Force }
-tar -czf $archive -C $outputRoot $packageName
-if ($LASTEXITCODE -ne 0) { throw "tar archive creation failed" }
-$archiveHash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
-[System.IO.File]::WriteAllText("$archive.sha256", "$archiveHash  $packageName.tar.gz`n", $ascii)
+$temporaryArchive = "$archive.$([Guid]::NewGuid().ToString('N')).tmp"
+try {
+    tar -czf $temporaryArchive -C $outputRoot $packageName
+    if ($LASTEXITCODE -ne 0) { throw "tar archive creation failed" }
+    $archiveHash = (Get-FileHash -LiteralPath $temporaryArchive -Algorithm SHA256).Hash.ToLowerInvariant()
+    [System.IO.File]::WriteAllText("$temporaryArchive.sha256", "$archiveHash  $packageName.tar.gz`n", $ascii)
+    [System.IO.File]::Move($temporaryArchive, $archive, $true)
+    [System.IO.File]::Move("$temporaryArchive.sha256", "$archive.sha256", $true)
+} finally {
+    [System.IO.File]::Delete($temporaryArchive)
+    [System.IO.File]::Delete("$temporaryArchive.sha256")
+}
 
 Write-Host "Package: $archive"
 Write-Host "SHA-256: $archiveHash"

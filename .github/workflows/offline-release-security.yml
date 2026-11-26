@@ -1,0 +1,74 @@
+name: Offline release signatures and image scanning
+on:
+  workflow_dispatch:
+    inputs:
+      build_run:
+        description: Same-repository Actions run containing the built tarball
+        required: true
+      artifact:
+        description: Artifact name (one DTS offline tarball)
+        required: true
+      sha256:
+        description: Expected archive SHA-256 from the release builder
+        required: true
+permissions:
+  contents: read
+  actions: read
+jobs:
+  attest:
+    if: github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    environment: release-signing
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.build_run }}
+          name: ${{ inputs.artifact }}
+          path: input
+      - name: Select and validate archive
+        env:
+          EXPECTED: ${{ inputs.sha256 }}
+        run: |
+          python - <<'PY'
+          import hashlib, os, pathlib, re
+          candidates = list(pathlib.Path("input").rglob("dts-*-offline-*-linux-amd64.tar.gz"))
+          if len(candidates) != 1: raise SystemExit("expected exactly one release tarball")
+          p = candidates[0]
+          if not re.fullmatch(r"dts-(kubernetes|compose)-offline-[\w.\-]+-linux-amd64\.tar\.gz",p.name): raise SystemExit("invalid release name")
+          with p.open("rb") as f:
+              if hashlib.file_digest(f, "sha256").hexdigest() != os.environ["EXPECTED"].lower(): raise SystemExit("unexpected release hash")
+          dest = pathlib.Path("package") / p.name
+          dest.parent.mkdir()
+          p.rename(dest)
+          with open(os.environ["GITHUB_ENV"],"a") as f: print(f"PACKAGE={dest}",file=f)
+          PY
+      - name: Install pinned scanner
+        working-directory: ${{ runner.temp }}
+        run: |
+          curl -fsSL -o trivy.tar.gz https://github.com/aquasecurity/trivy/releases/download/v0.76.2/trivy_0.76.2_Linux-64bit.tar.gz
+          echo "bc0fc726e017b8927a62b2d3531d7a84ee01769daf5c99ed866dced54089fdbf  trivy.tar.gz" | sha256sum -c
+          tar -xzf trivy.tar.gz trivy
+      - run: python tools/release-security/test_release.py
+      - run: python tools/release-security/release.py scan --package "$PACKAGE" --out evidence --trivy "$RUNNER_TEMP/trivy"
+      - name: Sign and check offline evidence
+        env:
+          PRIVATE_PEM: ${{ secrets.DTS_RELEASE_ED25519_PRIVATE_PEM }}
+          PUBLIC_PEM: ${{ vars.DTS_RELEASE_ED25519_PUBLIC_PEM }}
+        run: |
+          umask 077
+          key=$(mktemp)
+          pub=$(mktemp)
+          trap 'rm -f "$key" "$pub"' EXIT
+          printf '%s\n' "$PRIVATE_PEM" > "$key"
+          printf '%s\n' "$PUBLIC_PEM" > "$pub"
+          python tools/release-security/release.py sign --package "$PACKAGE" --out evidence --key "$key"
+          python tools/release-security/release.py verify --package "$PACKAGE" --out evidence --key "$pub"
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-security-evidence
+          path: evidence/
+          if-no-files-found: warn

@@ -1,12 +1,115 @@
 package validation
 
 import (
+	"bytes"
 	"context"
 	"dts/backend/internal/connector"
 	"dts/backend/internal/domain"
 	"strings"
 	"testing"
 )
+
+func TestExactJSONChecksum(t *testing.T) {
+	col := domain.ColumnInfo{DataType: "jsonb"}
+	canon := func(s string) string { return string(canonicalValue(col, []byte(s))) }
+	a := `{"b":1,"a":[9007199254740993,-0.000000000000000000123456789012345678901234500,10e99999999999999999999]}`
+	b := `{"a":[9007199254740993.0,-1234567890123456789012345e-43,1e100000000000000000000],"b":1.00}`
+	if got, want := canon(a), canon(b); got != want {
+		t.Errorf("equivalent numbers differ:\n%s\n%s", got, want)
+	}
+	for _, pair := range [][2]string{
+		{`[9007199254740992]`, `[9007199254740993]`},
+		{`[1.00000000000000000001]`, `[1.00000000000000000002]`},
+		{`{"a":1,"a":2}`, `{"a":2}`},
+		{`{"id":1} trailing`, `{"id":1}`},
+		{`["123"]`, `[123]`},
+	} {
+		if canon(pair[0]) == canon(pair[1]) {
+			t.Errorf("checksum collapsed distinct values %q and %q", pair[0], pair[1])
+		}
+	}
+}
+
+type scriptedChecksumReader struct {
+	fake
+	batches []*connector.RowBatch
+}
+
+func (r *scriptedChecksumReader) ReadBatch(_ context.Context, _ connector.ReadBatchRequest) (*connector.RowBatch, error) {
+	if len(r.batches) == 0 {
+		return &connector.RowBatch{}, nil
+	}
+	b := r.batches[0]
+	r.batches = r.batches[1:]
+	return b, nil
+}
+
+func TestChecksumRejectsMalformedPagesAtomically(t *testing.T) {
+	key := connector.Value{Raw: []byte("a")}
+	page := &connector.RowBatch{Rows: [][]connector.Value{{key}}, LastPK: 7, LastKey: []connector.Value{key}}
+	cols := []domain.ColumnInfo{{Name: "k"}}
+	for _, tc := range []struct {
+		name      string
+		useKeyset bool
+		pages     []*connector.RowBatch
+	}{
+		{"nil", false, []*connector.RowBatch{nil}},
+		{"long row", false, []*connector.RowBatch{{Rows: [][]connector.Value{{key, key}}}}},
+		{"short row", false, []*connector.RowBatch{{Rows: [][]connector.Value{{}}}}},
+		{"oversize page", false, []*connector.RowBatch{{Rows: [][]connector.Value{{key}, {key}}}}},
+		{"repeated integer cursor", false, []*connector.RowBatch{page, page}},
+		{"repeated keyset cursor", true, []*connector.RowBatch{page, page}},
+		{"null keyset field", true, []*connector.RowBatch{{Rows: page.Rows, LastKey: []connector.Value{{Null: true}}}}},
+		{"missing keyset field", true, []*connector.RowBatch{{Rows: page.Rows}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			acc := NewUnorderedAccumulator()
+			before := acc.Checksum()
+			req := connector.ReadBatchRequest{UseKeyset: tc.useKeyset, PrimaryKey: "k", EndPK: 10}
+			reader := &scriptedChecksumReader{batches: tc.pages}
+			if err := acc.AddRequest(context.Background(), reader, req, cols, cols, 1); err == nil {
+				t.Fatal("invalid page accepted")
+			}
+			if acc.Checksum() != before {
+				t.Fatal("failed request committed a partial checksum")
+			}
+		})
+	}
+}
+
+func TestCanonicalNumberEncoding(t *testing.T) {
+	for raw, want := range map[string]string{"-0.000e1000": "0", "1e-6": "0.000001", "0.0000001": "1e-7", "10e20": "1e+21", "21340.00": "21340", "1.20e-2": "0.012"} {
+		if got := canonicalValue(domain.ColumnInfo{DataType: "json"}, []byte(raw)); !bytes.Equal(got, []byte(want)) {
+			t.Errorf("%s = %s, want %s", raw, got, want)
+		}
+	}
+}
+
+func TestLargeJSONExponentStaysCompact(t *testing.T) {
+	places := 10000
+	zeros := strings.Repeat("0", places)
+	nines := strings.Repeat("9", places)
+	for raw, want := range map[string]string{
+		"10e" + nines:   "1e+1" + zeros,
+		"10e-1" + zeros: "1e-" + nines,
+		"0.1e-" + nines: "1e-1" + zeros,
+	} {
+		if string(exactJSONNumber(raw)) != want {
+			t.Fatal("large exponent carry or borrow lost")
+		}
+	}
+}
+
+func TestChecksumContinuesThroughShortPages(t *testing.T) {
+	reader := &scriptedChecksumReader{batches: []*connector.RowBatch{
+		{Rows: [][]connector.Value{{{Raw: []byte("1")}}}, LastPK: 1},
+		{Rows: [][]connector.Value{{{Raw: []byte("2")}}}, LastPK: 2},
+	}}
+	sum, err := Range(context.Background(), reader, "s", "t", "k", []domain.ColumnInfo{{Name: "k"}}, 1, 2, 1000)
+	if err != nil || sum.Rows != 2 {
+		t.Fatalf("short page truncated checksum: %+v, %v", sum, err)
+	}
+}
 
 type fake struct{ rows [][]connector.Value }
 

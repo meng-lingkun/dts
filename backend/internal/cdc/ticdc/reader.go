@@ -129,8 +129,11 @@ func (r *Reader) ensureMode(ctx context.Context) error {
 	pf, ok := r.kafka.(kafkaPartitionFetcher)
 	if !ok {
 		r.mu.Lock()
+		defer r.mu.Unlock()
+		if r.hasDurableAck && len(r.acked.normalizedOffsets()) != 1 {
+			return errors.New("TiCDC multi-partition checkpoint requires a partition-aware Kafka client")
+		}
 		r.modeReady = true
-		r.mu.Unlock()
 		return nil
 	}
 	parts, err := pf.Partitions(ctx, r.topic)
@@ -148,13 +151,6 @@ func (r *Reader) ensureMode(ctx context.Context) error {
 		}
 		seen[partition] = true
 	}
-	if len(parts) == 1 && parts[0] == 0 {
-		r.mu.Lock()
-		r.modeReady = true
-		r.mu.Unlock()
-		return nil
-	}
-
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	persisted := r.acked.normalizedOffsets()
@@ -164,9 +160,13 @@ func (r *Reader) ensureMode(ctx context.Context) error {
 				return fmt.Errorf("TiCDC Kafka partition topology changed: durable checkpoint contains partition %d which is no longer present", partition)
 			}
 		}
-		if len(persisted) == 1 && persisted[0] > 0 && len(parts) > 1 {
-			return errors.New("TiCDC topic changed from a single partition to multiple partitions after a durable offset was acknowledged; create a new capture/changefeed instead of guessing missing partition offsets")
+		if len(persisted) != len(parts) {
+			return fmt.Errorf("TiCDC Kafka partition topology changed: durable checkpoint covers %d partitions but the topic has %d", len(persisted), len(parts))
 		}
+	}
+	if len(parts) == 1 && parts[0] == 0 {
+		r.modeReady = true
+		return nil
 	}
 	r.multi = true
 	r.partitions = append([]int32(nil), parts...)

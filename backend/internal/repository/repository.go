@@ -2,13 +2,19 @@ package repository
 
 import (
 	"context"
-	"errors"
 	"dts/backend/internal/domain"
+	"errors"
 	"time"
 )
 
 var ErrNoChunk = errors.New("no chunk available")
+var ErrNotFound = errors.New("not found")
 var ErrLeaseOwner = errors.New("chunk lease owner mismatch")
+var ErrConflict = errors.New("resource revision changed; reload before retrying")
+var ErrLastAdmin = errors.New("at least one enabled admin user is required")
+var ErrTokenLimit = errors.New("at most 100 active personal API tokens per user")
+
+const MaxPersonalTokens = 100
 
 // ControlOperationLeaser serializes long-running control-plane operations
 // across server replicas. Implementations must make acquisition atomic and
@@ -17,6 +23,16 @@ type ControlOperationLeaser interface {
 	AcquireControlOperation(context.Context, string, string, string, time.Duration) (bool, error)
 	RenewControlOperation(context.Context, string, string, string, time.Duration) error
 	ReleaseControlOperation(context.Context, string, string, string) error
+}
+
+// CDCExecutionLeaser coordinates target apply, spool drain, replay and validation
+// barriers across servers. Each acquisition must use a fresh owner token. Renew
+// must reject expired leases even when the owner has not changed.
+type CDCExecutionLeaser interface {
+	CDCExecutionEpoch(context.Context, string, string, string) (int64, error)
+	AcquireCDCSpoolDrainLease(context.Context, string, string, string, time.Duration) (bool, error)
+	RenewCDCSpoolDrainLease(context.Context, string, string, string, time.Duration) error
+	ReleaseCDCSpoolDrainLease(context.Context, string, string, string) error
 }
 
 type Repository interface {
@@ -38,9 +54,14 @@ type Repository interface {
 	FindMigrationTableProfile(context.Context, string, string, string, string) (*domain.MigrationTable, error)
 
 	CreateChunks(context.Context, []domain.MigrationChunk) error
+	// SplitPendingChunk replaces expected with an entire partition, atomically.
+	// The first piece retains the existing ID. A moved snapshot returns ErrConflict.
+	SplitPendingChunk(context.Context, domain.MigrationChunk, []domain.MigrationChunk) error
+	NumericRangeCoverage(context.Context, domain.MigrationTable) (bool, error)
 	ListChunks(context.Context, string) ([]domain.MigrationChunk, error)
 	GetChunk(context.Context, string) (*domain.MigrationChunk, error)
 	UpdateChunk(context.Context, *domain.MigrationChunk) error
+	UpdateOwnedChunk(context.Context, string, *domain.MigrationChunk) error
 	ClaimChunk(context.Context, string, time.Duration, []string) (*domain.MigrationChunk, error)
 	RenewChunkLease(context.Context, string, string, time.Duration) error
 	UpdateChunkProgress(context.Context, string, string, domain.ChunkProgress) error
@@ -50,6 +71,7 @@ type Repository interface {
 	GetEngineJob(context.Context, string) (*domain.EngineJob, error)
 	ListEngineJobs(context.Context, string) ([]domain.EngineJob, error)
 	UpdateEngineJob(context.Context, *domain.EngineJob) error
+	UpdateOwnedEngineJob(context.Context, string, *domain.EngineJob) error
 	ClaimEngineJob(context.Context, string, time.Duration, []string) (*domain.EngineJob, error)
 	RenewEngineJobLease(context.Context, string, string, time.Duration) error
 
@@ -59,6 +81,8 @@ type Repository interface {
 
 	CreateCDCPosition(context.Context, *domain.CDCPosition) error
 	ListCDCPositions(context.Context, string, int) ([]domain.CDCPosition, error)
+	// Latest lookups return (nil, nil) when the stream has no matching record.
+	LatestCDCPosition(context.Context, string, string) (*domain.CDCPosition, error)
 	CreateCDCSpool(context.Context, *domain.CDCSpoolRecord) error
 	ListCDCSpool(context.Context, string, string, int) ([]domain.CDCSpoolRecord, error)
 	LatestPendingCDCSpool(context.Context, string, string) (*domain.CDCSpoolRecord, error)
@@ -87,8 +111,19 @@ type Repository interface {
 	ListTaskLogs(context.Context, string, int) ([]domain.TaskLog, error)
 
 	CreateUser(context.Context, *domain.User) error
+	// CreateInitialUser commits only while the shared user registry is empty.
+	CreateInitialUser(context.Context, *domain.User) error
 	UpdateUser(context.Context, *domain.User) error
+	UpdateUserLastLogin(context.Context, string, time.Time) error
 	GetUser(context.Context, string) (*domain.User, error)
 	GetUserByUsername(context.Context, string) (*domain.User, error)
 	ListUsers(context.Context) ([]domain.User, error)
+	RecordSession(context.Context, domain.UserSession) error
+	SessionState(ctx context.Context, userID, id string) (exists, active bool, err error)
+	RevokeSession(ctx context.Context, userID, id string) (bool, error)
+	ListSessions(context.Context, string) ([]domain.UserSession, error)
+	CreatePersonalToken(ctx context.Context, v domain.PersonalToken, userRevision int64) error
+	PersonalTokenUser(ctx context.Context, id string) (*domain.User, error)
+	ListPersonalTokens(ctx context.Context, userID string) ([]domain.PersonalToken, error)
+	DeletePersonalToken(ctx context.Context, userID, id string) (bool, error)
 }

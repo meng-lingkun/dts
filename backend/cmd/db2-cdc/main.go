@@ -51,6 +51,9 @@ func waitReady(ctx context.Context, client *http.Client, endpoint, token string)
 		if wt := strings.TrimSpace(os.Getenv("DTS_WORKER_TOKEN")); wt != "" {
 			req.Header.Set("X-DTS-Worker-Token", wt)
 		}
+		if generation := os.Getenv("DTS_LEASE_GENERATION"); generation != "" {
+			req.Header.Set("X-DTS-Lease-Generation", generation)
+		}
 		resp, err := client.Do(req)
 		if err == nil {
 			b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
@@ -93,6 +96,9 @@ func postTx(ctx context.Context, client *http.Client, endpoint, token, direction
 	}
 	if wt := strings.TrimSpace(os.Getenv("DTS_WORKER_TOKEN")); wt != "" {
 		req.Header.Set("X-DTS-Worker-Token", wt)
+	}
+	if generation := os.Getenv("DTS_LEASE_GENERATION"); generation != "" {
+		req.Header.Set("X-DTS-Lease-Generation", generation)
 	}
 	resp, err := client.Do(req)
 	if err != nil {

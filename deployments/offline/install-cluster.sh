@@ -124,7 +124,7 @@ state=/var/lib/dts-cluster-bootstrap
 if [ "$mode" = prepare ]; then
   [ ! -e /etc/kubernetes/kubelet.conf ] || { echo 'ERROR: node already belongs to a cluster' >&2; exit 1; }
   if [ ! -e "$state/owned" ]; then
-    for file in /etc/containerd/config.toml /etc/systemd/system/containerd.service /etc/systemd/system/kubelet.service /usr/local/bin/containerd /usr/local/bin/kubelet /usr/local/bin/kubeadm /usr/local/bin/kubectl /usr/local/sbin/runc /usr/local/bin/crictl; do
+    for file in /etc/containerd/config.toml /etc/crictl.yaml /etc/systemd/system/containerd.service /etc/systemd/system/kubelet.service /usr/local/bin/containerd /usr/local/bin/kubelet /usr/local/bin/kubeadm /usr/local/bin/kubectl /usr/local/sbin/runc /usr/local/bin/crictl; do
       [ ! -e "$file" ] || { echo "ERROR: existing $file; this installer only initializes new nodes" >&2; exit 1; }
     done
     if command -v containerd >/dev/null || command -v kubelet >/dev/null || command -v kubeadm >/dev/null || systemctl is-active --quiet containerd || systemctl is-active --quiet kubelet; then
@@ -182,7 +182,6 @@ if [ "$mode" = init ]; then
   [ "$#" = 2 ] || usage
   node_ip=$2
   printf '%s\n' "$node_ip" | awk -F. 'NF!=4 {exit 1} {for(i=1;i<=4;i++) if($i !~ /^[0-9]+$/ || $i>255) exit 1}' || { echo 'ERROR: provide the control node IPv4 address' >&2; exit 1; }
-  [ ! -e /etc/kubernetes/admin.conf ] || { echo 'ERROR: cluster already initialized; use existing kubeconfig' >&2; exit 1; }
 else
   [ "$#" = 2 ] && [ -r "$2" ] || usage
   [ ! -e /etc/kubernetes/kubelet.conf ] || { echo 'ERROR: node already joined' >&2; exit 1; }
@@ -194,8 +193,17 @@ write_crictl_config
 # Test actual CRI authentication from this node before starting Kubernetes.
 crictl --runtime-endpoint unix:///run/containerd/containerd.sock pull "$DTS_REGISTRY/kubernetes/pause:3.10"
 if [ "$mode" = init ]; then
-  kubeadm_config="$state/kubeadm-init.yaml"
-  cat > "$kubeadm_config" <<EOF
+  export KUBECONFIG=/etc/kubernetes/admin.conf
+  if [ -e "$KUBECONFIG" ]; then
+    # kubeadm writes admin.conf before starting the API. Resume only a
+    # completed bootstrap on a node owned by this installer.
+    [ -f "$state/owned" ] && kubectl --request-timeout=15s -n kube-system get deployment/coredns daemonset/kube-proxy >/dev/null || {
+      echo 'ERROR: incomplete kubeadm control plane; inspect kubelet and the API before retrying init' >&2
+      exit 1
+    }
+  else
+    kubeadm_config="$state/kubeadm-init.yaml"
+    cat > "$kubeadm_config" <<EOF
 apiVersion: kubeadm.k8s.io/v1beta4
 kind: InitConfiguration
 localAPIEndpoint:
@@ -216,10 +224,10 @@ apiVersion: kubelet.config.k8s.io/v1beta1
 kind: KubeletConfiguration
 cgroupDriver: systemd
 EOF
-  chmod 0600 "$kubeadm_config"
-  kubeadm config images pull --config "$kubeadm_config"
-  kubeadm init --config "$kubeadm_config"
-  export KUBECONFIG=/etc/kubernetes/admin.conf
+    chmod 0600 "$kubeadm_config"
+    kubeadm config images pull --config "$kubeadm_config"
+    kubeadm init --config "$kubeadm_config"
+  fi
   sed "s|ghcr.io/flannel-io/|$DTS_REGISTRY/flannel/|g" cluster/network/kube-flannel.yaml | kubectl apply -f -
   kubectl -n kube-flannel rollout status daemonset/kube-flannel-ds --timeout=300s
   kubectl get nodes -o wide
